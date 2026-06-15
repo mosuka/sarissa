@@ -78,11 +78,18 @@ impl FlatVectorIndexReader {
         path: &str,
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
-        use std::io::Read;
+        use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
+        use std::io::{Read, Seek};
 
         // Open the index file
         let file_name = format!("{}.flat", path);
         let mut input = storage.open_input(&file_name)?;
+
+        // Ground truth for bounding allocations sized from the unverified
+        // header counts below (Issue #806). The `.flat` reader has no
+        // pre-parse checksum, so every header count reaches its allocation
+        // unverified.
+        let file_size = input.size()?;
 
         // Read metadata
         let mut num_vectors_buf = [0u8; 4];
@@ -115,10 +122,24 @@ impl FlatVectorIndexReader {
             }
         };
 
+        // Bytes left for the per-vector records section, captured once at its
+        // start (Issue #806). Each record is at least doc_id (8) +
+        // field_name_len (4) + the fixed quantized payload (dim int8 + 8 meta),
+        // so this stride also bounds the per-record `dimension`-sized int8 read.
+        let records_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+
         let (vectors, vector_ids) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
                 // Step 7 of #481 Stage 1: load vectors as int8 + meta
                 // directly into a QuantizedVectorPool.
+                checked_capacity(
+                    num_vectors,
+                    record_stride,
+                    records_remaining,
+                    "flat num_vectors",
+                )?;
                 let mut vector_ids = Vec::with_capacity(num_vectors);
                 let mut records: Vec<(u64, String, Vec<u8>, QuantizedVectorMeta)> =
                     Vec::with_capacity(num_vectors);
@@ -132,6 +153,7 @@ impl FlatVectorIndexReader {
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                    checked_len(field_name_len, records_remaining, "flat field_name_len")?;
 
                     let mut field_name_buf = vec![0u8; field_name_len];
                     input.read_exact(&mut field_name_buf)?;
@@ -158,6 +180,12 @@ impl FlatVectorIndexReader {
                 (VectorStorage::OwnedQuantized(Arc::new(pool)), vector_ids)
             }
             crate::storage::LoadingMode::Lazy => {
+                checked_capacity(
+                    num_vectors,
+                    record_stride,
+                    records_remaining,
+                    "flat num_vectors",
+                )?;
                 let mut offsets = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
 
@@ -182,6 +210,7 @@ impl FlatVectorIndexReader {
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                    checked_len(field_name_len, records_remaining, "flat field_name_len")?;
 
                     let mut field_name_buf = vec![0u8; field_name_len];
                     input.read_exact(&mut field_name_buf)?;
@@ -561,5 +590,57 @@ impl VectorIterator for FlatVectorIterator {
     fn reset(&mut self) -> Result<()> {
         self.current = 0;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod alloc_bound_tests {
+    use super::*;
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use crate::vector::core::quantization::ScalarQuantParams;
+    use std::io::Write;
+
+    /// Build an in-memory storage holding `bytes` under `name`.
+    fn storage_with(name: &str, bytes: Vec<u8>) -> Arc<dyn Storage> {
+        let storage = MemoryStorage::new(MemoryStorageConfig::default());
+        let mut out = storage.create_output(name).unwrap();
+        out.write_all(&bytes).unwrap();
+        out.flush_and_sync().unwrap();
+        Arc::new(storage)
+    }
+
+    /// Serialized neutral LVS1 (Scalar8Bit) header bytes.
+    fn neutral_header_bytes() -> Vec<u8> {
+        let mut buf = Vec::new();
+        VectorSegmentHeader::scalar_8bit(ScalarQuantParams {
+            offset: 0.0,
+            scale: 1.0,
+        })
+        .write_to(&mut buf)
+        .unwrap();
+        buf
+    }
+
+    #[test]
+    fn load_rejects_oversized_num_vectors_without_aborting() {
+        // A `.flat` segment whose `num_vectors` field is corrupted to a huge
+        // value while the file holds no records must be rejected cleanly,
+        // never drive a multi-GiB `Vec::with_capacity` that aborts the
+        // process via `handle_alloc_error` (Issue #806).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes()); // num_vectors (corrupt)
+        bytes.extend_from_slice(&4u32.to_le_bytes()); // dimension
+        bytes.extend_from_slice(&neutral_header_bytes()); // LVS1 header, no records
+
+        let storage = storage_with("corrupt.flat", bytes);
+        let err = FlatVectorIndexReader::load(storage, "corrupt", DistanceMetric::Cosine)
+            .expect_err("oversized num_vectors must be rejected as corruption");
+        match err {
+            LaurusError::Index(msg) => {
+                assert!(msg.contains("num_vectors"), "got: {msg}");
+                assert!(msg.contains("corrupted"), "got: {msg}");
+            }
+            other => panic!("expected Index error, got {other:?}"),
+        }
     }
 }

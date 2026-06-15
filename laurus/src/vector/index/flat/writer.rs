@@ -10,10 +10,12 @@ use crate::storage::Storage;
 use crate::vector::core::quantization::ScalarQuantParams;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::FlatIndexConfig;
+use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
 use crate::vector::index::field::LegacyVectorFieldWriter;
 use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
 use crate::vector::index::quantized_io::{
-    quantize_segment, read_dequantized_vector, write_quantized_record,
+    quantize_segment, quantized_record_payload_size, read_dequantized_vector,
+    write_quantized_record,
 };
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
@@ -91,11 +93,16 @@ impl FlatIndexWriter {
         storage: Arc<dyn Storage>,
         path: &str,
     ) -> Result<Self> {
-        use std::io::Read;
+        use std::io::{Read, Seek};
 
         // Open the index file
         let file_name = format!("{}.flat", path);
         let mut input = storage.open_input(&file_name)?;
+
+        // Ground truth for bounding allocations sized from unverified header
+        // counts below (Issue #806). Unlike the reader, this writer load path
+        // runs no checksum verification at all, so every count is unverified.
+        let file_size = input.size()?;
 
         // Read metadata
         let mut num_vectors_buf = [0u8; 4];
@@ -138,6 +145,18 @@ impl FlatIndexWriter {
         // Read quantized vectors, dequantizing back to f32 so the
         // in-memory writer state stays compatible with downstream
         // operations (delete_document, vectors() accessor, etc.).
+        // Bytes left for the per-vector records section (Issue #806). Each
+        // record is at least doc_id (8) + field_name_len (4) + the fixed
+        // quantized payload (dim int8 + 8 meta).
+        let records_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+        checked_capacity(
+            num_vectors,
+            record_stride,
+            records_remaining,
+            "flat num_vectors",
+        )?;
         let mut vectors = Vec::with_capacity(num_vectors);
         for _ in 0..num_vectors {
             let mut doc_id_buf = [0u8; 8];
@@ -148,6 +167,7 @@ impl FlatIndexWriter {
             let mut field_name_len_buf = [0u8; 4];
             input.read_exact(&mut field_name_len_buf)?;
             let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+            checked_len(field_name_len, records_remaining, "flat field_name_len")?;
 
             let mut field_name_buf = vec![0u8; field_name_len];
             input.read_exact(&mut field_name_buf)?;

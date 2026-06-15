@@ -10,10 +10,12 @@ use crate::storage::Storage;
 use crate::vector::core::quantization::ScalarQuantParams;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::IvfIndexConfig;
+use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
 use crate::vector::index::field::LegacyVectorFieldWriter;
 use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
 use crate::vector::index::quantized_io::{
-    quantize_segment, read_dequantized_vector, write_quantized_record,
+    quantize_segment, quantized_record_payload_size, read_dequantized_vector,
+    write_quantized_record,
 };
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 use serde::{Deserialize, Serialize};
@@ -105,11 +107,16 @@ impl IvfIndexWriter {
         storage: Arc<dyn Storage>,
         path: &str,
     ) -> Result<Self> {
-        use std::io::Read;
+        use std::io::{Read, Seek};
 
         // Open the index file
         let file_name = format!("{}.ivf", path);
         let mut input = storage.open_input(&file_name)?;
+
+        // Ground truth for bounding allocations sized from unverified header
+        // counts below (Issue #806). This writer load path runs no checksum
+        // verification, so every count is unverified.
+        let file_size = input.size()?;
 
         // Read metadata
         let mut num_vectors_buf = [0u8; 4];
@@ -135,7 +142,17 @@ impl IvfIndexWriter {
             )));
         }
 
-        // Read centroids
+        // Read centroids. Each centroid serializes as `dimension` f32 values
+        // (4 bytes each), so bounding `n_clusters` by that stride also bounds
+        // each per-centroid `vec![0.0f32; dimension]` allocation (Issue #806).
+        let centroids_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        checked_capacity(
+            n_clusters,
+            (dimension as u64).saturating_mul(4),
+            centroids_remaining,
+            "ivf centroids",
+        )?;
         let mut centroids = Vec::with_capacity(n_clusters);
         for _ in 0..n_clusters {
             let mut values = vec![0.0f32; dimension];
@@ -171,11 +188,20 @@ impl IvfIndexWriter {
 
         // Read inverted lists, dequantizing each record back to f32
         // for the in-memory writer state.
+        // Bytes left for the inverted-list section (Issue #806). Each record
+        // is at least doc_id (8) + field_name_len (4) + the fixed quantized
+        // payload (dim int8 + 8 meta); each cluster serializes at least its
+        // list_size (4 bytes).
+        let lists_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+        checked_capacity(n_clusters, 4, lists_remaining, "ivf cluster lists")?;
         let mut inverted_lists = vec![Vec::new(); n_clusters];
         for list in &mut inverted_lists {
             let mut list_size_buf = [0u8; 4];
             input.read_exact(&mut list_size_buf)?;
             let list_size = u32::from_le_bytes(list_size_buf) as usize;
+            checked_capacity(list_size, record_stride, lists_remaining, "ivf list_size")?;
 
             for _ in 0..list_size {
                 let mut doc_id_buf = [0u8; 8];
@@ -186,6 +212,7 @@ impl IvfIndexWriter {
                 let mut field_name_len_buf = [0u8; 4];
                 input.read_exact(&mut field_name_len_buf)?;
                 let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                checked_len(field_name_len, lists_remaining, "ivf field_name_len")?;
 
                 let mut field_name_buf = vec![0u8; field_name_len];
                 input.read_exact(&mut field_name_buf)?;
@@ -200,7 +227,15 @@ impl IvfIndexWriter {
             }
         }
 
-        // Reconstruct vectors from inverted lists
+        // Reconstruct vectors from inverted lists. `num_vectors` is a separate
+        // header field and is still unverified, so bound it against the same
+        // record section before reserving (Issue #806).
+        checked_capacity(
+            num_vectors,
+            record_stride,
+            lists_remaining,
+            "ivf num_vectors",
+        )?;
         let mut vectors = Vec::with_capacity(num_vectors);
         for list in &inverted_lists {
             vectors.extend(list.iter().cloned());

@@ -559,6 +559,24 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
 /// A trait for reading data from storage.
 pub trait StorageInput: Read + Seek + Send + Sync + std::fmt::Debug {
     /// Get the size of the input stream.
+    ///
+    /// # Contract
+    ///
+    /// Implementations **must** return the true total byte length of the
+    /// backing file, independent of the current `Seek` position. Both
+    /// [`FileStorage`](crate::storage::file::FileStorage) (mmap and buffered
+    /// inputs) and [`MemoryStorage`](crate::storage::memory::MemoryStorage)
+    /// honor this today.
+    ///
+    /// Segment loaders rely on this as ground truth to bound allocations
+    /// sized from not-yet-verified on-disk header counts: a header that
+    /// declares more elements or bytes than the file can physically hold is
+    /// rejected as corruption *before* the allocation, so a flipped byte
+    /// cannot drive a multi-GiB `with_capacity` that aborts the process via
+    /// `handle_alloc_error` (Issues #791 and #806; see
+    /// [`crate::vector::index::alloc_bounds`]). A backend that returns a
+    /// truncated or inflated size would weaken that guard, so new backends
+    /// must preserve the invariant.
     fn size(&self) -> Result<u64>;
 
     /// Clone this input stream.

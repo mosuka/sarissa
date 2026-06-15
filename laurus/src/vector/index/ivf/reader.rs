@@ -84,11 +84,18 @@ impl IvfIndexReader {
         path: &str,
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
+        use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
         use std::io::{Read, Seek};
 
         // Open the index file
         let file_name = format!("{}.ivf", path);
         let mut input = storage.open_input(&file_name)?;
+
+        // Ground truth for bounding allocations sized from the unverified
+        // header counts below (Issue #806). The `.ivf` reader has no
+        // pre-parse checksum, so every header count reaches its allocation
+        // unverified.
+        let file_size = input.size()?;
 
         // Read metadata
         let mut num_vectors_buf = [0u8; 4];
@@ -107,7 +114,17 @@ impl IvfIndexReader {
         input.read_exact(&mut n_probe_buf)?;
         let n_probe = u32::from_le_bytes(n_probe_buf) as usize;
 
-        // Read centroids
+        // Read centroids. Each centroid serializes as `dimension` f32 values
+        // (4 bytes each), so bounding `n_clusters` by that stride also bounds
+        // each per-centroid `vec![0.0f32; dimension]` allocation (Issue #806).
+        let centroids_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        checked_capacity(
+            n_clusters,
+            (dimension as u64).saturating_mul(4),
+            centroids_remaining,
+            "ivf centroids",
+        )?;
         let mut centroids = Vec::with_capacity(n_clusters);
         for _ in 0..n_clusters {
             let mut values = vec![0.0f32; dimension];
@@ -142,11 +159,28 @@ impl IvfIndexReader {
             }
         };
 
-        // Read inverted lists, preserving per-cluster grouping.
+        // Bytes left for the inverted-list section, captured once at its start
+        // (Issue #806). Reused by the per-cluster / per-record checks below so
+        // the hot loops add no extra syscall. Each record is at least doc_id
+        // (8) + field_name_len (4) + the fixed quantized payload (dim int8 + 8
+        // meta), so `record_stride` also bounds the per-record int8 read.
+        let lists_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+
+        // Read inverted lists, preserving per-cluster grouping. Each cluster
+        // serializes at least its list_size (4 bytes).
+        checked_capacity(n_clusters, 4, lists_remaining, "ivf cluster lists")?;
         let mut cluster_to_vectors: Vec<Vec<(u64, String)>> = Vec::with_capacity(n_clusters);
 
         let (vectors, vector_ids) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
+                checked_capacity(
+                    num_vectors,
+                    record_stride,
+                    lists_remaining,
+                    "ivf num_vectors",
+                )?;
                 let mut vector_ids = Vec::with_capacity(num_vectors);
                 let mut records: Vec<(u64, String, Vec<u8>, QuantizedVectorMeta)> =
                     Vec::with_capacity(num_vectors);
@@ -155,6 +189,7 @@ impl IvfIndexReader {
                     let mut list_size_buf = [0u8; 4];
                     input.read_exact(&mut list_size_buf)?;
                     let list_size = u32::from_le_bytes(list_size_buf) as usize;
+                    checked_capacity(list_size, record_stride, lists_remaining, "ivf list_size")?;
                     let mut cluster_vecs = Vec::with_capacity(list_size);
 
                     for _ in 0..list_size {
@@ -165,6 +200,7 @@ impl IvfIndexReader {
                         let mut field_name_len_buf = [0u8; 4];
                         input.read_exact(&mut field_name_len_buf)?;
                         let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                        checked_len(field_name_len, lists_remaining, "ivf field_name_len")?;
 
                         let mut field_name_buf = vec![0u8; field_name_len];
                         input.read_exact(&mut field_name_buf)?;
@@ -198,6 +234,12 @@ impl IvfIndexReader {
                 (VectorStorage::OwnedQuantized(Arc::new(pool)), vector_ids)
             }
             crate::storage::LoadingMode::Lazy => {
+                checked_capacity(
+                    num_vectors,
+                    record_stride,
+                    lists_remaining,
+                    "ivf num_vectors",
+                )?;
                 let mut offsets = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
                 let quant_payload_size = quantized_record_payload_size(dimension) as i64;
@@ -206,6 +248,7 @@ impl IvfIndexReader {
                     let mut list_size_buf = [0u8; 4];
                     input.read_exact(&mut list_size_buf)?;
                     let list_size = u32::from_le_bytes(list_size_buf) as usize;
+                    checked_capacity(list_size, record_stride, lists_remaining, "ivf list_size")?;
                     let mut cluster_vecs = Vec::with_capacity(list_size);
 
                     for _ in 0..list_size {
@@ -218,6 +261,7 @@ impl IvfIndexReader {
                         let mut field_name_len_buf = [0u8; 4];
                         input.read_exact(&mut field_name_len_buf)?;
                         let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                        checked_len(field_name_len, lists_remaining, "ivf field_name_len")?;
 
                         let mut field_name_buf = vec![0u8; field_name_len];
                         input.read_exact(&mut field_name_buf)?;
@@ -635,5 +679,44 @@ impl VectorIterator for IvfVectorIterator {
     fn reset(&mut self) -> Result<()> {
         self.current = 0;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod alloc_bound_tests {
+    use super::*;
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use std::io::Write;
+
+    fn storage_with(name: &str, bytes: Vec<u8>) -> Arc<dyn Storage> {
+        let storage = MemoryStorage::new(MemoryStorageConfig::default());
+        let mut out = storage.create_output(name).unwrap();
+        out.write_all(&bytes).unwrap();
+        out.flush_and_sync().unwrap();
+        Arc::new(storage)
+    }
+
+    #[test]
+    fn load_rejects_oversized_n_clusters_without_aborting() {
+        // An `.ivf` segment whose `n_clusters` field is corrupted to a huge
+        // value while the file holds no centroids must be rejected cleanly,
+        // never drive a multi-GiB `Vec::with_capacity` that aborts the
+        // process via `handle_alloc_error` (Issue #806).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // num_vectors
+        bytes.extend_from_slice(&4u32.to_le_bytes()); // dimension
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes()); // n_clusters (corrupt)
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // n_probe — file ends here
+
+        let storage = storage_with("corrupt.ivf", bytes);
+        let err = IvfIndexReader::load(storage, "corrupt", DistanceMetric::Cosine)
+            .expect_err("oversized n_clusters must be rejected as corruption");
+        match err {
+            LaurusError::Index(msg) => {
+                assert!(msg.contains("centroids"), "got: {msg}");
+                assert!(msg.contains("corrupted"), "got: {msg}");
+            }
+            other => panic!("expected Index error, got {other:?}"),
+        }
     }
 }

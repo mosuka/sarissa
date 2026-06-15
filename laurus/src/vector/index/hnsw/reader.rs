@@ -160,7 +160,8 @@ impl HnswIndexReader {
         path: &str,
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
-        use std::io::Read;
+        use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
+        use std::io::{Read, Seek};
 
         // Open the index file
         let file_name = format!("{}.hnsw", path);
@@ -172,6 +173,10 @@ impl HnswIndexReader {
         // trailing footer), so it works for every loading mode and leaves
         // legacy footer-less segments untouched.
         Self::verify_checksum_footer(&mut *input)?;
+
+        // Ground truth for bounding allocations sized from the (for legacy
+        // footer-less segments, unverified) header counts below (Issue #806).
+        let file_size = input.size()?;
 
         // Read metadata (vector count stored as u64)
         let mut num_vectors_buf = [0u8; 8];
@@ -216,6 +221,16 @@ impl HnswIndexReader {
                     input.read_exact(&mut node_count_buf)?;
                     let node_count = u64::from_le_bytes(node_count_buf) as usize;
 
+                    // Bound every graph allocation by the bytes left in the
+                    // file (Issue #806). The graph trails the vector payload,
+                    // so this remaining count is tight: a corrupt count on a
+                    // small graph can no longer drive a huge `with_capacity`.
+                    // Reused for the inner layer / neighbor counts so no extra
+                    // syscall is taken inside the per-node / per-layer loops.
+                    let graph_remaining =
+                        file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+                    // Each node serializes at least doc_id (8) + layer_count (4).
+                    checked_capacity(node_count, 12, graph_remaining, "hnsw node_count")?;
                     let mut nodes = HashMap::with_capacity(node_count);
 
                     for _ in 0..node_count {
@@ -227,12 +242,21 @@ impl HnswIndexReader {
                         input.read_exact(&mut layer_count_buf)?;
                         let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
 
+                        // Each layer serializes at least its neighbor_count (4).
+                        checked_capacity(layer_count, 4, graph_remaining, "hnsw layer_count")?;
                         let mut layers = Vec::with_capacity(layer_count);
                         for _ in 0..layer_count {
                             let mut neighbor_count_buf = [0u8; 4];
                             input.read_exact(&mut neighbor_count_buf)?;
                             let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
 
+                            // Each neighbor serializes as a u64 (8 bytes).
+                            checked_capacity(
+                                neighbor_count,
+                                8,
+                                graph_remaining,
+                                "hnsw neighbor_count",
+                            )?;
                             let mut neighbors = Vec::with_capacity(neighbor_count);
                             for _ in 0..neighbor_count {
                                 let mut neighbor_buf = [0u8; 8];
@@ -267,6 +291,12 @@ impl HnswIndexReader {
         // carries Scalar8Bit params today.
         let header = VectorSegmentHeader::read_from(&mut input)?;
 
+        // Bytes left for the per-vector records section, captured once at its
+        // start (Issue #806). Reused by the per-record `field_name_len` /
+        // payload checks below so the hot loop adds no extra syscall.
+        let records_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+
         let (vectors, vector_ids, graph) = match (&header.quant, storage.loading_mode()) {
             (QuantHeader::Scalar8Bit(params), crate::storage::LoadingMode::Eager) => {
                 // Step 6 of #481 Stage 1: load vectors as int8 + meta
@@ -275,6 +305,17 @@ impl HnswIndexReader {
                 // dequantization. The legacy
                 // VectorIndexReader::get_vector API still works via
                 // VectorStorage::OwnedQuantized's dequantize-on-get.
+                // Each record is at least doc_id (8) + field_name_len (4) +
+                // the fixed quantized payload (dim int8 + 8 meta). Bounding
+                // `num_vectors` by that stride also bounds the per-record
+                // `dimension`-sized int8 read (Issue #806).
+                let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+                checked_capacity(
+                    num_vectors,
+                    record_stride,
+                    records_remaining,
+                    "hnsw num_vectors",
+                )?;
                 let mut vector_ids = Vec::with_capacity(num_vectors);
                 let mut records: Vec<(u64, String, Vec<u8>, QuantizedVectorMeta)> =
                     Vec::with_capacity(num_vectors);
@@ -287,6 +328,7 @@ impl HnswIndexReader {
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                    checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
                     let mut field_name_buf = vec![0u8; field_name_len];
                     input.read_exact(&mut field_name_buf)?;
                     let field_name = String::from_utf8(field_name_buf).map_err(|e| {
@@ -316,6 +358,13 @@ impl HnswIndexReader {
                 )
             }
             (QuantHeader::Scalar8Bit(params), crate::storage::LoadingMode::Lazy) => {
+                let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+                checked_capacity(
+                    num_vectors,
+                    record_stride,
+                    records_remaining,
+                    "hnsw num_vectors",
+                )?;
                 let mut offsets = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
 
@@ -341,6 +390,7 @@ impl HnswIndexReader {
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                    checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
 
                     let mut field_name_buf = vec![0u8; field_name_len];
                     input.read_exact(&mut field_name_buf)?;
@@ -381,9 +431,18 @@ impl HnswIndexReader {
                 // segments (the OnDemand path's offsets table only
                 // carries Scalar8Bit params), so we eagerly load the
                 // codes regardless of `loading_mode`.
+                let codes_size = pq_params.m as usize;
+                // Each PQ record is at least doc_id (8) + field_name_len (4) +
+                // `codes_size` bytes of codes (Issue #806).
+                checked_capacity(
+                    num_vectors,
+                    12 + codes_size as u64,
+                    records_remaining,
+                    "hnsw num_vectors",
+                )?;
+                checked_len(codes_size, records_remaining, "hnsw pq codes")?;
                 let mut vector_ids = Vec::with_capacity(num_vectors);
                 let mut records: Vec<(u64, String, Vec<u8>)> = Vec::with_capacity(num_vectors);
-                let codes_size = pq_params.m as usize;
 
                 for _ in 0..num_vectors {
                     let mut doc_id_buf = [0u8; 8];
@@ -393,6 +452,7 @@ impl HnswIndexReader {
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                    checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
                     let mut field_name_buf = vec![0u8; field_name_len];
                     input.read_exact(&mut field_name_buf)?;
                     let field_name = String::from_utf8(field_name_buf).map_err(|e| {
@@ -425,6 +485,9 @@ impl HnswIndexReader {
                 // codes via `pq_fastscan_io::read_pq_fastscan_record`
                 // and build a `PqFastScanPool` for the SIMD-friendly
                 // block-transposed in-memory layout.
+                // Each record is at least doc_id (8) + field_name_len (4) +
+                // one byte of packed codes (Issue #806).
+                checked_capacity(num_vectors, 13, records_remaining, "hnsw num_vectors")?;
                 let mut vector_ids = Vec::with_capacity(num_vectors);
                 let mut records: Vec<(u64, String, Vec<u8>)> = Vec::with_capacity(num_vectors);
 
@@ -436,6 +499,7 @@ impl HnswIndexReader {
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                    checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
                     let mut field_name_buf = vec![0u8; field_name_len];
                     input.read_exact(&mut field_name_buf)?;
                     let field_name = String::from_utf8(field_name_buf).map_err(|e| {
@@ -1006,5 +1070,87 @@ impl VectorIterator for HnswVectorIterator {
     fn reset(&mut self) -> Result<()> {
         self.current = 0;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod alloc_bound_tests {
+    use super::*;
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use crate::vector::core::quantization::ScalarQuantParams;
+    use std::io::Write;
+
+    fn storage_with(name: &str, bytes: Vec<u8>) -> Arc<dyn Storage> {
+        let storage = MemoryStorage::new(MemoryStorageConfig::default());
+        let mut out = storage.create_output(name).unwrap();
+        out.write_all(&bytes).unwrap();
+        out.flush_and_sync().unwrap();
+        Arc::new(storage)
+    }
+
+    fn neutral_header_bytes() -> Vec<u8> {
+        let mut buf = Vec::new();
+        VectorSegmentHeader::scalar_8bit(ScalarQuantParams {
+            offset: 0.0,
+            scale: 1.0,
+        })
+        .write_to(&mut buf)
+        .unwrap();
+        buf
+    }
+
+    /// The HNSW preamble: num_vectors (u64) + dimension/m/ef (u32 each).
+    fn preamble(num_vectors: u64, dimension: u32, m: u32, ef: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&num_vectors.to_le_bytes());
+        buf.extend_from_slice(&dimension.to_le_bytes());
+        buf.extend_from_slice(&m.to_le_bytes());
+        buf.extend_from_slice(&ef.to_le_bytes());
+        buf
+    }
+
+    #[test]
+    fn load_rejects_oversized_num_vectors_on_footerless_segment() {
+        // The residual exposure for `.hnsw` is a *legacy footer-less* segment:
+        // it skips the Issue #786 checksum and reaches the per-vector
+        // allocation with an unverified header. A corrupt `num_vectors` over a
+        // record-less file must be rejected, never aborted (Issue #806).
+        let mut bytes = preamble(u64::MAX, 4, 16, 200);
+        bytes.extend_from_slice(&neutral_header_bytes()); // no records, no footer
+
+        let storage = storage_with("corrupt.hnsw", bytes);
+        let err = HnswIndexReader::load(storage, "corrupt", DistanceMetric::Cosine)
+            .expect_err("oversized num_vectors must be rejected as corruption");
+        match err {
+            LaurusError::Index(msg) => {
+                assert!(msg.contains("num_vectors"), "got: {msg}");
+                assert!(msg.contains("corrupted"), "got: {msg}");
+            }
+            other => panic!("expected Index error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_rejects_oversized_graph_node_count_on_footerless_segment() {
+        // The graph trails the (empty) vector payload. A corrupt `node_count`
+        // must be bounded by the bytes left for the graph, not allocated up
+        // front (Issue #806).
+        let mut bytes = preamble(0, 4, 16, 200);
+        bytes.extend_from_slice(&neutral_header_bytes()); // zero vector records
+        bytes.push(1u8); // has_graph = true
+        bytes.extend_from_slice(&u64::MAX.to_le_bytes()); // entry_point (== None)
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // max_level
+        bytes.extend_from_slice(&u64::MAX.to_le_bytes()); // node_count (corrupt)
+
+        let storage = storage_with("corrupt_graph.hnsw", bytes);
+        let err = HnswIndexReader::load(storage, "corrupt_graph", DistanceMetric::Cosine)
+            .expect_err("oversized node_count must be rejected as corruption");
+        match err {
+            LaurusError::Index(msg) => {
+                assert!(msg.contains("node_count"), "got: {msg}");
+                assert!(msg.contains("corrupted"), "got: {msg}");
+            }
+            other => panic!("expected Index error, got {other:?}"),
+        }
     }
 }

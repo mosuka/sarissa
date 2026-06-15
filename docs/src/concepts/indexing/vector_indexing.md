@@ -323,6 +323,29 @@ remaining after the payload — sidecars written before the footer was
 introduced have zero trailing bytes and still load, with verification
 skipped.
 
+#### Bounded allocations from on-disk header counts
+
+Every vector segment header carries element counts (`num_vectors`,
+`n_clusters`, the HNSW graph's `node_count` / `layer_count` /
+`neighbor_count`) and per-record byte lengths (`field_name_len`, PQ
+`codes`) that the reader uses to size `Vec` / `HashMap` capacities and
+read buffers. The HNSW CRC footer is verified before the structural
+parse, but legacy footer-less segments — and the writer reload paths,
+which run no footer verification — reach those counts unverified. A
+single flipped byte could otherwise turn a small count into a multi-GiB
+allocation request that aborts the process through `handle_alloc_error`
+(out of memory) before any corruption check runs.
+
+To prevent that, the HNSW, Flat, and IVF loaders bound each such
+allocation against ground truth — the true file length from
+`StorageInput::size()`. Because the bytes a count or buffer describes
+must physically exist in the file, a header that declares more elements
+or bytes than the file can hold is rejected as a corrupted segment
+*before* the allocation. This generalizes the rerank sidecar's
+file-size bound to the main segment readers and covers legacy
+footer-less segments, so a corrupt or hostile header surfaces a clean
+"corrupted segment" error rather than an OOM abort.
+
 #### Recall vs speed trade-off
 
 `rerank_factor` lets you exchange a small per-query rerank cost
