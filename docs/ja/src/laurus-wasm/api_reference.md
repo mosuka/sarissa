@@ -206,13 +206,16 @@ WASM バインディングは `Geo3dDistanceQuery` / `Geo3dBoundingBoxQuery` /
 
 バイナリデータフィールドを追加します。
 
-#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)`
+#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?)`
 
 HNSW ベクトルインデックスフィールドを追加します。
 
 - `distance`: `"cosine"`（デフォルト）、`"euclidean"`、`"dot_product"`、`"manhattan"`、`"angular"`
 - `m`: 分岐係数（デフォルト 16）
 - `efConstruction`: 構築時の探索幅（デフォルト 200）
+- `quantizer`: `"scalar_8bit"`（デフォルト）または `"product_quantization"`（`subvectorCount` が必須）
+- `subvectorCount`: PQ サブベクトル数。`dimension` を割り切れる値を指定します
+- `rerankStorage`: 省略（デフォルト）するか、`"f32"` を指定して完全精度のリランクサイドカーを保存します
 
 #### `addFlatField(name, dimension, distance?, embedder?)`
 
@@ -224,6 +227,11 @@ IVF ベクトルインデックスフィールドを追加します。
 
 - `nClusters`: パーティショニングクラスタ数（デフォルト 100）
 - `nProbe`: 検索時にプローブするクラスタ数（デフォルト 1）
+
+**ベクトル量子化とリランクストレージ**（HNSW フィールド）:
+
+- `quantizer` — `"scalar_8bit"`（デフォルト、4 倍圧縮）または高圧縮率の `"product_quantization"`。Product quantization では `subvectorCount`（`dimension` を割り切れる値）が必須です。
+- `rerankStorage` — `"f32"` を指定すると完全精度の `*.hnsw.f32` サイドカーを書き出し、厳密な Stage-2 リランクを有効化します。省略すると int8 のみのセグメントを維持します。
 
 #### `addAnalyzer(name, analyzer)`
 

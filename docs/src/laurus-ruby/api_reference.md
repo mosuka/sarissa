@@ -61,9 +61,14 @@ Laurus::Schema.new
 | `add_geo_field(name, stored: true, indexed: true)` | Geographic coordinate field (lat/lon). |
 | `add_geo3d_field(name, stored: true, indexed: true)` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
 | `add_datetime_field(name, stored: true, indexed: true)` | UTC datetime field. |
-| `add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, embedder: nil)` | HNSW approximate nearest-neighbor vector field. |
+| `add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, quantizer: nil, subvector_count: nil, rerank_storage: nil, embedder: nil)` | HNSW approximate nearest-neighbor vector field. |
 | `add_flat_field(name, dimension, distance: "cosine", embedder: nil)` | Flat (brute-force) vector field. |
 | `add_ivf_field(name, dimension, distance: "cosine", n_clusters: 100, n_probe: 1, embedder: nil)` | IVF approximate nearest-neighbor vector field. |
+
+**Vector quantization & rerank storage** (HNSW fields):
+
+- `quantizer` — `"scalar_8bit"` (default, 4× compression) or `"product_quantization"` for higher compression. Product quantization requires `subvector_count` (must divide `dimension`).
+- `rerank_storage` — set to `"f32"` to write a full-precision `*.hnsw.f32` sidecar enabling exact Stage-2 rerank; omit to keep the int8-only segment.
 
 ### Other methods
 

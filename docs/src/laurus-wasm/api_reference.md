@@ -209,7 +209,7 @@ above.
 
 Add a binary data field.
 
-#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)`
+#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?)`
 
 Add an HNSW vector index field.
 
@@ -217,6 +217,11 @@ Add an HNSW vector index field.
   `"manhattan"`, `"angular"`
 - `m`: Branching factor (default 16)
 - `efConstruction`: Build-time expansion (default 200)
+- `quantizer`: `"scalar_8bit"` (default) or `"product_quantization"`
+  (requires `subvectorCount`)
+- `subvectorCount`: number of PQ sub-vectors; must divide `dimension`
+- `rerankStorage`: omit (default) or `"f32"` to store a full-precision
+  rerank sidecar
 
 #### `addFlatField(name, dimension, distance?, embedder?)`
 
@@ -228,6 +233,11 @@ Add an IVF vector index field.
 
 - `nClusters`: Number of partitioning clusters (default 100)
 - `nProbe`: Number of clusters to probe at query time (default 1)
+
+**Vector quantization & rerank storage** (HNSW fields):
+
+- `quantizer` — `"scalar_8bit"` (default, 4× compression) or `"product_quantization"` for higher compression. Product quantization requires `subvectorCount` (must divide `dimension`).
+- `rerankStorage` — set to `"f32"` to write a full-precision `*.hnsw.f32` sidecar enabling exact Stage-2 rerank; omit to keep the int8-only segment.
 
 #### `addAnalyzer(name, analyzer)`
 

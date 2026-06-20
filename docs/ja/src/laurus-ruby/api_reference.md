@@ -61,9 +61,14 @@ Laurus::Schema.new
 | `add_geo_field(name, stored: true, indexed: true)` | 地理座標フィールド（緯度/経度）。 |
 | `add_geo3d_field(name, stored: true, indexed: true)` | 3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は [Geo3d の概念](../concepts/geo3d.md)。 |
 | `add_datetime_field(name, stored: true, indexed: true)` | UTC 日時フィールド。 |
-| `add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, embedder: nil)` | HNSW 近似最近傍ベクトルフィールド。 |
+| `add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, quantizer: nil, subvector_count: nil, rerank_storage: nil, embedder: nil)` | HNSW 近似最近傍ベクトルフィールド。 |
 | `add_flat_field(name, dimension, distance: "cosine", embedder: nil)` | Flat（総当たり）ベクトルフィールド。 |
 | `add_ivf_field(name, dimension, distance: "cosine", n_clusters: 100, n_probe: 1, embedder: nil)` | IVF 近似最近傍ベクトルフィールド。 |
+
+**ベクトル量子化とリランクストレージ**（HNSW フィールド）:
+
+- `quantizer` — `"scalar_8bit"`（デフォルト、4 倍圧縮）または高圧縮率の `"product_quantization"`。Product quantization では `subvector_count`（`dimension` を割り切れる値）が必須です。
+- `rerank_storage` — `"f32"` を指定すると完全精度の `*.hnsw.f32` サイドカーを書き出し、厳密な Stage-2 リランクを有効化します。省略すると int8 のみのセグメントを維持します。
 
 ### その他のメソッド
 

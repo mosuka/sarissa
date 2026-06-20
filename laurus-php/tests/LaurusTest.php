@@ -555,4 +555,140 @@ class LaurusTest extends TestCase
             $this->assertLessThanOrEqual(1, count($results));
         }
     }
+
+    // ── HNSW quantizer / rerank_storage options (#797) ────────────────────
+    //
+    // These assert the values configured on addHnswField actually reach the
+    // Rust core via deterministic observables, not merely that search
+    // succeeds. addHnswField is positional:
+    //   (name, dimension, distance, m, efConstruction, defaultEfSearch,
+    //    embedder, quantizer, subvectorCount, rerankStorage)
+
+    /**
+     * Recursively collect files under $dir whose name ends with $suffix.
+     */
+    private function findFilesBySuffix(string $dir, string $suffix): array
+    {
+        $found = [];
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($it as $file) {
+            if (str_ends_with($file->getFilename(), $suffix)) {
+                $found[] = $file->getPathname();
+            }
+        }
+        return $found;
+    }
+
+    public function testRerankStorageF32WritesSidecar(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_rerank_" . uniqid();
+        mkdir($dir);
+        $schema = new Laurus\Schema();
+        $schema->addHnswField("embedding", 4, null, 16, 200, null, null, null, null, "f32");
+        $idx = new Laurus\Index($dir, $schema);
+        $idx->putDocument("doc1", ["embedding" => [0.1, 0.2, 0.3, 0.4]]);
+        $idx->putDocument("doc2", ["embedding" => [0.9, 0.8, 0.7, 0.6]]);
+        $idx->commit();
+
+        $this->assertNotEmpty(
+            $this->findFilesBySuffix($dir, ".hnsw.f32"),
+            "rerank_storage 'f32' must write a .hnsw.f32 sidecar"
+        );
+    }
+
+    public function testNoRerankStorageWritesNoSidecar(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_norerank_" . uniqid();
+        mkdir($dir);
+        $schema = new Laurus\Schema();
+        $schema->addHnswField("embedding", 4);
+        $idx = new Laurus\Index($dir, $schema);
+        $idx->putDocument("doc1", ["embedding" => [0.1, 0.2, 0.3, 0.4]]);
+        $idx->putDocument("doc2", ["embedding" => [0.9, 0.8, 0.7, 0.6]]);
+        $idx->commit();
+
+        $this->assertEmpty($this->findFilesBySuffix($dir, ".hnsw.f32"));
+    }
+
+    public function testProductQuantizationBuildsAndSearches(): void
+    {
+        $schema = new Laurus\Schema();
+        // PQ is an L2 quantizer, so use Euclidean (matching the core's
+        // test_hnsw_pq_search_returns_corpus_neighbour).
+        $schema->addHnswField("embedding", 4, "euclidean", 16, 200, null, null, "product_quantization", 2, null);
+        $idx = new Laurus\Index(null, $schema);
+        // Stable two-cluster corpus mirroring the core (issue #730).
+        $nearOffsets = [
+            [0.0, 0.0, 0.0, 0.0],
+            [0.1, 0.1, 0.1, 0.1],
+            [-0.1, -0.1, -0.1, -0.1],
+            [0.2, -0.2, 0.2, -0.2],
+            [-0.2, 0.2, -0.2, 0.2],
+            [0.05, 0.05, -0.05, -0.05],
+            [-0.05, -0.05, 0.05, 0.05],
+            [0.15, -0.1, 0.1, -0.15],
+        ];
+        $nearBase = [10.0, 10.0, 20.0, 20.0];
+        $farBase = [-100.0, -100.0, -200.0, -200.0];
+        foreach ($nearOffsets as $i => $off) {
+            $near = [];
+            $far = [];
+            foreach ($nearBase as $j => $b) {
+                $near[] = $b + $off[$j];
+            }
+            foreach ($farBase as $j => $b) {
+                $far[] = $b + $off[$j];
+            }
+            $idx->putDocument("near$i", ["embedding" => $near]);
+            $idx->putDocument("far$i", ["embedding" => $far]);
+        }
+        $idx->commit();
+
+        $q = new Laurus\VectorQuery("embedding", $nearBase);
+        $results = $idx->search($q, 3);
+        $this->assertCount(3, $results);
+        foreach ($results as $r) {
+            $this->assertStringStartsWith("near", $r->getId());
+        }
+    }
+
+    public function testPqSubvectorCountMustDivideDimension(): void
+    {
+        $schema = new Laurus\Schema();
+        $schema->addHnswField("embedding", 4, null, 16, 200, null, null, "product_quantization", 3, null);
+        $idx = new Laurus\Index(null, $schema);
+        $idx->putDocument("doc1", ["embedding" => [0.1, 0.2, 0.3, 0.4]]);
+        $this->expectException(\Throwable::class);
+        $idx->commit();
+    }
+
+    public function testUnknownQuantizerRejected(): void
+    {
+        $schema = new Laurus\Schema();
+        $this->expectException(\Throwable::class);
+        $schema->addHnswField("embedding", 4, null, 16, 200, null, null, "bogus");
+    }
+
+    public function testPqRequiresSubvectorCount(): void
+    {
+        $schema = new Laurus\Schema();
+        $this->expectException(\Throwable::class);
+        $schema->addHnswField("embedding", 4, null, 16, 200, null, null, "product_quantization");
+    }
+
+    public function testSubvectorCountRejectedForScalar(): void
+    {
+        $schema = new Laurus\Schema();
+        $this->expectException(\Throwable::class);
+        $schema->addHnswField("embedding", 4, null, 16, 200, null, null, null, 2);
+    }
+
+    public function testUnknownRerankStorageRejected(): void
+    {
+        $schema = new Laurus\Schema();
+        $this->expectException(\Throwable::class);
+        $schema->addHnswField("embedding", 4, null, 16, 200, null, null, null, null, "bogus");
+    }
 }

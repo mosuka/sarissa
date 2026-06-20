@@ -6,7 +6,7 @@ use std::str::FromStr;
 use laurus::{
     BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
     EmbedderDefinition, FieldOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
-    IntegerOption, IvfOption, Schema, TextOption,
+    IntegerOption, IvfOption, QuantizationMethod, RerankStorageKind, Schema, TextOption,
 };
 use magnus::prelude::*;
 use magnus::scan_args::{get_kwargs, scan_args};
@@ -27,6 +27,63 @@ fn parse_distance(s: &str) -> Result<DistanceMetric, Error> {
                 "Unknown distance metric: '{}'. Valid: cosine, euclidean, dot_product, manhattan, angular",
                 other
             ),
+        )),
+    }
+}
+
+/// Parse a quantizer name plus optional `subvector_count` into a
+/// [`QuantizationMethod`].
+///
+/// Accepts `"scalar_8bit"` / `"scalar"` (the default when `name` is
+/// `None`) and `"product_quantization"` / `"pq"`. Product quantization
+/// requires a `subvector_count` (which must divide the field dimension —
+/// validated by the core at index-build time); supplying it for any other
+/// quantizer is rejected so an incoherent configuration cannot silently
+/// reach the core.
+fn parse_quantizer(
+    name: Option<&str>,
+    subvector_count: Option<usize>,
+) -> Result<QuantizationMethod, Error> {
+    let ruby = Ruby::get().expect("called from Ruby thread");
+    match name.map(|s| s.to_lowercase()).as_deref() {
+        None | Some("scalar_8bit") | Some("scalar") => {
+            if subvector_count.is_some() {
+                return Err(Error::new(
+                    ruby.exception_arg_error(),
+                    "subvector_count is only valid with quantizer: 'product_quantization'",
+                ));
+            }
+            Ok(QuantizationMethod::Scalar8Bit)
+        }
+        Some("product_quantization") | Some("pq") => {
+            let subvector_count = subvector_count.ok_or_else(|| {
+                Error::new(
+                    ruby.exception_arg_error(),
+                    "quantizer: 'product_quantization' requires subvector_count \
+                     (must divide the field dimension)",
+                )
+            })?;
+            Ok(QuantizationMethod::ProductQuantization { subvector_count })
+        }
+        Some(other) => Err(Error::new(
+            ruby.exception_arg_error(),
+            format!("Unknown quantizer: '{other}'. Valid: scalar_8bit, product_quantization"),
+        )),
+    }
+}
+
+/// Parse a rerank-storage name into an optional [`RerankStorageKind`].
+///
+/// `None` (the default) keeps the Stage-1 int8-only segment; `"f32"`
+/// enables the Stage-2 full-precision rerank sidecar (`*.hnsw.f32`).
+fn parse_rerank_storage(name: Option<&str>) -> Result<Option<RerankStorageKind>, Error> {
+    let ruby = Ruby::get().expect("called from Ruby thread");
+    match name.map(|s| s.to_lowercase()).as_deref() {
+        None => Ok(None),
+        Some("f32") => Ok(Some(RerankStorageKind::F32)),
+        Some(other) => Err(Error::new(
+            ruby.exception_arg_error(),
+            format!("Unknown rerank_storage: '{other}'. Valid: f32"),
         )),
     }
 }
@@ -308,6 +365,14 @@ impl RbSchema {
     ///     omitted, the searcher uses an internal fallback of 50. Per-query
     ///     overrides via the search request still take precedence.
     ///   - `embedder:` (String, optional): Embedder name registered via `add_embedder`.
+    ///   - `quantizer:` (String, optional): Vector quantizer — "scalar_8bit"
+    ///     (default) or "product_quantization" (requires `subvector_count`).
+    ///   - `subvector_count:` (usize, optional): Number of PQ sub-vectors.
+    ///     Required when `quantizer:` is "product_quantization" and must
+    ///     divide `dimension`; rejected for other quantizers.
+    ///   - `rerank_storage:` (String, optional): Stage-2 rerank sidecar —
+    ///     omitted (default) keeps the int8-only segment, "f32" stores
+    ///     full-precision vectors in a `*.hnsw.f32` sidecar for exact rerank.
     fn add_hnsw_field(&self, args: &[Value]) -> Result<(), Error> {
         let args = scan_args::<(String, usize), (), (), (), RHash, ()>(args)?;
         let (name, dimension) = args.required;
@@ -320,6 +385,9 @@ impl RbSchema {
                 Option<usize>,
                 Option<usize>,
                 Option<Option<String>>,
+                Option<String>,
+                Option<usize>,
+                Option<String>,
             ),
             (),
         >(
@@ -331,9 +399,21 @@ impl RbSchema {
                 "ef_construction",
                 "default_ef_search",
                 "embedder",
+                "quantizer",
+                "subvector_count",
+                "rerank_storage",
             ],
         )?;
-        let (distance, m, ef_construction, default_ef_search, embedder) = kwargs.optional;
+        let (
+            distance,
+            m,
+            ef_construction,
+            default_ef_search,
+            embedder,
+            quantizer,
+            subvector_count,
+            rerank_storage,
+        ) = kwargs.optional;
         let distance_str = distance.as_deref().unwrap_or("cosine");
         let opt = HnswOption {
             dimension,
@@ -341,6 +421,8 @@ impl RbSchema {
             m: m.unwrap_or(16),
             ef_construction: ef_construction.unwrap_or(200),
             default_ef_search,
+            quantizer: parse_quantizer(quantizer.as_deref(), subvector_count)?,
+            rerank_storage: parse_rerank_storage(rerank_storage.as_deref())?,
             embedder: embedder.flatten(),
             ..Default::default()
         };

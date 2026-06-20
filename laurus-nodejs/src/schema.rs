@@ -5,7 +5,7 @@ use std::str::FromStr;
 use laurus::{
     BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
     EmbedderDefinition, FieldOption, FlatOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
-    IntegerOption, IvfOption, Schema, TextOption,
+    IntegerOption, IvfOption, QuantizationMethod, RerankStorageKind, Schema, TextOption,
 };
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -28,6 +28,57 @@ fn parse_distance(s: &str) -> Result<DistanceMetric> {
         "angular" => Ok(DistanceMetric::Angular),
         other => Err(napi::Error::from_reason(format!(
             "Unknown distance metric: '{other}'. Valid: cosine, euclidean, dot_product, manhattan, angular"
+        ))),
+    }
+}
+
+/// Parse a quantizer name plus optional `subvectorCount` into a
+/// [`QuantizationMethod`].
+///
+/// Accepts `"scalar_8bit"` / `"scalar"` (the default when `name` is
+/// `None`) and `"product_quantization"` / `"pq"`. Product quantization
+/// requires a `subvector_count` (which must divide the field dimension —
+/// validated by the core at index-build time); supplying it for any other
+/// quantizer is rejected so an incoherent configuration cannot silently
+/// reach the core.
+fn parse_quantizer(
+    name: Option<&str>,
+    subvector_count: Option<usize>,
+) -> Result<QuantizationMethod> {
+    match name.map(|s| s.to_lowercase()).as_deref() {
+        None | Some("scalar_8bit") | Some("scalar") => {
+            if subvector_count.is_some() {
+                return Err(napi::Error::from_reason(
+                    "subvectorCount is only valid with quantizer='product_quantization'",
+                ));
+            }
+            Ok(QuantizationMethod::Scalar8Bit)
+        }
+        Some("product_quantization") | Some("pq") => {
+            let subvector_count = subvector_count.ok_or_else(|| {
+                napi::Error::from_reason(
+                    "quantizer='product_quantization' requires subvectorCount \
+                     (must divide the field dimension)",
+                )
+            })?;
+            Ok(QuantizationMethod::ProductQuantization { subvector_count })
+        }
+        Some(other) => Err(napi::Error::from_reason(format!(
+            "Unknown quantizer: '{other}'. Valid: scalar_8bit, product_quantization"
+        ))),
+    }
+}
+
+/// Parse a rerank-storage name into an optional [`RerankStorageKind`].
+///
+/// `None` (the default) keeps the Stage-1 int8-only segment; `"f32"`
+/// enables the Stage-2 full-precision rerank sidecar (`*.hnsw.f32`).
+fn parse_rerank_storage(name: Option<&str>) -> Result<Option<RerankStorageKind>> {
+    match name.map(|s| s.to_lowercase()).as_deref() {
+        None => Ok(None),
+        Some("f32") => Ok(Some(RerankStorageKind::F32)),
+        Some(other) => Err(napi::Error::from_reason(format!(
+            "Unknown rerank_storage: '{other}'. Valid: f32"
         ))),
     }
 }
@@ -262,6 +313,14 @@ impl JsSchema {
     ///   searcher uses an internal fallback of 50. Per-query overrides
     ///   via the search request still take precedence.
     /// * `embedder` - Optional embedder name registered via `addEmbedder`.
+    /// * `quantizer` - Vector quantizer — "scalar_8bit" (default) or
+    ///   "product_quantization" (requires `subvectorCount`).
+    /// * `subvectorCount` - Number of PQ sub-vectors. Required when
+    ///   `quantizer` is "product_quantization" and must divide `dimension`;
+    ///   rejected for other quantizers.
+    /// * `rerankStorage` - Stage-2 rerank sidecar — omitted (default) keeps
+    ///   the int8-only segment, "f32" stores full-precision vectors in a
+    ///   `*.hnsw.f32` sidecar for exact rerank distances.
     #[napi]
     #[allow(clippy::too_many_arguments)]
     pub fn add_hnsw_field(
@@ -273,6 +332,9 @@ impl JsSchema {
         ef_construction: Option<u32>,
         default_ef_search: Option<u32>,
         embedder: Option<String>,
+        quantizer: Option<String>,
+        subvector_count: Option<u32>,
+        rerank_storage: Option<String>,
     ) -> Result<()> {
         let opt = HnswOption {
             dimension: dimension as usize,
@@ -280,6 +342,8 @@ impl JsSchema {
             m: m.unwrap_or(16) as usize,
             ef_construction: ef_construction.unwrap_or(200) as usize,
             default_ef_search: default_ef_search.map(|v| v as usize),
+            quantizer: parse_quantizer(quantizer.as_deref(), subvector_count.map(|v| v as usize))?,
+            rerank_storage: parse_rerank_storage(rerank_storage.as_deref())?,
             embedder,
             ..Default::default()
         };
