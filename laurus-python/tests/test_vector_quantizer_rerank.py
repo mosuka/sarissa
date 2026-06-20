@@ -1,0 +1,132 @@
+"""Tests for the HNSW quantizer / rerank_storage schema options (Issue #797).
+
+These assert that the values configured on ``add_hnsw_field`` actually reach
+the Rust core, using deterministic observables rather than only that search
+succeeds:
+
+* ``rerank_storage="f32"`` makes the core write a ``*.hnsw.f32`` Stage-2
+  sidecar on disk (mirrors the server-side guard in #793/#800); the default
+  writes no sidecar.
+* ``quantizer="product_quantization"`` forwards ``subvector_count`` to the
+  core's PQ training, which rejects a count that does not divide the field
+  dimension.
+"""
+
+import pytest
+import laurus
+
+
+# ---------------------------------------------------------------------------
+# rerank_storage reaches the core (on-disk sidecar)
+# ---------------------------------------------------------------------------
+
+
+def test_rerank_storage_f32_writes_sidecar(tmp_path):
+    schema = laurus.Schema()
+    schema.add_hnsw_field("embedding", dimension=4, rerank_storage="f32")
+    idx = laurus.Index(path=str(tmp_path), schema=schema)
+    idx.put_document("doc1", {"embedding": [0.1, 0.2, 0.3, 0.4]})
+    idx.put_document("doc2", {"embedding": [0.9, 0.8, 0.7, 0.6]})
+    idx.commit()
+
+    sidecars = list(tmp_path.rglob("*.hnsw.f32"))
+    assert sidecars, "rerank_storage='f32' must write a .hnsw.f32 rerank sidecar"
+
+
+def test_no_rerank_storage_writes_no_sidecar(tmp_path):
+    schema = laurus.Schema()
+    schema.add_hnsw_field("embedding", dimension=4)
+    idx = laurus.Index(path=str(tmp_path), schema=schema)
+    idx.put_document("doc1", {"embedding": [0.1, 0.2, 0.3, 0.4]})
+    idx.put_document("doc2", {"embedding": [0.9, 0.8, 0.7, 0.6]})
+    idx.commit()
+
+    sidecars = list(tmp_path.rglob("*.hnsw.f32"))
+    assert not sidecars, "no rerank sidecar should exist without rerank_storage"
+
+
+# ---------------------------------------------------------------------------
+# quantizer reaches the core (PQ training honours subvector_count)
+# ---------------------------------------------------------------------------
+
+
+def test_product_quantization_builds_and_searches():
+    schema = laurus.Schema()
+    # PQ is an L2 quantizer, so use Euclidean (matching the core's
+    # `test_hnsw_pq_search_returns_corpus_neighbour`).
+    schema.add_hnsw_field(
+        "embedding",
+        dimension=4,
+        distance="euclidean",
+        quantizer="product_quantization",
+        subvector_count=2,
+    )
+    idx = laurus.Index(schema=schema)
+    # Mirror the stable two-cluster corpus from the core's
+    # `test_hnsw_pq_search_returns_corpus_neighbour` (issue #730): a dense,
+    # widely-separated pair of clusters keeps the PQ codebook stable across
+    # platforms so the near cluster is never displaced by quantization error.
+    near_offsets = [
+        [0.0, 0.0, 0.0, 0.0],
+        [0.1, 0.1, 0.1, 0.1],
+        [-0.1, -0.1, -0.1, -0.1],
+        [0.2, -0.2, 0.2, -0.2],
+        [-0.2, 0.2, -0.2, 0.2],
+        [0.05, 0.05, -0.05, -0.05],
+        [-0.05, -0.05, 0.05, 0.05],
+        [0.15, -0.1, 0.1, -0.15],
+    ]
+    near_base = [10.0, 10.0, 20.0, 20.0]
+    far_base = [-100.0, -100.0, -200.0, -200.0]
+    for i, off in enumerate(near_offsets):
+        idx.put_document(f"near{i}", {"embedding": [b + o for b, o in zip(near_base, off)]})
+        idx.put_document(f"far{i}", {"embedding": [b + o for b, o in zip(far_base, off)]})
+    idx.commit()
+
+    results = idx.search(laurus.VectorQuery("embedding", near_base), limit=3)
+    assert len(results) == 3
+    assert all(r.id.startswith("near") for r in results)
+
+
+def test_pq_subvector_count_must_divide_dimension():
+    """subvector_count=3 does not divide dimension=4, so the core's PQ
+    training must reject it at commit — proving the value reached the core."""
+    schema = laurus.Schema()
+    schema.add_hnsw_field(
+        "embedding", dimension=4, quantizer="product_quantization", subvector_count=3
+    )
+    idx = laurus.Index(schema=schema)
+    idx.put_document("doc1", {"embedding": [0.1, 0.2, 0.3, 0.4]})
+    with pytest.raises(Exception):
+        idx.commit()
+
+
+# ---------------------------------------------------------------------------
+# Builder-level validation (incoherent configs are rejected up front)
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_quantizer_rejected():
+    schema = laurus.Schema()
+    with pytest.raises(ValueError):
+        schema.add_hnsw_field("embedding", dimension=4, quantizer="bogus")
+
+
+def test_pq_requires_subvector_count():
+    schema = laurus.Schema()
+    with pytest.raises(ValueError):
+        schema.add_hnsw_field(
+            "embedding", dimension=4, quantizer="product_quantization"
+        )
+
+
+def test_subvector_count_rejected_for_scalar():
+    schema = laurus.Schema()
+    with pytest.raises(ValueError):
+        schema.add_hnsw_field("embedding", dimension=4, subvector_count=2)
+
+
+def test_unknown_rerank_storage_rejected():
+    schema = laurus.Schema()
+    with pytest.raises(ValueError):
+        schema.add_hnsw_field("embedding", dimension=4, rerank_storage="bogus")

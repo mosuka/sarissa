@@ -61,9 +61,14 @@ new \Laurus\Schema()
 | `addGeoField(string $name, bool $stored = true, bool $indexed = true): void` | 地理座標フィールド（緯度/経度）。 |
 | `addGeo3dField(string $name, bool $stored = true, bool $indexed = true): void` | 3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は [Geo3d の概念](../concepts/geo3d.md)。 |
 | `addDatetimeField(string $name, bool $stored = true, bool $indexed = true): void` | UTC 日時フィールド。 |
-| `addHnswField(string $name, int $dimension, ?string $distance = "cosine", int $m = 16, int $efConstruction = 200, ?string $embedder = null): void` | HNSW 近似最近傍ベクトルフィールド。 |
+| `addHnswField(string $name, int $dimension, ?string $distance = "cosine", int $m = 16, int $efConstruction = 200, ?string $embedder = null, ?string $quantizer = null, ?int $subvectorCount = null, ?string $rerankStorage = null): void` | HNSW 近似最近傍ベクトルフィールド。 |
 | `addFlatField(string $name, int $dimension, ?string $distance = "cosine", ?string $embedder = null): void` | Flat（総当たり）ベクトルフィールド。 |
 | `addIvfField(string $name, int $dimension, ?string $distance = "cosine", int $nClusters = 100, int $nProbe = 1, ?string $embedder = null): void` | IVF 近似最近傍ベクトルフィールド。 |
+
+**ベクトル量子化とリランクストレージ**（HNSW フィールド）:
+
+- `quantizer` — `"scalar_8bit"`（デフォルト、4 倍圧縮）または高圧縮率の `"product_quantization"`。Product quantization では `subvectorCount`（`dimension` を割り切れる値）が必須です。
+- `rerankStorage` — `"f32"` を指定すると完全精度の `*.hnsw.f32` サイドカーを書き出し、厳密な Stage-2 リランクを有効化します。省略すると int8 のみのセグメントを維持します。
 
 ### その他のメソッド
 

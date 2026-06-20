@@ -5,7 +5,8 @@ use std::str::FromStr;
 use laurus::{
     AnalyzerSpec, BooleanOption, BuiltinAnalyzerSpec, BytesOption, DateTimeOption, DistanceMetric,
     DynamicFieldPolicy, EmbedderDefinition, FieldOption, FlatOption, FloatOption, Geo3dOption,
-    GeoOption, HnswOption, IntegerOption, IvfOption, Schema, TextOption,
+    GeoOption, HnswOption, IntegerOption, IvfOption, QuantizationMethod, RerankStorageKind, Schema,
+    TextOption,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -74,6 +75,57 @@ fn parse_distance(s: &str) -> PyResult<DistanceMetric> {
         other => Err(PyValueError::new_err(format!(
             "Unknown distance metric: '{}'. Valid: cosine, euclidean, dot_product, manhattan, angular",
             other
+        ))),
+    }
+}
+
+/// Parse a quantizer name plus optional `subvector_count` into a
+/// [`QuantizationMethod`].
+///
+/// Accepts `"scalar_8bit"` / `"scalar"` (the default when `name` is
+/// `None`) and `"product_quantization"` / `"pq"`. Product quantization
+/// requires a `subvector_count` (which must divide the field dimension —
+/// the divisibility itself is validated by the core at index-build time);
+/// supplying `subvector_count` for any other quantizer is rejected so an
+/// incoherent configuration cannot silently reach the core.
+fn parse_quantizer(
+    name: Option<&str>,
+    subvector_count: Option<usize>,
+) -> PyResult<QuantizationMethod> {
+    match name.map(|s| s.to_lowercase()).as_deref() {
+        None | Some("scalar_8bit") | Some("scalar") => {
+            if subvector_count.is_some() {
+                return Err(PyValueError::new_err(
+                    "subvector_count is only valid with quantizer='product_quantization'",
+                ));
+            }
+            Ok(QuantizationMethod::Scalar8Bit)
+        }
+        Some("product_quantization") | Some("pq") => {
+            let subvector_count = subvector_count.ok_or_else(|| {
+                PyValueError::new_err(
+                    "quantizer='product_quantization' requires subvector_count \
+                     (must divide the field dimension)",
+                )
+            })?;
+            Ok(QuantizationMethod::ProductQuantization { subvector_count })
+        }
+        Some(other) => Err(PyValueError::new_err(format!(
+            "Unknown quantizer: '{other}'. Valid: scalar_8bit, product_quantization"
+        ))),
+    }
+}
+
+/// Parse a rerank-storage name into an optional [`RerankStorageKind`].
+///
+/// `None` (the default) keeps the Stage-1 int8-only segment; `"f32"`
+/// enables the Stage-2 full-precision rerank sidecar (`*.hnsw.f32`).
+fn parse_rerank_storage(name: Option<&str>) -> PyResult<Option<RerankStorageKind>> {
+    match name.map(|s| s.to_lowercase()).as_deref() {
+        None => Ok(None),
+        Some("f32") => Ok(Some(RerankStorageKind::F32)),
+        Some(other) => Err(PyValueError::new_err(format!(
+            "Unknown rerank_storage: '{other}'. Valid: f32"
         ))),
     }
 }
@@ -253,9 +305,18 @@ impl PySchema {
     ///         `ef_search` candidate-list size (Issue #644). When unset,
     ///         the searcher uses an internal fallback of 50. Per-query
     ///         overrides via the search request still take precedence.
+    ///     quantizer: Vector quantizer — "scalar_8bit" (default) or
+    ///         "product_quantization". Product quantization requires
+    ///         `subvector_count`.
+    ///     subvector_count: Number of PQ sub-vectors. Required when
+    ///         `quantizer="product_quantization"` and must divide
+    ///         `dimension`; rejected for other quantizers.
+    ///     rerank_storage: Stage-2 rerank sidecar — None (default) keeps
+    ///         the int8-only segment, "f32" stores full-precision vectors
+    ///         in a `*.hnsw.f32` sidecar for exact rerank distances.
     ///     embedder: Optional embedder name registered via `add_embedder`.
     ///         When set, text payloads are automatically embedded by the Rust engine.
-    #[pyo3(signature = (name, dimension, *, distance="cosine", m=16, ef_construction=200, default_ef_search=None, embedder=None))]
+    #[pyo3(signature = (name, dimension, *, distance="cosine", m=16, ef_construction=200, default_ef_search=None, quantizer=None, subvector_count=None, rerank_storage=None, embedder=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn add_hnsw_field(
         &mut self,
@@ -265,6 +326,9 @@ impl PySchema {
         m: usize,
         ef_construction: usize,
         default_ef_search: Option<usize>,
+        quantizer: Option<String>,
+        subvector_count: Option<usize>,
+        rerank_storage: Option<String>,
         embedder: Option<String>,
     ) -> PyResult<()> {
         let opt = HnswOption {
@@ -273,6 +337,8 @@ impl PySchema {
             m,
             ef_construction,
             default_ef_search,
+            quantizer: parse_quantizer(quantizer.as_deref(), subvector_count)?,
+            rerank_storage: parse_rerank_storage(rerank_storage.as_deref())?,
             embedder,
             ..Default::default()
         };

@@ -73,7 +73,7 @@ class Schema {
 | `addGeoField(name, stored?, indexed?)` | Geographic coordinate field. |
 | `addGeo3dField(name, stored?, indexed?)` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
 | `addDatetimeField(name, stored?, indexed?)` | UTC datetime field. |
-| `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)` | HNSW vector field. |
+| `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?)` | HNSW vector field. |
 | `addFlatField(name, dimension, distance?, embedder?)` | Flat (brute-force) vector field. |
 | `addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)` | IVF vector field. |
 | `addEmbedder(name, config)` | Register a named embedder. |
@@ -82,6 +82,11 @@ class Schema {
 | `dynamicFieldPolicy()` | Return the current policy as a lowercase string. |
 | `fieldNames()` | Return all field names. |
 | `toString()` | Return a string representation of the schema (`"Schema(fields=[...])"`). |
+
+**Vector quantization & rerank storage** (HNSW fields):
+
+- `quantizer` — `"scalar_8bit"` (default, 4× compression) or `"product_quantization"` for higher compression. Product quantization requires `subvectorCount` (must divide `dimension`).
+- `rerankStorage` — set to `"f32"` to write a full-precision `*.hnsw.f32` sidecar enabling exact Stage-2 rerank; omit to keep the int8-only segment.
 
 #### Dynamic field policy
 

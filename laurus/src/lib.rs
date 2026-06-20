@@ -109,6 +109,7 @@ pub use storage::{Storage, StorageConfig, StorageFactory};
 pub use vector::core::distance::DistanceMetric;
 pub use vector::core::field::{FlatOption, HnswOption, IvfOption};
 pub use vector::core::quantization::QuantizationMethod;
+pub use vector::core::rerank::RerankStorageKind;
 pub use vector::store::request::{
     QueryPayload, QueryVector, VectorScoreMode, VectorSearchParams, VectorSearchRequest,
 };

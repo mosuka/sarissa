@@ -61,9 +61,14 @@ new \Laurus\Schema()
 | `addGeoField(string $name, bool $stored = true, bool $indexed = true): void` | Geographic coordinate field (lat/lon). |
 | `addGeo3dField(string $name, bool $stored = true, bool $indexed = true): void` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
 | `addDatetimeField(string $name, bool $stored = true, bool $indexed = true): void` | UTC datetime field. |
-| `addHnswField(string $name, int $dimension, ?string $distance = "cosine", int $m = 16, int $efConstruction = 200, ?string $embedder = null): void` | HNSW approximate nearest-neighbor vector field. |
+| `addHnswField(string $name, int $dimension, ?string $distance = "cosine", int $m = 16, int $efConstruction = 200, ?string $embedder = null, ?string $quantizer = null, ?int $subvectorCount = null, ?string $rerankStorage = null): void` | HNSW approximate nearest-neighbor vector field. |
 | `addFlatField(string $name, int $dimension, ?string $distance = "cosine", ?string $embedder = null): void` | Flat (brute-force) vector field. |
 | `addIvfField(string $name, int $dimension, ?string $distance = "cosine", int $nClusters = 100, int $nProbe = 1, ?string $embedder = null): void` | IVF approximate nearest-neighbor vector field. |
+
+**Vector quantization & rerank storage** (HNSW fields):
+
+- `quantizer` — `"scalar_8bit"` (default, 4× compression) or `"product_quantization"` for higher compression. Product quantization requires `subvectorCount` (must divide `dimension`).
+- `rerankStorage` — set to `"f32"` to write a full-precision `*.hnsw.f32` sidecar enabling exact Stage-2 rerank; omit to keep the int8-only segment.
 
 ### Other methods
 

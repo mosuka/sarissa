@@ -9,7 +9,7 @@ use ext_php_rs::types::ZendHashTable;
 use laurus::{
     BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
     EmbedderDefinition, FieldOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
-    IntegerOption, IvfOption, Schema, TextOption,
+    IntegerOption, IvfOption, QuantizationMethod, RerankStorageKind, Schema, TextOption,
 };
 
 /// Parse a distance metric string into [`DistanceMetric`].
@@ -33,6 +33,55 @@ fn parse_distance(s: &str) -> PhpResult<DistanceMetric> {
             other
         )
         .into()),
+    }
+}
+
+/// Parse a quantizer name plus optional `subvector_count` into a
+/// [`QuantizationMethod`].
+///
+/// Accepts `"scalar_8bit"` / `"scalar"` (the default when `name` is
+/// `None`) and `"product_quantization"` / `"pq"`. Product quantization
+/// requires a `subvector_count` (which must divide the field dimension —
+/// validated by the core at index-build time); supplying it for any other
+/// quantizer is rejected so an incoherent configuration cannot silently
+/// reach the core.
+fn parse_quantizer(
+    name: Option<&str>,
+    subvector_count: Option<usize>,
+) -> PhpResult<QuantizationMethod> {
+    match name.map(|s| s.to_lowercase()).as_deref() {
+        None | Some("scalar_8bit") | Some("scalar") => {
+            if subvector_count.is_some() {
+                return Err(
+                    "subvector_count is only valid with quantizer 'product_quantization'".into(),
+                );
+            }
+            Ok(QuantizationMethod::Scalar8Bit)
+        }
+        Some("product_quantization") | Some("pq") => match subvector_count {
+            Some(subvector_count) => {
+                Ok(QuantizationMethod::ProductQuantization { subvector_count })
+            }
+            None => Err("quantizer 'product_quantization' requires subvector_count \
+                         (must divide the field dimension)"
+                .into()),
+        },
+        Some(other) => Err(format!(
+            "Unknown quantizer: '{other}'. Valid: scalar_8bit, product_quantization"
+        )
+        .into()),
+    }
+}
+
+/// Parse a rerank-storage name into an optional [`RerankStorageKind`].
+///
+/// `None` (the default) keeps the Stage-1 int8-only segment; `"f32"`
+/// enables the Stage-2 full-precision rerank sidecar (`*.hnsw.f32`).
+fn parse_rerank_storage(name: Option<&str>) -> PhpResult<Option<RerankStorageKind>> {
+    match name.map(|s| s.to_lowercase()).as_deref() {
+        None => Ok(None),
+        Some("f32") => Ok(Some(RerankStorageKind::F32)),
+        Some(other) => Err(format!("Unknown rerank_storage: '{other}'. Valid: f32").into()),
     }
 }
 
@@ -230,6 +279,14 @@ impl PhpSchema {
     ///   searcher uses an internal fallback of 50. Per-query overrides
     ///   via the search request still take precedence.
     /// * `embedder` - Embedder name registered via `addEmbedder` (default: "" for none).
+    /// * `quantizer` - Vector quantizer — "scalar_8bit" (default) or
+    ///   "product_quantization" (requires `subvector_count`).
+    /// * `subvector_count` - Number of PQ sub-vectors. Required when
+    ///   `quantizer` is "product_quantization" and must divide `dimension`;
+    ///   rejected for other quantizers.
+    /// * `rerank_storage` - Stage-2 rerank sidecar — omitted (default) keeps
+    ///   the int8-only segment, "f32" stores full-precision vectors in a
+    ///   `*.hnsw.f32` sidecar for exact rerank distances.
     #[php(defaults(m = 16, ef_construction = 200))]
     #[allow(clippy::too_many_arguments)]
     pub fn add_hnsw_field(
@@ -241,6 +298,9 @@ impl PhpSchema {
         ef_construction: i64,
         default_ef_search: Option<i64>,
         embedder: Option<String>,
+        quantizer: Option<String>,
+        subvector_count: Option<i64>,
+        rerank_storage: Option<String>,
     ) -> PhpResult<()> {
         let dist_str = distance.unwrap_or_else(|| "cosine".to_string());
         let opt = HnswOption {
@@ -249,6 +309,8 @@ impl PhpSchema {
             m: m as usize,
             ef_construction: ef_construction as usize,
             default_ef_search: default_ef_search.map(|v| v as usize),
+            quantizer: parse_quantizer(quantizer.as_deref(), subvector_count.map(|v| v as usize))?,
+            rerank_storage: parse_rerank_storage(rerank_storage.as_deref())?,
             embedder,
             ..Default::default()
         };

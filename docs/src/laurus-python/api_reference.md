@@ -63,9 +63,14 @@ class Schema:
 | `add_geo_field(name, *, stored=True, indexed=True)` | Geographic coordinate field (lat/lon). |
 | `add_geo3d_field(name, *, stored=True, indexed=True)` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
 | `add_datetime_field(name, *, stored=True, indexed=True)` | UTC datetime field. |
-| `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=200, embedder=None)` | HNSW approximate nearest-neighbor vector field. |
+| `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=200, quantizer=None, subvector_count=None, rerank_storage=None, embedder=None)` | HNSW approximate nearest-neighbor vector field. |
 | `add_flat_field(name, dimension, *, distance="cosine", embedder=None)` | Flat (brute-force) vector field. |
 | `add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1, embedder=None)` | IVF approximate nearest-neighbor vector field. |
+
+**Vector quantization & rerank storage** (HNSW fields):
+
+- `quantizer` — `"scalar_8bit"` (default, 4× compression) or `"product_quantization"` for higher compression. Product quantization requires `subvector_count` (must divide `dimension`).
+- `rerank_storage` — set to `"f32"` to write a full-precision `*.hnsw.f32` sidecar enabling exact Stage-2 rerank; omit to keep the int8-only segment.
 
 ### Other methods
 
