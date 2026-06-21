@@ -654,3 +654,268 @@ fn hnsw_searcher_honours_per_query_and_schema_ef_search() -> Result<()> {
 
     Ok(())
 }
+
+/// A [`StorageInput`] that counts every byte read from its inner stream, used to
+/// measure the I/O an Eager `.hnsw` load performs (Issue #789).
+#[derive(Debug)]
+struct CountingInput {
+    inner: Box<dyn crate::storage::StorageInput>,
+    counter: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl std::io::Read for CountingInput {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.counter
+            .fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+        Ok(n)
+    }
+}
+
+impl std::io::Seek for CountingInput {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+impl crate::storage::StorageInput for CountingInput {
+    fn size(&self) -> Result<u64> {
+        self.inner.size()
+    }
+
+    fn clone_input(&self) -> Result<Box<dyn crate::storage::StorageInput>> {
+        Ok(Box::new(CountingInput {
+            inner: self.inner.clone_input()?,
+            counter: Arc::clone(&self.counter),
+        }))
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.inner.close()
+    }
+
+    // Force every read through `read` (and thus the counter); the HNSW reader
+    // never takes the zero-copy `as_slice` path, so this matches production.
+    fn as_slice(&self) -> Option<&[u8]> {
+        None
+    }
+}
+
+/// A [`Storage`] that wraps another and counts the bytes read from files whose
+/// name ends in `.hnsw`, so a test can assert how many passes a load makes over
+/// the segment (Issue #789). All other operations delegate unchanged.
+#[derive(Debug)]
+struct CountingStorage {
+    inner: Arc<dyn crate::storage::Storage>,
+    hnsw_bytes_read: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl crate::storage::Storage for CountingStorage {
+    fn open_input(&self, name: &str) -> Result<Box<dyn crate::storage::StorageInput>> {
+        let input = self.inner.open_input(name)?;
+        if name.ends_with(".hnsw") {
+            Ok(Box::new(CountingInput {
+                inner: input,
+                counter: Arc::clone(&self.hnsw_bytes_read),
+            }))
+        } else {
+            Ok(input)
+        }
+    }
+
+    fn create_output(&self, name: &str) -> Result<Box<dyn crate::storage::StorageOutput>> {
+        self.inner.create_output(name)
+    }
+
+    fn create_output_append(&self, name: &str) -> Result<Box<dyn crate::storage::StorageOutput>> {
+        self.inner.create_output_append(name)
+    }
+
+    fn file_exists(&self, name: &str) -> bool {
+        self.inner.file_exists(name)
+    }
+
+    fn delete_file(&self, name: &str) -> Result<()> {
+        self.inner.delete_file(name)
+    }
+
+    fn list_files(&self) -> Result<Vec<String>> {
+        self.inner.list_files()
+    }
+
+    fn file_size(&self, name: &str) -> Result<u64> {
+        self.inner.file_size(name)
+    }
+
+    fn metadata(&self, name: &str) -> Result<crate::storage::FileMetadata> {
+        self.inner.metadata(name)
+    }
+
+    fn rename_file(&self, old_name: &str, new_name: &str) -> Result<()> {
+        self.inner.rename_file(old_name, new_name)
+    }
+
+    fn create_temp_output(
+        &self,
+        prefix: &str,
+    ) -> Result<(String, Box<dyn crate::storage::StorageOutput>)> {
+        self.inner.create_temp_output(prefix)
+    }
+
+    fn sync(&self) -> Result<()> {
+        self.inner.sync()
+    }
+
+    fn close(&mut self) -> Result<()> {
+        // The inner storage is shared behind an `Arc`; nothing to close here.
+        Ok(())
+    }
+}
+
+/// Eager load must read the `.hnsw` segment exactly once (Issue #789).
+///
+/// The integrity CRC is folded into the single structural pass, so the only
+/// `.hnsw` reads are the 8-byte footer probe plus one sequential pass over the
+/// content — `file_size` bytes total. Before #789, verification ran as a
+/// separate full pass, so a footer-carrying segment was read ~twice
+/// (`2 * content_len + 8`). Asserting the exact single-pass byte count is a
+/// deterministic regression guard against the double-read returning.
+#[test]
+fn eager_load_reads_hnsw_segment_exactly_once() -> Result<()> {
+    let inner = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let config = HnswIndexConfig {
+        dimension: 4,
+        m: 8,
+        ef_construction: 32,
+        distance_metric: DistanceMetric::Cosine,
+        normalize_vectors: false,
+        ..Default::default()
+    };
+    // A handful of vectors makes the segment comfortably larger than the
+    // 8-byte footer, so a single pass and a double pass differ unambiguously.
+    let vectors: Vec<(u64, String, Vector)> = (0..32)
+        .map(|i| {
+            let f = i as f32;
+            (
+                i,
+                "f".to_string(),
+                Vector::new(vec![f, f + 1.0, f + 2.0, f + 3.0]),
+            )
+        })
+        .collect();
+    let mut writer = HnswIndexWriter::with_storage(
+        config,
+        VectorIndexWriterConfig::default(),
+        "count_seg",
+        Arc::clone(&inner),
+    )?;
+    writer.add_vectors(vectors)?;
+    writer.finalize()?;
+    writer.write()?;
+
+    let file_size = inner.file_size("count_seg.hnsw")?;
+    assert!(
+        file_size > crate::vector::index::hnsw::HNSW_FOOTER_LEN,
+        "segment must carry a footer for this measurement"
+    );
+
+    let hnsw_bytes_read = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let counting: Arc<dyn crate::storage::Storage> = Arc::new(CountingStorage {
+        inner: Arc::clone(&inner),
+        hnsw_bytes_read: Arc::clone(&hnsw_bytes_read),
+    });
+    // Default loading_mode() is Eager, which is the folded path under test.
+    assert!(matches!(
+        counting.loading_mode(),
+        crate::storage::LoadingMode::Eager
+    ));
+
+    let _reader = HnswIndexReader::load(counting, "count_seg", DistanceMetric::Cosine)?;
+
+    let read = hnsw_bytes_read.load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        read, file_size,
+        "Eager load must read the segment exactly once (footer probe + one \
+         folded pass = file_size); a double-read would be ~2x content_len"
+    );
+    Ok(())
+}
+
+/// A corrupted pq-fastscan Eager segment must be rejected by the folded CRC
+/// (Issue #789).
+///
+/// The default-quantizer corruption tests only cover Scalar8Bit. The
+/// `OwnedPqFastScan` branch of [`HnswIndexReader::load`] also reads purely
+/// sequentially (`read_pq_fastscan_record` is `Read`-bound, never seeks), so
+/// `is_sequential()` stays true and the CRC is folded into the single Eager
+/// pass on this branch too. This test locks in that a byte flip on a
+/// non-Scalar8Bit segment is still detected.
+#[cfg(feature = "pq-fastscan")]
+#[test]
+fn eager_load_rejects_corrupted_pq_fastscan_segment() -> Result<()> {
+    use crate::vector::core::quantization::QuantizationMethod;
+    use std::io::{Read, Write};
+
+    let dim = 8usize;
+    let sub = 4usize;
+    let n = 64u64;
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let config = HnswIndexConfig {
+        dimension: dim,
+        m: 16,
+        ef_construction: 100,
+        distance_metric: DistanceMetric::Euclidean,
+        quantization_method: QuantizationMethod::ProductQuantizationFastScan {
+            subvector_count: sub,
+        },
+        ..Default::default()
+    };
+    // Deterministic, broadly-spread vectors so the K=16 codebook trainer
+    // converges to non-degenerate centroids (mirrors pq_fastscan_search_test).
+    let vectors: Vec<(u64, String, Vector)> = (0..n)
+        .map(|i| {
+            let s = i as usize;
+            let v: Vec<f32> = (0..dim)
+                .map(|d| ((s * 31 + d * 17) % 257) as f32 - 128.0)
+                .collect();
+            (i, "f".to_string(), Vector::new(v))
+        })
+        .collect();
+    let mut writer = HnswIndexWriter::with_storage(
+        config,
+        VectorIndexWriterConfig::default(),
+        "pqfs_seg",
+        Arc::clone(&storage),
+    )?;
+    writer.add_vectors(vectors)?;
+    writer.finalize()?;
+    writer.write()?;
+
+    // Sanity: the clean segment loads.
+    HnswIndexReader::load(Arc::clone(&storage), "pqfs_seg", DistanceMetric::Euclidean)?;
+
+    // Flip a byte deep in the content (well before the 8-byte footer); the
+    // folded CRC must reject the segment on the next load.
+    let mut bytes = {
+        let mut input = storage.open_input("pqfs_seg.hnsw")?;
+        let mut buf = Vec::new();
+        input
+            .read_to_end(&mut buf)
+            .expect("read pq-fastscan segment");
+        buf
+    };
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0xff;
+    {
+        let mut out = storage.create_output("pqfs_seg.hnsw")?;
+        out.write_all(&bytes).expect("rewrite corrupted segment");
+        out.close()?;
+    }
+
+    let result = HnswIndexReader::load(Arc::clone(&storage), "pqfs_seg", DistanceMetric::Euclidean);
+    assert!(
+        result.is_err(),
+        "a corrupted pq-fastscan .hnsw must be rejected on Eager load, got Ok"
+    );
+    Ok(())
+}

@@ -90,27 +90,33 @@ impl HnswIndexReader {
         ))
     }
 
-    /// Verify the CRC-32 footer of a `.hnsw` segment if present (Issue #786).
+    /// Probe the trailing CRC-32 footer of a `.hnsw` segment (Issue #786) and
+    /// return the stored checksum if a valid footer is present, leaving `input`
+    /// rewound to offset 0.
     ///
-    /// New segments end with `[magic u32][crc-32 u32]` over all preceding
-    /// bytes (written via [`crate::storage::checksum::CrcWriter`]). The footer
-    /// is detected by the magic at `size - 8`; legacy segments without it skip
-    /// verification (back-compat). On a present footer the CRC over the
-    /// content is recomputed and compared. The input is left rewound to the
-    /// start so the caller's structural parse runs unchanged.
+    /// Unlike a full verification this reads **only** the 8-byte footer, not the
+    /// whole file: the Eager load path folds the actual CRC computation into its
+    /// single structural pass (Issue #789), so it just needs the expected value
+    /// up front. New segments end with `[magic u32][crc-32 u32]` over all
+    /// preceding bytes (written via [`crate::storage::checksum::CrcWriter`]); the
+    /// footer is detected by the magic at `size - 8`. Legacy footer-less
+    /// segments return `None` (verification is skipped, back-compat).
     ///
     /// # Arguments
     ///
     /// * `input` - The opened `.hnsw` segment stream.
+    /// * `size` - The total file size (footer included).
     ///
-    /// # Errors
+    /// # Returns
     ///
-    /// Returns [`LaurusError::index`] if a footer is present but its checksum
-    /// does not match the content (corruption), or on I/O failure.
-    fn verify_checksum_footer(input: &mut dyn crate::storage::StorageInput) -> Result<()> {
-        use std::io::{Read, SeekFrom};
+    /// `Some(stored_crc)` when a footer is present, otherwise `None`.
+    fn read_footer_crc(
+        input: &mut dyn crate::storage::StorageInput,
+        size: u64,
+    ) -> Result<Option<u32>> {
+        use std::io::SeekFrom;
 
-        let size = input.size()?;
+        let mut stored = None;
         if size >= crate::vector::index::hnsw::HNSW_FOOTER_LEN {
             let content_len = size - crate::vector::index::hnsw::HNSW_FOOTER_LEN;
             input.seek(SeekFrom::Start(content_len))?;
@@ -118,25 +124,56 @@ impl HnswIndexReader {
             input.read_exact(&mut footer)?;
             let magic = u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]]);
             if magic == crate::vector::index::hnsw::HNSW_FOOTER_MAGIC {
-                let stored = u32::from_le_bytes([footer[4], footer[5], footer[6], footer[7]]);
-                input.seek(SeekFrom::Start(0))?;
-                let mut crc_in = crate::storage::checksum::CrcReader::new(&mut *input);
-                let mut remaining = content_len;
-                let mut buf = [0u8; 64 * 1024];
-                while remaining > 0 {
-                    let want = remaining.min(buf.len() as u64) as usize;
-                    crc_in.read_exact(&mut buf[..want])?;
-                    remaining -= want as u64;
-                }
-                let computed = crc_in.checksum();
-                if computed != stored {
-                    return Err(LaurusError::index(
-                        "HNSW segment checksum mismatch: .hnsw file is corrupted",
-                    ));
-                }
+                stored = Some(u32::from_le_bytes([
+                    footer[4], footer[5], footer[6], footer[7],
+                ]));
             }
         }
         input.seek(SeekFrom::Start(0))?;
+        Ok(stored)
+    }
+
+    /// Verify that the `content_len` bytes from offset 0 hash to `expected`, in
+    /// an independent sequential pass, then rewind to 0.
+    ///
+    /// Used on the Lazy / OnDemand load path (Issue #789): that parse seeks over
+    /// the vector payload and so cannot fold the checksum into its structural
+    /// pass the way the Eager path does, so the integrity guarantee from
+    /// Issue #786 is preserved here with a dedicated pass.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - The opened `.hnsw` segment stream.
+    /// * `content_len` - Number of payload bytes preceding the footer.
+    /// * `expected` - The footer's stored CRC-32.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LaurusError::index`] if the recomputed CRC does not match
+    /// `expected` (corruption), or on I/O failure.
+    fn verify_footer_content(
+        input: &mut dyn crate::storage::StorageInput,
+        content_len: u64,
+        expected: u32,
+    ) -> Result<()> {
+        use std::io::{Read, SeekFrom};
+
+        input.seek(SeekFrom::Start(0))?;
+        let mut crc_in = crate::storage::checksum::CrcReader::new(&mut *input);
+        let mut remaining = content_len;
+        let mut buf = [0u8; 64 * 1024];
+        while remaining > 0 {
+            let want = remaining.min(buf.len() as u64) as usize;
+            crc_in.read_exact(&mut buf[..want])?;
+            remaining -= want as u64;
+        }
+        let computed = crc_in.checksum();
+        input.seek(SeekFrom::Start(0))?;
+        if computed != expected {
+            return Err(LaurusError::index(
+                "HNSW segment checksum mismatch: .hnsw file is corrupted",
+            ));
+        }
         Ok(())
     }
 
@@ -165,18 +202,37 @@ impl HnswIndexReader {
 
         // Open the index file
         let file_name = format!("{}.hnsw", path);
-        let mut input = storage.open_input(&file_name)?;
-
-        // Verify the CRC-32 footer if present (Issue #786), then rewind. This
-        // is an independent sequential pass that does not touch the structural
-        // parse below (which stops at the end of the graph and never reads the
-        // trailing footer), so it works for every loading mode and leaves
-        // legacy footer-less segments untouched.
-        Self::verify_checksum_footer(&mut *input)?;
+        let mut raw_input = storage.open_input(&file_name)?;
 
         // Ground truth for bounding allocations sized from the (for legacy
         // footer-less segments, unverified) header counts below (Issue #806).
-        let file_size = input.size()?;
+        let file_size = raw_input.size()?;
+
+        // Probe the CRC-32 footer (Issue #786) cheaply: read only the 8-byte
+        // footer to learn the expected checksum, not the whole file.
+        let stored_crc = Self::read_footer_crc(&mut *raw_input, file_size)?;
+        let content_len = match stored_crc {
+            Some(_) => file_size - crate::vector::index::hnsw::HNSW_FOOTER_LEN,
+            None => file_size,
+        };
+
+        // Fold the integrity check into the single Eager structural pass
+        // (Issue #789): that pass reads the whole content sequentially, so a CRC
+        // accumulated *during* it verifies the footer with no extra read. The
+        // Lazy / OnDemand parse seeks over the vector payload and so cannot
+        // fold; verify it up front with a dedicated pass instead (the #786
+        // behavior). Footer-less legacy segments have nothing to verify.
+        let eager = matches!(storage.loading_mode(), crate::storage::LoadingMode::Eager);
+        let fold = eager && stored_crc.is_some();
+        if !fold && let Some(expected) = stored_crc {
+            Self::verify_footer_content(&mut *raw_input, content_len, expected)?;
+        }
+
+        // Wrap the input so the structural parse below accumulates the content
+        // CRC as it reads (only when `fold`; otherwise this is a thin
+        // position-tracking pass-through). The wrapper implements `StorageInput`,
+        // so the parse — including the Lazy seeks — is unchanged.
+        let mut input = crate::storage::checksum::ChecksumTrackingInput::new(raw_input, fold);
 
         // Read metadata (vector count stored as u64)
         let mut num_vectors_buf = [0u8; 8];
@@ -526,6 +582,32 @@ impl HnswIndexReader {
                 )
             }
         };
+
+        // Finalize the folded CRC verification (Issue #789). On the Eager path
+        // the structural parse above read every content byte sequentially
+        // through `input`, accumulating the CRC as it went; `absorb_to` covers
+        // any residual bytes (the parse normally stops exactly at the footer, so
+        // this is a no-op), then the running CRC is compared against the
+        // footer's stored value. This replaces the separate full read that
+        // Issue #786 used, so corruption is still detected with no extra I/O.
+        // `is_sequential()` guards the running CRC: the Eager parse never seeks
+        // backward, but if that ever changes the wrapper degrades gracefully to
+        // a dedicated verification pass so the #786 guarantee can never silently
+        // weaken. `fold` is only set in Eager mode with a footer present, so
+        // Lazy/OnDemand and footer-less legacy segments skip this block (they
+        // were verified up front or have nothing to verify).
+        if fold && let Some(expected) = stored_crc {
+            if input.is_sequential() {
+                input.absorb_to(content_len).map_err(LaurusError::Io)?;
+                if input.checksum() != expected {
+                    return Err(LaurusError::index(
+                        "HNSW segment checksum mismatch: .hnsw file is corrupted",
+                    ));
+                }
+            } else {
+                Self::verify_footer_content(&mut input, content_len, expected)?;
+            }
+        }
 
         // Build zero-allocation prefetch lookup. For OwnedQuantized
         // (Step 6+), the address points to the int8 record start

@@ -165,6 +165,41 @@ async fn corrupted_hnsw_segment_is_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn corrupted_hnsw_segment_is_rejected_lazy_mmap() {
+    use laurus::storage::file::FileStorageConfig;
+    use laurus::storage::{StorageConfig, StorageFactory};
+
+    // FileStorage with mmap selects the Lazy load path, which cannot fold the
+    // CRC into its (seeking) structural parse and so verifies the footer up
+    // front in a dedicated pass (Issue #789). This guards that path the same
+    // way the Eager test guards the folded path.
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = FileStorageConfig::new(dir.path());
+    assert!(
+        cfg.use_mmap,
+        "this test must exercise the Lazy (mmap) load path"
+    );
+    let storage = StorageFactory::create(StorageConfig::File(cfg)).unwrap();
+    build_committed(storage.clone()).await;
+
+    // Flip a byte deep in the segment content (well before the 8-byte footer).
+    let mut bytes = read_all(&storage, HNSW_FILE);
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0xff;
+    write_all(&storage, HNSW_FILE, &bytes);
+
+    // Open a fresh storage instance so no cached mmap masks the on-disk change.
+    let storage2 =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(dir.path()))).unwrap();
+    let store = laurus::vector::VectorStore::new(storage2, make_config()).unwrap();
+    let result = store.search(request());
+    assert!(
+        result.is_err(),
+        "a corrupted .hnsw must be rejected on the Lazy load path, got {result:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn corrupted_metadata_is_rejected() {
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     build_committed(storage.clone()).await;
@@ -200,5 +235,39 @@ async fn legacy_hnsw_without_footer_still_loads() {
         results.hits.len(),
         10,
         "a footer-less (legacy) segment must still load and search"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn legacy_hnsw_without_footer_still_loads_lazy_mmap() {
+    use laurus::storage::file::FileStorageConfig;
+    use laurus::storage::{StorageConfig, StorageFactory};
+
+    // Mirror of the Eager legacy test for the Lazy (mmap) / OnDemand path: a
+    // footer-less segment yields stored_crc = None, so verification is skipped
+    // up front and the segment loads unchanged (Issue #789 back-compat).
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = FileStorageConfig::new(dir.path());
+    assert!(
+        cfg.use_mmap,
+        "this test must exercise the Lazy (mmap) load path"
+    );
+    let storage = StorageFactory::create(StorageConfig::File(cfg)).unwrap();
+    build_committed(storage.clone()).await;
+
+    // Drop the 8-byte CRC footer to mimic a pre-#786 segment with no checksum.
+    let bytes = read_all(&storage, HNSW_FILE);
+    let legacy = &bytes[..bytes.len() - 8];
+    write_all(&storage, HNSW_FILE, legacy);
+
+    // Open a fresh storage instance so no cached mmap masks the on-disk change.
+    let storage2 =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(dir.path()))).unwrap();
+    let store = laurus::vector::VectorStore::new(storage2, make_config()).unwrap();
+    let results = store.search(request()).unwrap();
+    assert_eq!(
+        results.hits.len(),
+        10,
+        "a footer-less (legacy) segment must still load and search on the Lazy path"
     );
 }
