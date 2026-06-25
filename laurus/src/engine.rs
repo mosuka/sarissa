@@ -38,6 +38,74 @@ pub struct EngineStats {
     pub vector_fields: HashMap<String, crate::vector::index::field::VectorFieldStats>,
 }
 
+/// Background timer that periodically forces the WAL durable under a
+/// [`WalSyncPolicy::Group`] configured with a `max_interval` (Issue #542, Phase
+/// 4b).
+///
+/// Runs a dedicated thread that calls [`DocumentLog::flush_wal`] every interval
+/// — a no-op when nothing is pending, thanks to the dirty guard — so a trailing
+/// partial batch under a low ingest rate is not left unsynced indefinitely (the
+/// record/byte thresholds may never be reached). Dropping the timer wakes the
+/// thread immediately and joins it. Native targets only; on `wasm32` (no
+/// background threads) the timer is never constructed and the interval is
+/// ignored.
+#[cfg(not(target_arch = "wasm32"))]
+struct WalFlushTimer {
+    /// Sending on (or dropping) this channel signals the thread to stop.
+    stop: std::sync::mpsc::Sender<()>,
+    /// Join handle for the flush thread, taken and joined on drop.
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WalFlushTimer {
+    /// Spawn the flush thread for `doc_log`, forcing the WAL durable every
+    /// `interval`.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_log` - The document log whose WAL is flushed on each tick.
+    /// * `interval` - How often to flush the WAL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the OS thread cannot be spawned.
+    fn spawn(doc_log: Arc<DocumentLog>, interval: std::time::Duration) -> Result<Self> {
+        use std::sync::mpsc::RecvTimeoutError;
+
+        let (stop, rx) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::Builder::new()
+            .name("laurus-wal-flush".to_string())
+            .spawn(move || {
+                // Keep ticking while each wait ends in a timeout: flush the WAL
+                // (a no-op when there is nothing pending). Any other outcome — a
+                // stop signal (`Ok`) or the sender being dropped (`Disconnected`)
+                // — ends the loop and the thread.
+                while let Err(RecvTimeoutError::Timeout) = rx.recv_timeout(interval) {
+                    if let Err(e) = doc_log.flush_wal() {
+                        log::warn!("WAL flush timer: failed to flush WAL: {e}");
+                    }
+                }
+            })?;
+        Ok(Self {
+            stop,
+            handle: Some(handle),
+        })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for WalFlushTimer {
+    fn drop(&mut self) {
+        // Wake the thread immediately so it exits without waiting out the
+        // current interval, then join it.
+        let _ = self.stop.send(());
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 /// Unified Engine that manages both Lexical and Vector indices.
 ///
 /// This engine acts as a facade, coordinating document ingestion and search
@@ -64,6 +132,12 @@ pub struct Engine {
     /// built in [`Self::unified_query_parser`], so both the direct
     /// `Payloads` path and the DSL path hit the same cache.
     embedding_cache: Option<Arc<EmbeddingCache>>,
+    /// Background WAL flush timer for a [`WalSyncPolicy::Group`] configured with
+    /// a `max_interval`. `None` when no interval is set. Held only to keep the
+    /// timer thread alive for the engine's lifetime; dropping the engine stops
+    /// it. Absent on `wasm32` (no background threads — the interval is ignored).
+    #[cfg(not(target_arch = "wasm32"))]
+    _wal_flush_timer: Option<WalFlushTimer>,
 }
 
 use crate::engine::search::{FusionAlgorithm, SearchResult};
@@ -1826,6 +1900,14 @@ impl EngineBuilder {
             .and_then(NonZeroUsize::new)
             .map(|cap| Arc::new(EmbeddingCache::new(cap)));
 
+        // Start the periodic WAL flush timer when the policy is a group commit
+        // with an interval. Native only; on wasm32 the interval is ignored.
+        #[cfg(not(target_arch = "wasm32"))]
+        let wal_flush_timer = match self.wal_sync_policy.flush_interval() {
+            Some(interval) => Some(WalFlushTimer::spawn(Arc::clone(&log), interval)?),
+            None => None,
+        };
+
         let engine = Engine {
             schema: RwLock::new(self.schema),
             lexical,
@@ -1833,6 +1915,8 @@ impl EngineBuilder {
             log,
             runtime_analyzers: self.runtime_analyzers,
             embedding_cache,
+            #[cfg(not(target_arch = "wasm32"))]
+            _wal_flush_timer: wal_flush_timer,
         };
 
         engine.recover().await?;
@@ -2123,6 +2207,94 @@ mod tests {
             .build();
         let results = engine.search(request).await.unwrap();
         assert_eq!(results.len(), 1, "group-committed doc must be searchable");
+    }
+
+    /// The background flush timer forces a dirty (deferred) WAL writer durable
+    /// within its interval, then stops cleanly on drop (Issue #542, Phase 4b).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn wal_flush_timer_flushes_dirty_writer_and_stops_on_drop() {
+        use std::time::Duration;
+
+        let wal_storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let doc_storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        // Thresholds high enough that a single append never trips them, so only
+        // the timer can flush the writer.
+        let log = Arc::new(
+            DocumentLog::with_sync_policy(
+                wal_storage,
+                "engine.wal",
+                doc_storage,
+                WalSyncPolicy::Group {
+                    max_records: usize::MAX,
+                    max_bytes: usize::MAX,
+                    max_interval: Some(Duration::from_millis(20)),
+                },
+            )
+            .unwrap(),
+        );
+
+        log.append("doc1", Document::builder().add_text("title", "x").build())
+            .unwrap();
+        assert!(
+            log.wal_is_dirty(),
+            "the deferred append leaves the writer dirty"
+        );
+
+        let timer = WalFlushTimer::spawn(Arc::clone(&log), Duration::from_millis(20)).unwrap();
+
+        // Poll up to ~2s for the timer to flush the writer.
+        let mut flushed = false;
+        for _ in 0..200 {
+            if !log.wal_is_dirty() {
+                flushed = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            flushed,
+            "the timer should flush the dirty writer within its interval"
+        );
+
+        // Dropping the timer must return promptly (clean shutdown / thread join).
+        drop(timer);
+    }
+
+    /// An engine built with a group-commit policy that includes a flush interval
+    /// starts and stops its background timer without hanging on drop (Issue
+    /// #542, Phase 4b).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn test_group_commit_with_interval_builds_and_drops_cleanly() {
+        use std::time::Duration;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "title",
+                schema::FieldOption::Text(crate::lexical::core::field::TextOption::default()),
+            )
+            .build();
+
+        let engine = Engine::builder(storage, schema)
+            .wal_sync_policy(WalSyncPolicy::group_with_interval(Duration::from_millis(
+                20,
+            )))
+            .build()
+            .await
+            .unwrap();
+
+        engine
+            .add_document(
+                "doc1",
+                Document::builder().add_text("title", "timer").build(),
+            )
+            .await
+            .unwrap();
+
+        // Dropping the engine must stop the background timer without hanging.
+        drop(engine);
     }
 
     #[tokio::test]

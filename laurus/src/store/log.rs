@@ -45,6 +45,7 @@
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
@@ -108,6 +109,17 @@ pub enum WalSyncPolicy {
         /// Flush once this many appended bytes have accumulated since the last
         /// sync.
         max_bytes: usize,
+        /// Optional periodic flush interval. When `Some`, the engine runs a
+        /// background timer that forces the WAL durable at least this often, so
+        /// a trailing partial batch under a low ingest rate is not left unsynced
+        /// indefinitely (the record/byte thresholds may never be reached).
+        /// `None` disables the timer, leaving durability to the thresholds,
+        /// [`commit`](crate::Engine::commit), and
+        /// [`flush_wal`](crate::Engine::flush_wal).
+        ///
+        /// Honored on native targets only; on `wasm32` (no background threads)
+        /// the interval is ignored.
+        max_interval: Option<Duration>,
     },
 }
 
@@ -128,11 +140,41 @@ pub const DEFAULT_GROUP_MAX_BYTES: usize = 1024 * 1024;
 impl WalSyncPolicy {
     /// A [`WalSyncPolicy::Group`] policy using the default batch thresholds
     /// ([`DEFAULT_GROUP_MAX_RECORDS`] records / [`DEFAULT_GROUP_MAX_BYTES`]
-    /// bytes, whichever is reached first).
+    /// bytes, whichever is reached first) and **no** periodic flush timer.
     pub fn group_with_defaults() -> Self {
         Self::Group {
             max_records: DEFAULT_GROUP_MAX_RECORDS,
             max_bytes: DEFAULT_GROUP_MAX_BYTES,
+            max_interval: None,
+        }
+    }
+
+    /// A [`WalSyncPolicy::Group`] policy using the default batch thresholds plus
+    /// a periodic flush `interval`, so a trailing partial batch is forced
+    /// durable at least every `interval` even under a low ingest rate.
+    ///
+    /// The timer is honored on native targets only; on `wasm32` the interval is
+    /// ignored (see [`WalSyncPolicy::Group::max_interval`]).
+    ///
+    /// # Arguments
+    ///
+    /// * `interval` - Maximum time a partial batch may remain unsynced.
+    pub fn group_with_interval(interval: Duration) -> Self {
+        Self::Group {
+            max_records: DEFAULT_GROUP_MAX_RECORDS,
+            max_bytes: DEFAULT_GROUP_MAX_BYTES,
+            max_interval: Some(interval),
+        }
+    }
+
+    /// The periodic flush interval for this policy, if any.
+    ///
+    /// Returns the `max_interval` of a [`WalSyncPolicy::Group`], or `None` for
+    /// [`WalSyncPolicy::PerRecord`] or a `Group` without a timer.
+    pub fn flush_interval(&self) -> Option<Duration> {
+        match self {
+            Self::Group { max_interval, .. } => *max_interval,
+            Self::PerRecord => None,
         }
     }
 }
@@ -488,6 +530,8 @@ impl DocumentLog {
             WalSyncPolicy::Group {
                 max_records,
                 max_bytes,
+                // The timer is driven by the engine, not the per-append path.
+                max_interval: _,
             } => state.as_ref().is_some_and(|s| {
                 s.unsynced_records >= max_records.max(1) || s.unsynced_bytes >= max_bytes.max(1)
             }),
@@ -510,6 +554,19 @@ impl DocumentLog {
     pub fn flush_wal(&self) -> Result<()> {
         let mut writer_guard = self.wal_writer.lock();
         Self::flush_writer(&mut writer_guard)
+    }
+
+    /// Test-only: whether the open writer has appended-but-unsynced bytes.
+    ///
+    /// Lets tests observe that a deferred (group-commit) batch has been flushed
+    /// — e.g. by the background flush timer — without exposing the writer
+    /// internals outside the crate.
+    #[cfg(test)]
+    pub(crate) fn wal_is_dirty(&self) -> bool {
+        self.wal_writer
+            .lock()
+            .as_ref()
+            .is_some_and(|state| state.dirty)
     }
 
     /// Read all records from the WAL.
@@ -767,7 +824,8 @@ mod tests {
         DocumentLog::new(wal_storage, "test.log", doc_storage).unwrap()
     }
 
-    /// A log under [`WalSyncPolicy::Group`] with the given batch thresholds.
+    /// A log under [`WalSyncPolicy::Group`] with the given batch thresholds and
+    /// no flush timer.
     fn make_group_log(max_records: usize, max_bytes: usize) -> DocumentLog {
         DocumentLog::with_sync_policy(
             make_storage(),
@@ -776,6 +834,7 @@ mod tests {
             WalSyncPolicy::Group {
                 max_records,
                 max_bytes,
+                max_interval: None,
             },
         )
         .unwrap()
@@ -986,7 +1045,7 @@ mod tests {
     }
 
     /// The default policy is per-record, and `group_with_defaults` uses the
-    /// documented batch thresholds (Issue #542, Phase 4).
+    /// documented batch thresholds with no flush timer (Issue #542, Phase 4).
     #[test]
     fn sync_policy_defaults() {
         assert_eq!(WalSyncPolicy::default(), WalSyncPolicy::PerRecord);
@@ -995,7 +1054,13 @@ mod tests {
             WalSyncPolicy::Group {
                 max_records: DEFAULT_GROUP_MAX_RECORDS,
                 max_bytes: DEFAULT_GROUP_MAX_BYTES,
+                max_interval: None,
             }
+        );
+        assert_eq!(WalSyncPolicy::group_with_defaults().flush_interval(), None);
+        assert_eq!(
+            WalSyncPolicy::group_with_interval(Duration::from_millis(50)).flush_interval(),
+            Some(Duration::from_millis(50))
         );
     }
 
