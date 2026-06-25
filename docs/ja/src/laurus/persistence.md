@@ -107,15 +107,28 @@ engine.add_document("doc-3", doc3).await?;
 
 ```rust
 use laurus::WalSyncPolicy;
+use std::time::Duration;
 
 let engine = Engine::builder(storage, schema)
-    // 既定閾値（1024 件 / 1 MiB）でのグループコミット。
+    // 既定閾値（1024 件 / 1 MiB）でのグループコミット（timer なし）。
     .wal_sync_policy(WalSyncPolicy::group_with_defaults())
-    // ...または任意のバッチサイズを指定:
-    // .wal_sync_policy(WalSyncPolicy::Group { max_records: 4096, max_bytes: 4 * 1024 * 1024 })
+    // ...既定閾値 + 500 ms ごとの定期 flush:
+    // .wal_sync_policy(WalSyncPolicy::group_with_interval(Duration::from_millis(500)))
+    // ...または任意のバッチサイズと timer を指定:
+    // .wal_sync_policy(WalSyncPolicy::Group {
+    //     max_records: 4096,
+    //     max_bytes: 4 * 1024 * 1024,
+    //     max_interval: Some(Duration::from_secs(1)),
+    // })
     .build()
     .await?;
 ```
+
+### 定期 flush タイマー
+
+`Group.max_interval` はサイズベースの閾値に時間上限を加えます。設定すると、エンジンは少なくともその間隔ごとに WAL を強制 durable 化する background timer を起動します。これにより、**低い取り込みレート**（record/byte 閾値に到達しない場合）でも末尾の partial batch が無期限に未 sync のまま残ることを防ぎます。保留中のものが無ければ flush は no-op なので、アイドルな timer のコストはゼロです。`None` で timer を無効化します。
+
+> **WASM 注意:** timer は native ターゲットのみで有効です。`wasm32` には background thread が無いため `max_interval` は無視され、耐久性は record/byte 閾値・`commit()`・`flush_wal()` に依存します。
 
 ### 耐久性の保証
 

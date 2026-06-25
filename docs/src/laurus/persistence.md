@@ -107,15 +107,28 @@ Under `Group`, the fsync is deferred and issued once **either** `max_records` re
 
 ```rust
 use laurus::WalSyncPolicy;
+use std::time::Duration;
 
 let engine = Engine::builder(storage, schema)
-    // Group commit with the default thresholds (1024 records / 1 MiB).
+    // Group commit with the default thresholds (1024 records / 1 MiB), no timer.
     .wal_sync_policy(WalSyncPolicy::group_with_defaults())
-    // ...or choose your own batch size:
-    // .wal_sync_policy(WalSyncPolicy::Group { max_records: 4096, max_bytes: 4 * 1024 * 1024 })
+    // ...the default thresholds plus a periodic flush every 500 ms:
+    // .wal_sync_policy(WalSyncPolicy::group_with_interval(Duration::from_millis(500)))
+    // ...or choose your own batch size and timer:
+    // .wal_sync_policy(WalSyncPolicy::Group {
+    //     max_records: 4096,
+    //     max_bytes: 4 * 1024 * 1024,
+    //     max_interval: Some(Duration::from_secs(1)),
+    // })
     .build()
     .await?;
 ```
+
+### Periodic Flush Timer
+
+`Group.max_interval` adds a time bound to the size-based thresholds. When set, the engine runs a background timer that forces the WAL durable at least that often, so a trailing partial batch under a **low ingest rate** — where the record/byte thresholds may never be reached — is not left unsynced indefinitely. The flush is a no-op when nothing is pending, so an idle timer costs nothing. `None` disables the timer.
+
+> **WASM note:** the timer is honored on native targets only. On `wasm32` there are no background threads, so `max_interval` is ignored; durability there relies on the record/byte thresholds, `commit()`, and `flush_wal()`.
 
 ### Durability Guarantees
 
