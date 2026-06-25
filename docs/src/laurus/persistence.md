@@ -94,6 +94,43 @@ engine.add_document("doc-3", doc3).await?;
 
 > **Tip:** Commits are relatively expensive because they flush segments to storage. For bulk indexing, batch many documents before calling `commit()`.
 
+## WAL Durability Policy
+
+By default, each `add`/`delete` fsyncs the WAL before returning, so a successful write can never be lost to a crash. When ingesting at high volume, that per-write fsync becomes the throughput bottleneck. The `WalSyncPolicy` lets you trade per-write durability for throughput:
+
+| Policy | Durability | Throughput | Analogue |
+| :--- | :--- | :--- | :--- |
+| `PerRecord` (default) | Every successful write is durable | Bounded by one fsync per write | SQLite `synchronous = FULL` |
+| `Group { max_records, max_bytes }` | A crash may lose up to the last unsynced batch | fsync amortized over a batch | SQLite `synchronous = NORMAL` |
+
+Under `Group`, the fsync is deferred and issued once **either** `max_records` records **or** `max_bytes` bytes have accumulated since the last sync (whichever comes first). Configure it on the builder:
+
+```rust
+use laurus::WalSyncPolicy;
+
+let engine = Engine::builder(storage, schema)
+    // Group commit with the default thresholds (1024 records / 1 MiB).
+    .wal_sync_policy(WalSyncPolicy::group_with_defaults())
+    // ...or choose your own batch size:
+    // .wal_sync_policy(WalSyncPolicy::Group { max_records: 4096, max_bytes: 4 * 1024 * 1024 })
+    .build()
+    .await?;
+```
+
+### Durability Guarantees
+
+- **`commit()` is a hard barrier under both policies.** It forces the WAL durable before materializing any store, so the WAL is never less durable than the committed indexes. After a successful `commit()`, all data is durable regardless of policy.
+- **`flush_wal()` forces a flush on demand** without a full commit — the way to bound the crash-loss window under `Group` at an application-chosen point, analogous to a SQLite WAL checkpoint:
+
+  ```rust
+  engine.add_document("doc-1", doc1).await?;
+  engine.flush_wal()?; // the WAL is now durable, without committing segments
+  ```
+
+- **A torn trailing record is never resurrected.** Each record is CRC-32 framed; on recovery a record that fails its checksum (or is truncated) is dropped along with everything after it, so the recovered log is always a gap-free valid prefix — group commit only ever risks losing a *suffix* of recent writes, never corrupting earlier ones.
+
+> **Note:** `Group` is opt-in; the default `PerRecord` policy is unchanged, so existing code keeps its per-write durability with no changes.
+
 ## Storage Layout
 
 The engine uses `PrefixedStorage` to organize data:

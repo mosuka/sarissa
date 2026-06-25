@@ -22,7 +22,7 @@ use crate::lexical::store::LexicalStore;
 use crate::lexical::store::config::LexicalIndexConfig;
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
-use crate::store::log::{DocumentLog, LogEntry};
+use crate::store::log::{DocumentLog, LogEntry, WalSyncPolicy};
 use crate::vector::store::VectorStore;
 use crate::vector::store::config::VectorIndexConfig;
 
@@ -502,6 +502,23 @@ impl Engine {
         // After successful commit to all stores, truncate the log
         self.log.truncate()?;
         Ok(())
+    }
+
+    /// Force every appended-but-unsynced WAL record durable, without a full
+    /// [`commit`](Self::commit) (Issue #542).
+    ///
+    /// Under the default [`WalSyncPolicy::PerRecord`] this is a near-no-op: each
+    /// `add`/`delete` already fsyncs, so there is nothing pending. Under
+    /// [`WalSyncPolicy::Group`] appends defer their fsync, so this is the way to
+    /// bound the crash-loss window at an application-chosen point — analogous to
+    /// SQLite's manual WAL checkpoint — without paying the cost of materializing
+    /// the lexical/vector indexes that [`commit`](Self::commit) entails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing or fsyncing the open WAL writer fails.
+    pub fn flush_wal(&self) -> Result<()> {
+        self.log.flush_wal()
     }
 
     /// Get combined index statistics from both the lexical and vector stores.
@@ -1670,6 +1687,7 @@ pub struct EngineBuilder {
     embedder: Option<Arc<dyn Embedder>>,
     runtime_analyzers: HashMap<String, Arc<dyn Analyzer>>,
     embedding_cache_capacity: Option<usize>,
+    wal_sync_policy: WalSyncPolicy,
 }
 
 impl EngineBuilder {
@@ -1682,6 +1700,7 @@ impl EngineBuilder {
             embedder: None,
             runtime_analyzers: HashMap::new(),
             embedding_cache_capacity: None,
+            wal_sync_policy: WalSyncPolicy::default(),
         }
     }
 
@@ -1748,6 +1767,26 @@ impl EngineBuilder {
         self
     }
 
+    /// Set the WAL durability policy (Issue #542).
+    ///
+    /// Defaults to [`WalSyncPolicy::PerRecord`], where every `add`/`delete`
+    /// fsyncs the WAL before returning, so a successful write can never be lost
+    /// to a crash. Switch to [`WalSyncPolicy::Group`] to defer and batch the
+    /// fsync — much higher ingest throughput at the cost of losing up to the
+    /// last unsynced batch on a crash. [`Engine::commit`] is a hard durability
+    /// barrier under both policies, and [`Engine::flush_wal`] forces a flush on
+    /// demand.
+    ///
+    /// # Arguments
+    ///
+    /// * `policy` - The durability policy. Use
+    ///   [`WalSyncPolicy::group_with_defaults`] for group commit with the
+    ///   default batch thresholds.
+    pub fn wal_sync_policy(mut self, policy: WalSyncPolicy) -> Self {
+        self.wal_sync_policy = policy;
+        self
+    }
+
     /// Build the [`Engine`].
     ///
     /// Creates the lexical store, vector store, and document log (WAL),
@@ -1775,10 +1814,11 @@ impl EngineBuilder {
         let lexical = LexicalStore::new(lexical_storage, lexical_config)?;
         let vector = VectorStore::new(vector_storage, vector_config)?;
 
-        let log = Arc::new(DocumentLog::new(
+        let log = Arc::new(DocumentLog::with_sync_policy(
             self.storage,
             "engine.wal",
             document_storage,
+            self.wal_sync_policy,
         )?);
 
         let embedding_cache = self
@@ -2039,6 +2079,50 @@ mod tests {
             1,
             "Should find doc via dynamically added field"
         );
+    }
+
+    /// An engine built with [`WalSyncPolicy::Group`] plumbs the policy through to
+    /// the WAL, accepts [`Engine::flush_wal`] as an on-demand durability barrier,
+    /// and commits searchable results (Issue #542, Phase 4).
+    #[tokio::test]
+    async fn test_group_commit_policy_is_wired_and_searchable() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "title",
+                schema::FieldOption::Text(crate::lexical::core::field::TextOption::default()),
+            )
+            .build();
+
+        let engine = Engine::builder(storage, schema)
+            .wal_sync_policy(WalSyncPolicy::group_with_defaults())
+            .build()
+            .await
+            .unwrap();
+
+        engine
+            .add_document(
+                "doc1",
+                Document::builder()
+                    .add_text("title", "group commit")
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        // Under the group policy the append defers its fsync; an on-demand
+        // flush_wal (no full commit) must succeed as a durability barrier.
+        engine.flush_wal().unwrap();
+
+        engine.commit().await.unwrap();
+
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:group"))
+            .limit(10)
+            .build();
+        let results = engine.search(request).await.unwrap();
+        assert_eq!(results.len(), 1, "group-committed doc must be searchable");
     }
 
     #[tokio::test]

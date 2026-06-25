@@ -84,6 +84,59 @@ pub struct LogRecord {
     pub entry: LogEntry,
 }
 
+/// Durability policy governing when WAL appends are fsync'd.
+///
+/// This trades the durability of an individual `append` against ingest
+/// throughput; [`commit`](crate::Engine::commit) is a hard barrier under both
+/// policies (it always forces the WAL durable before materializing any store).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WalSyncPolicy {
+    /// Fsync after every record (the default). An `append` returns only once its
+    /// record is durable, so a successful add/put can never be lost to a crash.
+    PerRecord,
+    /// Defer the fsync and amortize it over a batch: flush when **either**
+    /// `max_records` records **or** `max_bytes` bytes have accumulated since the
+    /// last sync (whichever comes first), and unconditionally at
+    /// [`commit`](crate::Engine::commit). An `append` may return before its
+    /// record is durable, so a crash can lose up to the last unsynced batch —
+    /// comparable to SQLite's `synchronous = NORMAL`. A torn trailing record is
+    /// never resurrected: it is dropped on recovery via the CRC + prefix-stop
+    /// path, keeping the recovered log gap-free.
+    Group {
+        /// Flush once this many records have accumulated since the last sync.
+        max_records: usize,
+        /// Flush once this many appended bytes have accumulated since the last
+        /// sync.
+        max_bytes: usize,
+    },
+}
+
+impl Default for WalSyncPolicy {
+    /// The default is [`WalSyncPolicy::PerRecord`], preserving per-record
+    /// durability for callers that do not opt into group commit.
+    fn default() -> Self {
+        Self::PerRecord
+    }
+}
+
+/// Default batch size (record count) for [`WalSyncPolicy::Group`].
+pub const DEFAULT_GROUP_MAX_RECORDS: usize = 1024;
+
+/// Default batch size (bytes) for [`WalSyncPolicy::Group`]: 1 MiB.
+pub const DEFAULT_GROUP_MAX_BYTES: usize = 1024 * 1024;
+
+impl WalSyncPolicy {
+    /// A [`WalSyncPolicy::Group`] policy using the default batch thresholds
+    /// ([`DEFAULT_GROUP_MAX_RECORDS`] records / [`DEFAULT_GROUP_MAX_BYTES`]
+    /// bytes, whichever is reached first).
+    pub fn group_with_defaults() -> Self {
+        Self::Group {
+            max_records: DEFAULT_GROUP_MAX_RECORDS,
+            max_bytes: DEFAULT_GROUP_MAX_BYTES,
+        }
+    }
+}
+
 /// Magic bytes at the start of a v2 (CRC-framed) WAL file.
 const WAL_MAGIC: &[u8; 4] = b"LWAL";
 
@@ -120,6 +173,14 @@ struct WalWriterState {
     /// skip a redundant fsync at commit time when nothing is pending (true under
     /// the default per-record contract, where every append already synced).
     dirty: bool,
+    /// Number of records appended since the last successful `flush_and_sync()`.
+    /// Drives the [`WalSyncPolicy::Group`] record-count threshold; reset to 0
+    /// on flush.
+    unsynced_records: usize,
+    /// Number of bytes appended since the last successful `flush_and_sync()`
+    /// (framed length, including the CRC for v2). Drives the
+    /// [`WalSyncPolicy::Group`] byte threshold; reset to 0 on flush.
+    unsynced_bytes: usize,
 }
 
 /// Unified document log providing WAL, doc_id generation, and document storage.
@@ -143,6 +204,10 @@ pub struct DocumentLog {
     wal_writer: Mutex<Option<WalWriterState>>,
     next_seq: AtomicU64,
     doc_store: RwLock<UnifiedDocumentStore>,
+    /// Durability policy controlling when appends are fsync'd. Defaults to
+    /// [`WalSyncPolicy::PerRecord`]; [`WalSyncPolicy::Group`] defers the fsync to
+    /// amortize it over a batch.
+    sync_policy: WalSyncPolicy,
 }
 
 impl DocumentLog {
@@ -154,6 +219,10 @@ impl DocumentLog {
     /// replay the WAL and synchronize both the `next_doc_id` and `next_seq`
     /// counters with the persisted state. Failing to do so may cause
     /// duplicate document IDs.
+    ///
+    /// Equivalent to [`with_sync_policy`](Self::with_sync_policy) with the
+    /// default [`WalSyncPolicy::PerRecord`], where every append is fsync'd before
+    /// returning.
     ///
     /// # Arguments
     ///
@@ -169,6 +238,42 @@ impl DocumentLog {
         wal_path: &str,
         doc_store_storage: Arc<dyn Storage>,
     ) -> Result<Self> {
+        Self::with_sync_policy(
+            wal_storage,
+            wal_path,
+            doc_store_storage,
+            WalSyncPolicy::PerRecord,
+        )
+    }
+
+    /// Create a new document log with WAL and document storage under an explicit
+    /// [`WalSyncPolicy`].
+    ///
+    /// The internal `next_doc_id` counter starts at **1** and is **not**
+    /// automatically recovered from any existing WAL file or document store.
+    /// Callers must invoke [`read_all`](Self::read_all) after construction to
+    /// replay the WAL and synchronize both the `next_doc_id` and `next_seq`
+    /// counters with the persisted state. Failing to do so may cause
+    /// duplicate document IDs.
+    ///
+    /// # Arguments
+    ///
+    /// * `wal_storage` - Storage backend for the WAL file.
+    /// * `wal_path` - Path (relative to the storage root) of the WAL file.
+    /// * `doc_store_storage` - Storage backend for the document store.
+    /// * `sync_policy` - When to fsync WAL appends. [`WalSyncPolicy::PerRecord`]
+    ///   syncs each append; [`WalSyncPolicy::Group`] defers and batches the
+    ///   fsync.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the document store cannot be opened.
+    pub fn with_sync_policy(
+        wal_storage: Arc<dyn Storage>,
+        wal_path: &str,
+        doc_store_storage: Arc<dyn Storage>,
+        sync_policy: WalSyncPolicy,
+    ) -> Result<Self> {
         let doc_store = UnifiedDocumentStore::open(doc_store_storage)?;
         Ok(Self {
             wal_storage,
@@ -177,6 +282,7 @@ impl DocumentLog {
             wal_writer: Mutex::new(None),
             next_seq: AtomicU64::new(1),
             doc_store: RwLock::new(doc_store),
+            sync_policy,
         })
     }
 
@@ -225,6 +331,8 @@ impl DocumentLog {
             out,
             format,
             dirty: false,
+            unsynced_records: 0,
+            unsynced_bytes: 0,
         });
         Ok(())
     }
@@ -233,8 +341,11 @@ impl DocumentLog {
 
     /// Append an upsert entry to the log.
     ///
-    /// Atomically assigns a new doc_id and sequence number, then writes
-    /// the entry to the log file with fsync.
+    /// Atomically assigns a new doc_id and sequence number, then writes the
+    /// entry to the log file. Whether the write is fsync'd before returning
+    /// depends on the configured [`WalSyncPolicy`]: always under
+    /// [`WalSyncPolicy::PerRecord`], or only when the batch threshold is reached
+    /// under [`WalSyncPolicy::Group`].
     ///
     /// Returns `(doc_id, seq_number)`.
     pub fn append(&self, external_id: &str, doc: Document) -> Result<(u64, SeqNumber)> {
@@ -255,12 +366,15 @@ impl DocumentLog {
             },
         };
 
-        Self::write_record(&mut writer_guard, &record)?;
+        Self::write_record(&mut writer_guard, &record, self.sync_policy)?;
 
         Ok((doc_id, seq))
     }
 
     /// Append a delete entry to the log.
+    ///
+    /// As with [`append`](Self::append), the fsync timing follows the configured
+    /// [`WalSyncPolicy`].
     ///
     /// Returns the assigned sequence number.
     pub fn append_delete(&self, doc_id: u64, external_id: &str) -> Result<SeqNumber> {
@@ -277,7 +391,7 @@ impl DocumentLog {
             },
         };
 
-        Self::write_record(&mut writer_guard, &record)?;
+        Self::write_record(&mut writer_guard, &record, self.sync_policy)?;
 
         Ok(seq)
     }
@@ -301,16 +415,24 @@ impl DocumentLog {
         let len_bytes = len.to_le_bytes();
 
         if let Some(state) = state.as_mut() {
+            // Frame size: length prefix (+ CRC for v2) + payload.
+            let mut frame_len = len_bytes.len() + bytes.len();
             state.out.write_all(&len_bytes)?;
             if state.format == WalFormat::V2 {
                 let mut hasher = crc32fast::Hasher::new();
                 hasher.update(&len_bytes);
                 hasher.update(&bytes);
-                state.out.write_all(&hasher.finalize().to_le_bytes())?;
+                let crc = hasher.finalize().to_le_bytes();
+                state.out.write_all(&crc)?;
+                frame_len += crc.len();
             }
             state.out.write_all(&bytes)?;
-            // Bytes are now buffered/written but not yet fsynced.
+            // Bytes are now buffered/written but not yet fsynced. Track how much
+            // is pending so a Group policy can flush once its batch threshold is
+            // reached.
             state.dirty = true;
+            state.unsynced_records += 1;
+            state.unsynced_bytes = state.unsynced_bytes.saturating_add(frame_len);
         }
 
         Ok(())
@@ -329,16 +451,47 @@ impl DocumentLog {
         {
             state.out.flush_and_sync()?;
             state.dirty = false;
+            state.unsynced_records = 0;
+            state.unsynced_bytes = 0;
         }
         Ok(())
     }
 
-    /// Write a single record to the WAL file and fsync it before returning
-    /// (per-record durability — the default contract).
-    fn write_record(state: &mut Option<WalWriterState>, record: &LogRecord) -> Result<()> {
+    /// Append a record and fsync according to `policy`.
+    ///
+    /// Under [`WalSyncPolicy::PerRecord`] the record is always fsync'd before
+    /// returning (per-record durability — the default contract). Under
+    /// [`WalSyncPolicy::Group`] the fsync is deferred and only happens once the
+    /// batch reaches `max_records` records or `max_bytes` bytes since the last
+    /// sync, amortizing one fsync over the batch; [`Self::flush_wal`] (called at
+    /// commit) forces any trailing partial batch durable.
+    fn write_record(
+        state: &mut Option<WalWriterState>,
+        record: &LogRecord,
+        policy: WalSyncPolicy,
+    ) -> Result<()> {
         Self::append_record_bytes(state, record)?;
-        Self::flush_writer(state)?;
+        if Self::batch_ready(state, policy) {
+            Self::flush_writer(state)?;
+        }
         Ok(())
+    }
+
+    /// Whether the pending (unsynced) batch should be flushed now under `policy`.
+    ///
+    /// Always `true` for [`WalSyncPolicy::PerRecord`]; for
+    /// [`WalSyncPolicy::Group`] it is `true` once either batch threshold is met.
+    /// `false` when no writer is open.
+    fn batch_ready(state: &Option<WalWriterState>, policy: WalSyncPolicy) -> bool {
+        match policy {
+            WalSyncPolicy::PerRecord => true,
+            WalSyncPolicy::Group {
+                max_records,
+                max_bytes,
+            } => state.as_ref().is_some_and(|s| {
+                s.unsynced_records >= max_records.max(1) || s.unsynced_bytes >= max_bytes.max(1)
+            }),
+        }
     }
 
     /// Force every appended-but-unsynced WAL record durable.
@@ -614,6 +767,27 @@ mod tests {
         DocumentLog::new(wal_storage, "test.log", doc_storage).unwrap()
     }
 
+    /// A log under [`WalSyncPolicy::Group`] with the given batch thresholds.
+    fn make_group_log(max_records: usize, max_bytes: usize) -> DocumentLog {
+        DocumentLog::with_sync_policy(
+            make_storage(),
+            "test.log",
+            make_storage(),
+            WalSyncPolicy::Group {
+                max_records,
+                max_bytes,
+            },
+        )
+        .unwrap()
+    }
+
+    /// A small upsert document for tests that only care about append counting.
+    fn small_doc() -> Document {
+        Document::builder()
+            .add_field("body", DataValue::Text("x".to_string()))
+            .build()
+    }
+
     #[test]
     fn test_append_and_read() {
         let log = make_log();
@@ -809,6 +983,98 @@ mod tests {
         let records = log.read_all().unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].seq, 1);
+    }
+
+    /// The default policy is per-record, and `group_with_defaults` uses the
+    /// documented batch thresholds (Issue #542, Phase 4).
+    #[test]
+    fn sync_policy_defaults() {
+        assert_eq!(WalSyncPolicy::default(), WalSyncPolicy::PerRecord);
+        assert_eq!(
+            WalSyncPolicy::group_with_defaults(),
+            WalSyncPolicy::Group {
+                max_records: DEFAULT_GROUP_MAX_RECORDS,
+                max_bytes: DEFAULT_GROUP_MAX_BYTES,
+            }
+        );
+    }
+
+    /// Under `Group`, appends below the record threshold buffer their bytes
+    /// without fsyncing; the append that reaches the threshold flushes the whole
+    /// batch and resets the counters, and every record round-trips (Issue #542,
+    /// Phase 4).
+    #[test]
+    fn group_policy_defers_then_flushes_at_record_threshold() {
+        // Flush every 3 records; effectively no byte limit.
+        let log = make_group_log(3, usize::MAX);
+
+        log.append("e1", small_doc()).unwrap();
+        log.append("e2", small_doc()).unwrap();
+        {
+            let guard = log.wal_writer.lock();
+            let state = guard.as_ref().unwrap();
+            assert!(state.dirty, "appends under the threshold stay unsynced");
+            assert_eq!(state.unsynced_records, 2);
+            assert!(state.unsynced_bytes > 0);
+        }
+
+        log.append("e3", small_doc()).unwrap();
+        {
+            let guard = log.wal_writer.lock();
+            let state = guard.as_ref().unwrap();
+            assert!(
+                !state.dirty,
+                "reaching the record threshold flushes the batch"
+            );
+            assert_eq!(state.unsynced_records, 0);
+            assert_eq!(state.unsynced_bytes, 0);
+        }
+
+        assert_eq!(log.read_all().unwrap().len(), 3);
+    }
+
+    /// Under `Group`, a single record that exceeds the byte threshold flushes
+    /// immediately even when the record-count limit is far from reached (Issue
+    /// #542, Phase 4).
+    #[test]
+    fn group_policy_flushes_at_byte_threshold() {
+        // 1-byte budget so any record trips the byte threshold; no count limit.
+        let log = make_group_log(usize::MAX, 1);
+
+        log.append("e1", small_doc()).unwrap();
+        let guard = log.wal_writer.lock();
+        let state = guard.as_ref().unwrap();
+        assert!(
+            !state.dirty,
+            "a record past the byte threshold flushes immediately"
+        );
+        assert_eq!(state.unsynced_bytes, 0);
+    }
+
+    /// Under `Group`, a trailing partial batch (below both thresholds) is left
+    /// unsynced until `flush_wal` — the commit-time barrier — makes it durable
+    /// and round-trips it (Issue #542, Phase 4).
+    #[test]
+    fn group_partial_batch_is_made_durable_by_flush_wal() {
+        let log = make_group_log(1000, usize::MAX);
+
+        log.append("e1", small_doc()).unwrap();
+        log.append("e2", small_doc()).unwrap();
+        assert!(
+            log.wal_writer.lock().as_ref().unwrap().dirty,
+            "a partial batch stays unsynced"
+        );
+
+        log.flush_wal().unwrap();
+        {
+            let guard = log.wal_writer.lock();
+            let state = guard.as_ref().unwrap();
+            assert!(!state.dirty, "flush_wal forces the partial batch durable");
+            assert_eq!(state.unsynced_records, 0);
+            assert_eq!(state.unsynced_bytes, 0);
+        }
+
+        assert_eq!(log.read_all().unwrap().len(), 2);
     }
 
     #[test]
