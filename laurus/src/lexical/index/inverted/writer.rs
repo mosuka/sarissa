@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
@@ -118,6 +118,16 @@ pub struct InvertedIndexWriter {
     /// Buffered analyzed documents with their assigned doc IDs.
     buffered_docs: Vec<(u64, AnalyzedDocument)>,
 
+    /// Membership index of the doc IDs currently in [`Self::buffered_docs`].
+    ///
+    /// Kept perfectly in sync with `buffered_docs` (every push inserts, every
+    /// clear empties it) so [`Self::remove_pending_document`] can answer
+    /// "is this id buffered?" in O(1). Without it the upsert path scanned the
+    /// whole buffer on every call — `O(N)` per upsert, `O(N²)` over an
+    /// `add × N` ingest, since newly assigned doc IDs are never already
+    /// buffered yet still paid the full scan (Issue #570).
+    buffered_doc_ids: AHashSet<u64>,
+
     /// DocValues writer for the current segment.
     doc_values_writer: DocValuesWriter,
 
@@ -197,6 +207,7 @@ impl InvertedIndexWriter {
             config,
             inverted_index: TermPostingIndex::new(),
             buffered_docs: Vec::new(),
+            buffered_doc_ids: AHashSet::new(),
             doc_values_writer,
             next_doc_id,
             current_segment,
@@ -268,6 +279,7 @@ impl InvertedIndexWriter {
 
         // Buffer the document with its assigned ID
         self.buffered_docs.push((doc_id, analyzed_doc));
+        self.buffered_doc_ids.insert(doc_id);
         self.stats.docs_added += 1;
 
         // Check if we need to flush
@@ -661,6 +673,7 @@ impl InvertedIndexWriter {
 
         // Clear buffers
         self.buffered_docs.clear();
+        self.buffered_doc_ids.clear();
         self.inverted_index = TermPostingIndex::new();
 
         // Reset DocValuesWriter for next segment
@@ -729,6 +742,7 @@ impl InvertedIndexWriter {
         }
         let paths = self.write_segment_files(segment_name)?;
         self.buffered_docs.clear();
+        self.buffered_doc_ids.clear();
         self.inverted_index = TermPostingIndex::new();
         self.stats.segments_created += 1;
         Ok(paths)
@@ -1279,6 +1293,7 @@ impl InvertedIndexWriter {
 
         // Clear all buffers
         self.buffered_docs.clear();
+        self.buffered_doc_ids.clear();
         self.inverted_index = TermPostingIndex::new();
 
         Ok(())
@@ -1319,35 +1334,29 @@ impl InvertedIndexWriter {
 
     /// Remove a pending document with the given ID from in-memory buffers and rebuild indices.
     fn remove_pending_document(&mut self, doc_id: u64) -> Result<()> {
-        // Fast path: nothing buffered
+        // Fast path: nothing buffered.
         if self.buffered_docs.is_empty() {
             return Ok(());
         }
 
-        // Retain only docs with different IDs
-        let mut changed = false;
-        self.buffered_docs.retain(|(id, _)| {
-            let keep = *id != doc_id;
-            if !keep {
-                changed = true;
-            }
-            keep
-        });
-
-        if !changed {
+        // O(1) membership probe. Newly assigned doc IDs (the common `add`
+        // case) are never already buffered, so this returns early and skips
+        // the full-buffer scan + index rebuild below — turning the per-upsert
+        // cost from O(N) into O(1) and the `add × N` ingest from O(N²) into
+        // O(N) (Issue #570). `remove` also drops the id, keeping the set in
+        // sync with the `retain` that follows.
+        if !self.buffered_doc_ids.remove(&doc_id) {
             return Ok(());
         }
 
-        // Rebuild in-memory inverted index and DocValues from the remaining buffered docs
+        // The id was buffered: drop every occurrence from the buffer and
+        // rebuild the in-memory inverted index / DocValues from what remains.
+        self.buffered_docs.retain(|(id, _)| *id != doc_id);
         self.rebuild_in_memory_index()?;
 
-        if changed {
-            // Decrement docs_added for the removed document
-            // Note: remove_pending_document logic in upsert implies removing 1 old version
-            // But if we just removed it from buffer, we un-did the add.
-            if self.stats.docs_added > 0 {
-                self.stats.docs_added -= 1;
-            }
+        // Decrement docs_added for the removed (un-done) document.
+        if self.stats.docs_added > 0 {
+            self.stats.docs_added -= 1;
         }
         Ok(())
     }
