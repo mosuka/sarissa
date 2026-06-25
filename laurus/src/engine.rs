@@ -477,16 +477,25 @@ impl Engine {
 
     /// Commit changes to both stores and truncate the WAL.
     ///
-    /// Persists all pending changes in the lexical store, vector store, and
-    /// document store (in that order), then truncates the WAL. After a
-    /// successful commit, the WAL is empty and all data is durable in the
-    /// underlying storage.
+    /// First forces the WAL durable (a hard barrier, so the WAL is never less
+    /// durable than the indexes about to be committed), then persists all
+    /// pending changes in the lexical store, vector store, and document store
+    /// (in that order), and finally truncates the WAL. After a successful
+    /// commit, the WAL is empty and all data is durable in the underlying
+    /// storage.
     ///
     /// # Errors
     ///
-    /// Returns an error if committing the lexical store, vector store,
-    /// document store, or truncating the WAL fails.
+    /// Returns an error if flushing the WAL, committing the lexical store,
+    /// vector store, document store, or truncating the WAL fails.
     pub async fn commit(&self) -> Result<()> {
+        // Hard durability barrier: force the WAL durable before any store
+        // materializes its state, so the WAL is never less durable than the
+        // committed lexical/vector indexes. A near-no-op under the per-record
+        // default (each append already synced, so the dirty guard skips the
+        // fsync); the load-bearing step once group commit defers per-append
+        // fsync (#542 Phase 3).
+        self.log.flush_wal()?;
         self.lexical.commit()?;
         self.vector.commit().await?;
         self.log.commit_documents()?;
