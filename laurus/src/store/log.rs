@@ -176,12 +176,13 @@ impl DocumentLog {
 
     /// Open or create the WAL file for appending, detecting its framing.
     ///
-    /// A fresh or truncated (empty) file is initialized as [`WalFormat::V2`] by
-    /// writing the 5-byte header; an existing file keeps whatever framing it
-    /// already has (v2 if it starts with [`WAL_MAGIC`], else legacy) so the two
-    /// are never mixed within one file.
-    fn ensure_writer(&self) -> Result<()> {
-        let mut writer_guard = self.wal_writer.lock();
+    /// Operates on an already-held writer guard so a caller can ensure the
+    /// writer and append within a single critical section. A fresh or truncated
+    /// (empty) file is initialized as [`WalFormat::V2`] by writing the 5-byte
+    /// header; an existing file keeps whatever framing it already has (v2 if it
+    /// starts with [`WAL_MAGIC`], else legacy) so the two are never mixed within
+    /// one file.
+    fn ensure_writer(&self, writer_guard: &mut Option<WalWriterState>) -> Result<()> {
         if writer_guard.is_some() {
             return Ok(());
         }
@@ -227,9 +228,10 @@ impl DocumentLog {
     ///
     /// Returns `(doc_id, seq_number)`.
     pub fn append(&self, external_id: &str, doc: Document) -> Result<(u64, SeqNumber)> {
-        self.ensure_writer()?;
-
+        // Single critical section: ensure the writer, allocate ids, and write
+        // under one lock so the on-disk record order matches id/seq allocation.
         let mut writer_guard = self.wal_writer.lock();
+        self.ensure_writer(&mut writer_guard)?;
 
         let doc_id = self.next_doc_id.fetch_add(1, Ordering::SeqCst);
         let seq = self.next_seq.fetch_add(1, Ordering::SeqCst);
@@ -252,9 +254,8 @@ impl DocumentLog {
     ///
     /// Returns the assigned sequence number.
     pub fn append_delete(&self, doc_id: u64, external_id: &str) -> Result<SeqNumber> {
-        self.ensure_writer()?;
-
         let mut writer_guard = self.wal_writer.lock();
+        self.ensure_writer(&mut writer_guard)?;
 
         let seq = self.next_seq.fetch_add(1, Ordering::SeqCst);
 
@@ -271,12 +272,15 @@ impl DocumentLog {
         Ok(seq)
     }
 
-    /// Write a single record to the WAL file, framed per the writer's format.
+    /// Encode and append a record's framed bytes to the WAL buffer **without**
+    /// fsyncing.
     ///
     /// v2 writers emit `[u32 len][u32 crc32][payload]` (CRC over `len ||
-    /// payload`); legacy writers emit `[u32 len][payload]`. The record is
-    /// fsync'd before returning.
-    fn write_record(state: &mut Option<WalWriterState>, record: &LogRecord) -> Result<()> {
+    /// payload`); legacy writers emit `[u32 len][payload]`. Durability is the
+    /// caller's responsibility via [`Self::flush_writer`] — this split lets a
+    /// future group-commit path amortize one fsync over many appended records
+    /// (#542). A no-op if no writer is open.
+    fn append_record_bytes(state: &mut Option<WalWriterState>, record: &LogRecord) -> Result<()> {
         let bytes = serde_json::to_vec(record)?;
         let len: u32 = bytes.len().try_into().map_err(|_| {
             crate::error::LaurusError::InvalidOperation(format!(
@@ -295,9 +299,25 @@ impl DocumentLog {
                 state.out.write_all(&hasher.finalize().to_le_bytes())?;
             }
             state.out.write_all(&bytes)?;
-            state.out.flush_and_sync()?;
         }
 
+        Ok(())
+    }
+
+    /// Flush and fsync the open WAL writer, making every appended-but-unsynced
+    /// record durable. A no-op if no writer is open.
+    fn flush_writer(state: &mut Option<WalWriterState>) -> Result<()> {
+        if let Some(state) = state.as_mut() {
+            state.out.flush_and_sync()?;
+        }
+        Ok(())
+    }
+
+    /// Write a single record to the WAL file and fsync it before returning
+    /// (per-record durability — the default contract).
+    fn write_record(state: &mut Option<WalWriterState>, record: &LogRecord) -> Result<()> {
+        Self::append_record_bytes(state, record)?;
+        Self::flush_writer(state)?;
         Ok(())
     }
 
@@ -443,7 +463,14 @@ impl DocumentLog {
     pub fn truncate(&self) -> Result<()> {
         {
             let mut writer_guard = self.wal_writer.lock();
-            *writer_guard = None;
+            // Flush + close the open handle before discarding it. Harmless today
+            // (every record is self-synced in `write_record`), but required once
+            // fsync is deferred: dropping the handle without flushing would lose
+            // any appended-but-unsynced bytes (#542 Phase 2).
+            if let Some(mut state) = writer_guard.take() {
+                state.out.flush_and_sync()?;
+                state.out.close()?;
+            }
         }
 
         let mut writer = self.wal_storage.create_output(&self.wal_path)?;
@@ -614,6 +641,54 @@ mod tests {
         let (doc_id, seq) = log.append("ext_2", doc2).unwrap();
         assert_eq!(doc_id, 2);
         assert_eq!(seq, 2);
+    }
+
+    /// After a truncate the WAL is recreated as a fresh v2 file: the discarded
+    /// handle is flushed and closed, the file is reset to empty, and the next
+    /// append re-stamps the magic+version header so records round-trip gap-free.
+    /// Guards the Phase 2 truncate seam, which now flushes and closes the open
+    /// writer before dropping it rather than discarding the handle outright
+    /// (Issue #542, Phase 2).
+    #[test]
+    fn truncate_recreates_fresh_v2_wal() {
+        use std::io::Read as _;
+
+        let wal_storage = make_storage();
+        let doc_storage = make_storage();
+        let log = DocumentLog::new(wal_storage.clone(), "test.log", doc_storage).unwrap();
+
+        let doc = Document::builder()
+            .add_field("body", DataValue::Text("hello".to_string()))
+            .build();
+        log.append("ext_1", doc.clone()).unwrap();
+        log.append("ext_2", doc.clone()).unwrap();
+
+        log.truncate().unwrap();
+
+        // Truncate resets the file to empty (the v2 header is re-stamped lazily
+        // on the next append), so recovery finds nothing.
+        assert_eq!(
+            wal_storage.open_input("test.log").unwrap().size().unwrap(),
+            0,
+            "truncate leaves an empty WAL file"
+        );
+        assert!(log.read_all().unwrap().is_empty());
+
+        // The next append re-initializes the file in v2 framing.
+        log.append("ext_3", doc).unwrap();
+        let mut header = [0u8; WAL_HEADER_LEN as usize];
+        wal_storage
+            .open_input("test.log")
+            .unwrap()
+            .read_exact(&mut header)
+            .unwrap();
+        assert_eq!(&header[0..4], WAL_MAGIC);
+        assert_eq!(header[4], WAL_VERSION);
+
+        // The post-truncate record round-trips and the sequence stays gap-free.
+        let records = log.read_all().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].seq, 3);
     }
 
     #[test]
