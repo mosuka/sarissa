@@ -22,6 +22,15 @@
 //! The WAL log file stores records in a simple binary format:
 //! `[u32: length][json: LogRecord]` repeated for each entry.
 //! Each entry is followed by `flush_and_sync()` for durability.
+//!
+//! ## Recovery
+//!
+//! [`DocumentLog::read_all`] replays the file and stops at the first record it
+//! cannot read in full — a short length prefix, a short body, or a body that
+//! fails to deserialize. Such a torn trailing record (e.g. from a crash
+//! mid-append) is dropped along with everything after it, and the valid prefix
+//! is recovered so the engine can still open. Recovery never skips a bad record
+//! to continue, which keeps the recovered sequence gap-free and consistent.
 
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -245,7 +254,26 @@ impl DocumentLog {
             reader.read_exact(&mut buffer)?;
             position += len;
 
-            let record: LogRecord = serde_json::from_slice(&buffer)?;
+            // A trailing record with an intact length prefix but a corrupt or
+            // partially written body indicates a torn write (e.g. a crash
+            // mid-append). Stop at the last valid record and recover the durable
+            // prefix instead of aborting recovery — this mirrors the short-read
+            // breaks above and lets the engine open. Recovery stops at the FIRST
+            // bad record (never skip-and-continue), so a later intact-looking
+            // record can never resurrect an op whose predecessors were dropped.
+            // (Issue #542, Phase 0.)
+            let record: LogRecord = match serde_json::from_slice(&buffer) {
+                Ok(record) => record,
+                Err(e) => {
+                    ::log::warn!(
+                        "WAL recovery: dropping corrupt trailing record at byte offset {} \
+                         ({len} body bytes): {e}; recovered {} valid record(s) before it",
+                        position - len,
+                        records.len()
+                    );
+                    break;
+                }
+            };
             if record.seq > max_seq {
                 max_seq = record.seq;
             }
@@ -484,6 +512,85 @@ mod tests {
             assert_eq!(doc_id, 3);
             assert_eq!(seq, 3);
         }
+    }
+
+    /// Write one framed record manually, returning its `[u32 len][body]` bytes.
+    fn frame(body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + body.len());
+        out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// A trailing record with an intact length prefix but a corrupt body (e.g. a
+    /// crash mid-append) must NOT abort recovery: `read_all` recovers the valid
+    /// prefix, drops the torn record, and resyncs counters from the prefix only
+    /// (Issue #542, Phase 0).
+    #[test]
+    fn read_all_recovers_prefix_when_trailing_record_body_is_corrupt() {
+        use std::io::Write as _;
+
+        let wal_storage = make_storage();
+        let doc_storage = make_storage();
+
+        // One valid record followed by a frame whose length prefix is intact but
+        // whose body is not valid JSON.
+        let valid = LogRecord {
+            seq: 1,
+            entry: LogEntry::Upsert {
+                doc_id: 1,
+                external_id: "ext_1".to_string(),
+                document: Document::builder()
+                    .add_field("body", DataValue::Text("hello".to_string()))
+                    .build(),
+            },
+        };
+        {
+            let mut out = wal_storage.create_output("test.log").unwrap();
+            out.write_all(&frame(&serde_json::to_vec(&valid).unwrap()))
+                .unwrap();
+            out.write_all(&frame(b"this is not valid json")).unwrap();
+            out.flush_and_sync().unwrap();
+            out.close().unwrap();
+        }
+
+        let log = DocumentLog::new(wal_storage, "test.log", doc_storage).unwrap();
+
+        // Recovery must succeed (not error) and yield only the valid prefix.
+        let records = log.read_all().unwrap();
+        assert_eq!(records.len(), 1, "only the valid prefix is recovered");
+        assert_eq!(records[0].seq, 1);
+
+        // Counters are resynced from the recovered prefix only: the next append
+        // continues monotonically without a gap.
+        assert_eq!(log.last_seq(), 1);
+        assert_eq!(log.next_doc_id(), 2);
+        let doc = Document::builder()
+            .add_field("body", DataValue::Text("next".to_string()))
+            .build();
+        let (doc_id, seq) = log.append("ext_2", doc).unwrap();
+        assert_eq!(doc_id, 2);
+        assert_eq!(seq, 2);
+    }
+
+    /// An empty/garbage-only WAL (no valid leading record) recovers nothing
+    /// rather than erroring.
+    #[test]
+    fn read_all_recovers_nothing_when_first_record_is_corrupt() {
+        use std::io::Write as _;
+
+        let wal_storage = make_storage();
+        let doc_storage = make_storage();
+        {
+            let mut out = wal_storage.create_output("test.log").unwrap();
+            out.write_all(&frame(b"garbage")).unwrap();
+            out.flush_and_sync().unwrap();
+            out.close().unwrap();
+        }
+
+        let log = DocumentLog::new(wal_storage, "test.log", doc_storage).unwrap();
+        let records = log.read_all().unwrap();
+        assert!(records.is_empty(), "no valid prefix to recover");
     }
 
     #[test]
