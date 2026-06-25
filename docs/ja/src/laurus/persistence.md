@@ -94,6 +94,43 @@ engine.add_document("doc-3", doc3).await?;
 
 > **ヒント:** コミットはセグメントをストレージにフラッシュするため比較的コストが高い操作です。バルクインデキシングでは、`commit()` を呼び出す前に多数のドキュメントをバッチ処理してください。
 
+## WAL 耐久性ポリシー
+
+既定では、各 `add`/`delete` は返る前に WAL を fsync するため、成功した書き込みがクラッシュで失われることはありません。大量に取り込む場合、この書き込みごとの fsync がスループットのボトルネックになります。`WalSyncPolicy` により、書き込みごとの耐久性とスループットをトレードオフできます。
+
+| ポリシー | 耐久性 | スループット | 相当 |
+| :--- | :--- | :--- | :--- |
+| `PerRecord`（既定） | 成功した書き込みは必ず durable | 書き込みごとに 1 回 fsync で律速 | SQLite `synchronous = FULL` |
+| `Group { max_records, max_bytes }` | クラッシュ時に未 sync の最終バッチまで失う可能性 | fsync をバッチで償却 | SQLite `synchronous = NORMAL` |
+
+`Group` では fsync が遅延され、前回の sync 以降に **`max_records` 件**または **`max_bytes` バイト**のいずれか（先に到達した方）が蓄積した時点で 1 回発行されます。ビルダーで設定します。
+
+```rust
+use laurus::WalSyncPolicy;
+
+let engine = Engine::builder(storage, schema)
+    // 既定閾値（1024 件 / 1 MiB）でのグループコミット。
+    .wal_sync_policy(WalSyncPolicy::group_with_defaults())
+    // ...または任意のバッチサイズを指定:
+    // .wal_sync_policy(WalSyncPolicy::Group { max_records: 4096, max_bytes: 4 * 1024 * 1024 })
+    .build()
+    .await?;
+```
+
+### 耐久性の保証
+
+- **`commit()` は両ポリシーで hard barrier です。** いずれのストアを materialize する前に WAL を強制的に durable 化するため、WAL がコミット済みインデックスより durability で劣ることはありません。`commit()` 成功後は、ポリシーに関わらず全データが durable です。
+- **`flush_wal()` は full commit なしでオンデマンドに flush します。** `Group` におけるクラッシュ時の損失窓を、アプリ任意の地点で抑えるための手段で、SQLite の WAL チェックポイントに相当します。
+
+  ```rust
+  engine.add_document("doc-1", doc1).await?;
+  engine.flush_wal()?; // セグメントをコミットせずに WAL を durable 化
+  ```
+
+- **途中で切れた末尾レコードは決して復活しません。** 各レコードは CRC-32 でフレーミングされ、リカバリ時にチェックサムに失敗した（または切り詰められた）レコードはそれ以降もろとも破棄されます。よって復旧後のログは常にギャップのない有効な接頭辞であり、グループコミットが失うのは直近書き込みの **末尾（suffix）** のみで、それ以前を破損させることはありません。
+
+> **注意:** `Group` はオプトインです。既定の `PerRecord` ポリシーは変更されないため、既存コードは何も変えずに書き込みごとの耐久性を維持します。
+
 ## ストレージレイアウト
 
 エンジンは `PrefixedStorage` を使用してデータを整理します。

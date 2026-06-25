@@ -19,6 +19,7 @@ The central coordinator for all indexing and search operations.
 | `engine.get_documents(id).await?` | Get all documents/chunks by external ID |
 | `engine.search(request).await?` | Execute a search request |
 | `engine.commit().await?` | Flush all pending changes to storage |
+| `engine.flush_wal()?` | Force the WAL durable without a full commit (see [WAL Durability Policy](persistence.md#wal-durability-policy)) |
 | `engine.add_field(name, field_option).await?` | Dynamically add a new field to the schema at runtime |
 | `engine.delete_field(name).await?` | Remove a field from the schema at runtime |
 | `engine.schema()` | Return the current `Schema` |
@@ -33,6 +34,7 @@ The central coordinator for all indexing and search operations.
 | `EngineBuilder::new(storage, schema)` | Create a builder with storage and schema |
 | `.analyzer(Arc<dyn Analyzer>)` | Set the text analyzer (default: `StandardAnalyzer`) |
 | `.embedder(Arc<dyn Embedder>)` | Set the vector embedder (optional) |
+| `.wal_sync_policy(policy)` | Set the WAL durability policy (default: `WalSyncPolicy::PerRecord`; see [WAL Durability Policy](persistence.md#wal-durability-policy)) |
 | `.build().await?` | Build the `Engine` |
 
 ## Schema

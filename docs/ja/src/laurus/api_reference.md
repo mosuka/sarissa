@@ -19,6 +19,7 @@ cargo doc --open
 | `engine.get_documents(id).await?` | 外部IDによるすべてのドキュメント/チャンクの取得 |
 | `engine.search(request).await?` | 検索リクエストの実行 |
 | `engine.commit().await?` | 保留中のすべての変更をストレージにフラッシュ |
+| `engine.flush_wal()?` | full commit なしで WAL を durable 化（[WAL 耐久性ポリシー](persistence.md#wal-耐久性ポリシー)参照） |
 | `engine.add_field(name, field_option).await?` | 稼働中のエンジンにフィールドを動的に追加 |
 | `engine.delete_field(name).await?` | 稼働中のエンジンからフィールドを動的に削除 |
 | `engine.schema()` | 現在のスキーマへの参照を取得 |
@@ -33,6 +34,7 @@ cargo doc --open
 | `EngineBuilder::new(storage, schema)` | StorageとSchemaでBuilderを作成 |
 | `.analyzer(Arc<dyn Analyzer>)` | テキストAnalyzerを設定（デフォルト: `StandardAnalyzer`） |
 | `.embedder(Arc<dyn Embedder>)` | ベクトルEmbedderを設定（オプション） |
+| `.wal_sync_policy(policy)` | WAL 耐久性ポリシーを設定（デフォルト: `WalSyncPolicy::PerRecord`。[WAL 耐久性ポリシー](persistence.md#wal-耐久性ポリシー)参照） |
 | `.build().await?` | `Engine` を構築 |
 
 ## Schema
