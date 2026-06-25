@@ -19,8 +19,18 @@
 //!
 //! ## File format
 //!
-//! The WAL log file stores records in a simple binary format:
-//! `[u32: length][json: LogRecord]` repeated for each entry.
+//! The WAL log file stores a sequence of length-prefixed records. There are two
+//! framings:
+//!
+//! - **v2** (current): a 5-byte file header (`b"LWAL"` magic + 1 version byte),
+//!   then `[u32 len][u32 crc32][json payload]` per entry. The CRC-32 is computed
+//!   over `len || payload` so both a corrupted length and a corrupted body are
+//!   detected.
+//! - **legacy** (pre-#542): no header, `[u32 len][json payload]` per entry, no
+//!   checksum. Still read for back-compat; a legacy file that survives an
+//!   upgrade keeps its framing until the next commit/truncate recreates it as
+//!   v2 (the two framings are never mixed within one file).
+//!
 //! Each entry is followed by `flush_and_sync()` for durability.
 //!
 //! ## Recovery
@@ -74,6 +84,38 @@ pub struct LogRecord {
     pub entry: LogEntry,
 }
 
+/// Magic bytes at the start of a v2 (CRC-framed) WAL file.
+const WAL_MAGIC: &[u8; 4] = b"LWAL";
+
+/// Current WAL file-format version written into the v2 header.
+const WAL_VERSION: u8 = 2;
+
+/// Length of the v2 file header: 4-byte [`WAL_MAGIC`] + 1-byte [`WAL_VERSION`].
+const WAL_HEADER_LEN: u64 = 5;
+
+/// On-disk framing of the WAL file currently being appended to / read.
+///
+/// A WAL file is written in a single, consistent format for its whole life: a
+/// fresh or truncated file is always [`WalFormat::V2`]; a pre-#542 file that
+/// survives an upgrade keeps [`WalFormat::Legacy`] until the next
+/// commit/truncate recreates it as v2. The two formats are never mixed within a
+/// file, so the reader can detect the format once from the file header.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum WalFormat {
+    /// Pre-#542 frames: `[u32 len][json payload]`, no per-record checksum.
+    Legacy,
+    /// v2 frames: `[u32 len][u32 crc32][payload]`, CRC over `len || payload`.
+    V2,
+}
+
+/// The open WAL append handle together with the framing of the file it points
+/// at, so [`DocumentLog::write_record`] knows whether to emit a CRC.
+#[derive(Debug)]
+struct WalWriterState {
+    out: Box<dyn crate::storage::StorageOutput>,
+    format: WalFormat,
+}
+
 /// Unified document log providing WAL, doc_id generation, and document storage.
 ///
 /// This component replaces the separate `WalManager` and `UnifiedDocumentStore`,
@@ -92,7 +134,7 @@ pub struct DocumentLog {
     wal_storage: Arc<dyn Storage>,
     wal_path: String,
     next_doc_id: AtomicU64,
-    wal_writer: Mutex<Option<Box<dyn crate::storage::StorageOutput>>>,
+    wal_writer: Mutex<Option<WalWriterState>>,
     next_seq: AtomicU64,
     doc_store: RwLock<UnifiedDocumentStore>,
 }
@@ -132,13 +174,47 @@ impl DocumentLog {
         })
     }
 
-    /// Open or create the WAL file for appending.
+    /// Open or create the WAL file for appending, detecting its framing.
+    ///
+    /// A fresh or truncated (empty) file is initialized as [`WalFormat::V2`] by
+    /// writing the 5-byte header; an existing file keeps whatever framing it
+    /// already has (v2 if it starts with [`WAL_MAGIC`], else legacy) so the two
+    /// are never mixed within one file.
     fn ensure_writer(&self) -> Result<()> {
         let mut writer_guard = self.wal_writer.lock();
-        if writer_guard.is_none() {
-            let writer = self.wal_storage.create_output_append(&self.wal_path)?;
-            *writer_guard = Some(writer);
+        if writer_guard.is_some() {
+            return Ok(());
         }
+
+        // Inspect the existing file (if any) before opening the append handle.
+        let existing_size = if self.wal_storage.file_exists(&self.wal_path) {
+            self.wal_storage.open_input(&self.wal_path)?.size()?
+        } else {
+            0
+        };
+        let is_existing_v2 = if existing_size >= WAL_HEADER_LEN {
+            let mut magic = [0u8; 4];
+            let mut input = self.wal_storage.open_input(&self.wal_path)?;
+            input.read_exact(&mut magic).is_ok() && &magic == WAL_MAGIC
+        } else {
+            false
+        };
+
+        let mut out = self.wal_storage.create_output_append(&self.wal_path)?;
+        let format = if existing_size == 0 {
+            // Fresh/truncated file: stamp the v2 header and use CRC framing.
+            out.write_all(WAL_MAGIC)?;
+            out.write_all(&[WAL_VERSION])?;
+            WalFormat::V2
+        } else if is_existing_v2 {
+            WalFormat::V2
+        } else {
+            // Pre-#542 file surviving an upgrade: keep appending legacy frames
+            // until the next commit/truncate recreates the file as v2.
+            WalFormat::Legacy
+        };
+
+        *writer_guard = Some(WalWriterState { out, format });
         Ok(())
     }
 
@@ -195,11 +271,12 @@ impl DocumentLog {
         Ok(seq)
     }
 
-    /// Write a single record to the WAL file.
-    fn write_record(
-        writer_guard: &mut Option<Box<dyn crate::storage::StorageOutput>>,
-        record: &LogRecord,
-    ) -> Result<()> {
+    /// Write a single record to the WAL file, framed per the writer's format.
+    ///
+    /// v2 writers emit `[u32 len][u32 crc32][payload]` (CRC over `len ||
+    /// payload`); legacy writers emit `[u32 len][payload]`. The record is
+    /// fsync'd before returning.
+    fn write_record(state: &mut Option<WalWriterState>, record: &LogRecord) -> Result<()> {
         let bytes = serde_json::to_vec(record)?;
         let len: u32 = bytes.len().try_into().map_err(|_| {
             crate::error::LaurusError::InvalidOperation(format!(
@@ -207,11 +284,18 @@ impl DocumentLog {
                 bytes.len()
             ))
         })?;
+        let len_bytes = len.to_le_bytes();
 
-        if let Some(writer) = writer_guard.as_mut() {
-            writer.write_all(&len.to_le_bytes())?;
-            writer.write_all(&bytes)?;
-            writer.flush_and_sync()?;
+        if let Some(state) = state.as_mut() {
+            state.out.write_all(&len_bytes)?;
+            if state.format == WalFormat::V2 {
+                let mut hasher = crc32fast::Hasher::new();
+                hasher.update(&len_bytes);
+                hasher.update(&bytes);
+                state.out.write_all(&hasher.finalize().to_le_bytes())?;
+            }
+            state.out.write_all(&bytes)?;
+            state.out.flush_and_sync()?;
         }
 
         Ok(())
@@ -230,21 +314,54 @@ impl DocumentLog {
             return Ok(Vec::new());
         }
 
+        let size = self.wal_storage.open_input(&self.wal_path)?.size()?;
+
+        // Detect the framing from the file header: a v2 file starts with the
+        // magic, a legacy file goes straight into `[u32 len]` records.
+        let is_v2 = if size >= WAL_HEADER_LEN {
+            let mut magic = [0u8; 4];
+            let mut probe = self.wal_storage.open_input(&self.wal_path)?;
+            probe.read_exact(&mut magic).is_ok() && &magic == WAL_MAGIC
+        } else {
+            false
+        };
+
         let mut reader = self.wal_storage.open_input(&self.wal_path)?;
         let mut records = Vec::new();
-        let size = reader.size()?;
-        let mut position = 0;
         let mut max_seq: u64 = 0;
         let mut max_doc_id: u64 = 0;
 
+        // Skip the v2 header (magic + version) so the loop starts at the first
+        // record in both formats.
+        let mut position = if is_v2 {
+            let mut header = [0u8; WAL_HEADER_LEN as usize];
+            reader.read_exact(&mut header)?;
+            WAL_HEADER_LEN
+        } else {
+            0
+        };
+
         while position < size {
-            let mut len_bytes = [0u8; 4];
             if position + 4 > size {
                 break;
             }
+            let mut len_bytes = [0u8; 4];
             reader.read_exact(&mut len_bytes)?;
             let len = u32::from_le_bytes(len_bytes) as u64;
             position += 4;
+
+            // v2 frames carry a CRC-32 (over `len || payload`) after the length.
+            let crc_expected = if is_v2 {
+                if position + 4 > size {
+                    break;
+                }
+                let mut crc_bytes = [0u8; 4];
+                reader.read_exact(&mut crc_bytes)?;
+                position += 4;
+                Some(u32::from_le_bytes(crc_bytes))
+            } else {
+                None
+            };
 
             if position + len > size {
                 break;
@@ -253,6 +370,24 @@ impl DocumentLog {
             let mut buffer = vec![0u8; len as usize];
             reader.read_exact(&mut buffer)?;
             position += len;
+
+            // Verify the CRC before trusting the body: a mismatch means a torn
+            // or bit-rotted record and is treated exactly like a short read —
+            // stop at the valid prefix (Issue #542, Phase 1).
+            if let Some(expected) = crc_expected {
+                let mut hasher = crc32fast::Hasher::new();
+                hasher.update(&len_bytes);
+                hasher.update(&buffer);
+                if hasher.finalize() != expected {
+                    ::log::warn!(
+                        "WAL recovery: CRC mismatch at byte offset {} ({len} body bytes); \
+                         recovered {} valid record(s) before it",
+                        position - len,
+                        records.len()
+                    );
+                    break;
+                }
+            }
 
             // A trailing record with an intact length prefix but a corrupt or
             // partially written body indicates a torn write (e.g. a crash
@@ -591,6 +726,139 @@ mod tests {
         let log = DocumentLog::new(wal_storage, "test.log", doc_storage).unwrap();
         let records = log.read_all().unwrap();
         assert!(records.is_empty(), "no valid prefix to recover");
+    }
+
+    /// A fresh WAL is written in v2 framing: the file starts with the magic +
+    /// version header and records round-trip through `read_all` with CRC
+    /// verification (Issue #542, Phase 1).
+    #[test]
+    fn wal_v2_fresh_file_has_header_and_round_trips() {
+        use std::io::Read as _;
+
+        let wal_storage = make_storage();
+        let doc_storage = make_storage();
+        let log = DocumentLog::new(wal_storage.clone(), "test.log", doc_storage).unwrap();
+
+        let doc = Document::builder()
+            .add_field("body", DataValue::Text("hello".to_string()))
+            .build();
+        log.append("ext_1", doc).unwrap();
+        log.append_delete(1, "ext_1").unwrap();
+
+        // The file begins with the v2 header.
+        let mut header = [0u8; WAL_HEADER_LEN as usize];
+        wal_storage
+            .open_input("test.log")
+            .unwrap()
+            .read_exact(&mut header)
+            .unwrap();
+        assert_eq!(&header[0..4], WAL_MAGIC);
+        assert_eq!(header[4], WAL_VERSION);
+
+        let records = log.read_all().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].seq, 1);
+        assert_eq!(records[1].seq, 2);
+    }
+
+    /// A v2 record whose payload is corrupted fails CRC verification and is
+    /// dropped as a torn tail, recovering the valid prefix (Issue #542, Phase 1).
+    #[test]
+    fn wal_v2_crc_mismatch_recovers_prefix() {
+        use std::io::{Read as _, Write as _};
+
+        let wal_storage = make_storage();
+        let doc_storage = make_storage();
+        {
+            let log =
+                DocumentLog::new(wal_storage.clone(), "test.log", doc_storage.clone()).unwrap();
+            let doc = Document::builder()
+                .add_field("body", DataValue::Text("first".to_string()))
+                .build();
+            log.append("ext_1", doc.clone()).unwrap();
+            log.append("ext_2", doc).unwrap();
+        }
+
+        // Flip the last byte (inside the 2nd record's payload) so its CRC fails.
+        let mut bytes = Vec::new();
+        wal_storage
+            .open_input("test.log")
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xFF;
+        {
+            let mut out = wal_storage.create_output("test.log").unwrap();
+            out.write_all(&bytes).unwrap();
+            out.flush_and_sync().unwrap();
+            out.close().unwrap();
+        }
+
+        let log = DocumentLog::new(wal_storage, "test.log", doc_storage).unwrap();
+        let records = log.read_all().unwrap();
+        assert_eq!(
+            records.len(),
+            1,
+            "CRC mismatch drops the corrupt 2nd record"
+        );
+        assert_eq!(records[0].seq, 1);
+    }
+
+    /// A legacy (pre-#542, header-less) WAL still recovers, and subsequent
+    /// appends continue in legacy framing rather than mixing formats within the
+    /// same file (Issue #542, Phase 1).
+    #[test]
+    fn legacy_wal_recovers_and_appends_stay_legacy() {
+        use std::io::{Read as _, Write as _};
+
+        let wal_storage = make_storage();
+        let doc_storage = make_storage();
+
+        // Write one legacy-framed record (no header, no CRC) directly.
+        let rec = LogRecord {
+            seq: 1,
+            entry: LogEntry::Upsert {
+                doc_id: 1,
+                external_id: "ext_1".to_string(),
+                document: Document::builder()
+                    .add_field("body", DataValue::Text("legacy".to_string()))
+                    .build(),
+            },
+        };
+        {
+            let mut out = wal_storage.create_output("test.log").unwrap();
+            out.write_all(&frame(&serde_json::to_vec(&rec).unwrap()))
+                .unwrap();
+            out.flush_and_sync().unwrap();
+            out.close().unwrap();
+        }
+
+        let log = DocumentLog::new(wal_storage.clone(), "test.log", doc_storage).unwrap();
+        let records = log.read_all().unwrap();
+        assert_eq!(records.len(), 1, "legacy record recovers");
+
+        // A new append continues the file in legacy framing.
+        let doc = Document::builder()
+            .add_field("body", DataValue::Text("more".to_string()))
+            .build();
+        log.append("ext_2", doc).unwrap();
+
+        // The file still has no v2 header (it was not switched mid-file).
+        let mut magic = [0u8; 4];
+        wal_storage
+            .open_input("test.log")
+            .unwrap()
+            .read_exact(&mut magic)
+            .unwrap();
+        assert_ne!(
+            &magic, WAL_MAGIC,
+            "appends must not switch a legacy file to v2 mid-file"
+        );
+
+        // Both records read back through the legacy path.
+        let records = log.read_all().unwrap();
+        assert_eq!(records.len(), 2);
     }
 
     #[test]
