@@ -114,6 +114,12 @@ enum WalFormat {
 struct WalWriterState {
     out: Box<dyn crate::storage::StorageOutput>,
     format: WalFormat,
+    /// Whether bytes have been appended since the last successful
+    /// `flush_and_sync()`. Set by [`DocumentLog::append_record_bytes`] and
+    /// cleared by [`DocumentLog::flush_writer`]; it lets [`DocumentLog::flush_wal`]
+    /// skip a redundant fsync at commit time when nothing is pending (true under
+    /// the default per-record contract, where every append already synced).
+    dirty: bool,
 }
 
 /// Unified document log providing WAL, doc_id generation, and document storage.
@@ -215,7 +221,11 @@ impl DocumentLog {
             WalFormat::Legacy
         };
 
-        *writer_guard = Some(WalWriterState { out, format });
+        *writer_guard = Some(WalWriterState {
+            out,
+            format,
+            dirty: false,
+        });
         Ok(())
     }
 
@@ -299,16 +309,26 @@ impl DocumentLog {
                 state.out.write_all(&hasher.finalize().to_le_bytes())?;
             }
             state.out.write_all(&bytes)?;
+            // Bytes are now buffered/written but not yet fsynced.
+            state.dirty = true;
         }
 
         Ok(())
     }
 
     /// Flush and fsync the open WAL writer, making every appended-but-unsynced
-    /// record durable. A no-op if no writer is open.
+    /// record durable, then mark it clean.
+    ///
+    /// Honors the [`WalWriterState::dirty`] guard: if nothing has been appended
+    /// since the last sync (the steady state under the per-record contract,
+    /// where every append already synced), the fsync is skipped so a commit-time
+    /// [`Self::flush_wal`] is a true no-op. A no-op if no writer is open.
     fn flush_writer(state: &mut Option<WalWriterState>) -> Result<()> {
-        if let Some(state) = state.as_mut() {
+        if let Some(state) = state.as_mut()
+            && state.dirty
+        {
             state.out.flush_and_sync()?;
+            state.dirty = false;
         }
         Ok(())
     }
@@ -319,6 +339,24 @@ impl DocumentLog {
         Self::append_record_bytes(state, record)?;
         Self::flush_writer(state)?;
         Ok(())
+    }
+
+    /// Force every appended-but-unsynced WAL record durable.
+    ///
+    /// Under the default per-record contract this is a near-no-op: each append
+    /// already self-syncs, so the [`WalWriterState::dirty`] guard skips the
+    /// fsync. It is the load-bearing commit-time barrier once a future
+    /// group-commit path (#542 Phase 4) defers per-append fsync — [`Engine::commit`]
+    /// calls it before any store materializes its state, so the WAL is never
+    /// less durable than the committed lexical/vector indexes. A no-op if no
+    /// writer is currently open (e.g. right after a [`Self::truncate`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing or fsyncing the open WAL writer fails.
+    pub fn flush_wal(&self) -> Result<()> {
+        let mut writer_guard = self.wal_writer.lock();
+        Self::flush_writer(&mut writer_guard)
     }
 
     /// Read all records from the WAL.
@@ -463,12 +501,15 @@ impl DocumentLog {
     pub fn truncate(&self) -> Result<()> {
         {
             let mut writer_guard = self.wal_writer.lock();
-            // Flush + close the open handle before discarding it. Harmless today
-            // (every record is self-synced in `write_record`), but required once
-            // fsync is deferred: dropping the handle without flushing would lose
-            // any appended-but-unsynced bytes (#542 Phase 2).
+            // Flush + close the open handle before discarding it. The flush is
+            // guarded by `dirty`, so it's skipped when every record is already
+            // self-synced (the per-record default) but still runs once fsync is
+            // deferred — dropping the handle with unsynced bytes would lose them
+            // (#542 Phase 2/3).
             if let Some(mut state) = writer_guard.take() {
-                state.out.flush_and_sync()?;
+                if state.dirty {
+                    state.out.flush_and_sync()?;
+                }
                 state.out.close()?;
             }
         }
@@ -689,6 +730,85 @@ mod tests {
         let records = log.read_all().unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].seq, 3);
+    }
+
+    /// `flush_wal` is a no-op when no writer is open — before the first append
+    /// or right after a truncate — returning Ok without opening anything
+    /// (Issue #542, Phase 3).
+    #[test]
+    fn flush_wal_is_noop_without_writer() {
+        let log = make_log();
+        log.flush_wal().unwrap();
+        assert!(
+            log.wal_writer.lock().is_none(),
+            "flush_wal must not open a writer"
+        );
+    }
+
+    /// Under the per-record default every append self-syncs, leaving the writer
+    /// clean, so a commit-time `flush_wal` skips the fsync (a true no-op) while
+    /// the records stay intact (Issue #542, Phase 3).
+    #[test]
+    fn append_leaves_writer_clean_so_flush_wal_is_noop() {
+        let log = make_log();
+        let doc = Document::builder()
+            .add_field("body", DataValue::Text("hello".to_string()))
+            .build();
+        log.append("ext_1", doc).unwrap();
+
+        assert!(
+            !log.wal_writer.lock().as_ref().unwrap().dirty,
+            "a per-record append leaves the writer synced/clean"
+        );
+        log.flush_wal().unwrap();
+        assert!(
+            !log.wal_writer.lock().as_ref().unwrap().dirty,
+            "flush_wal on a clean writer stays clean"
+        );
+
+        assert_eq!(log.read_all().unwrap().len(), 1);
+    }
+
+    /// When bytes are appended without an immediate sync — the deferred path a
+    /// future group-commit mode uses — the writer is dirty and `flush_wal` makes
+    /// the record durable, clears the flag, and the record round-trips (Issue
+    /// #542, Phase 3).
+    #[test]
+    fn flush_wal_syncs_a_dirty_writer() {
+        let log = make_log();
+        let record = LogRecord {
+            seq: 1,
+            entry: LogEntry::Upsert {
+                doc_id: 1,
+                external_id: "ext_1".to_string(),
+                document: Document::builder()
+                    .add_field("body", DataValue::Text("deferred".to_string()))
+                    .build(),
+            },
+        };
+
+        // Simulate a deferred (group-commit) append: open the writer and write
+        // the framed bytes without syncing.
+        {
+            let mut guard = log.wal_writer.lock();
+            log.ensure_writer(&mut guard).unwrap();
+            DocumentLog::append_record_bytes(&mut guard, &record).unwrap();
+            assert!(
+                guard.as_ref().unwrap().dirty,
+                "appended-but-unsynced bytes mark the writer dirty"
+            );
+        }
+
+        // flush_wal makes the deferred record durable and clears the flag.
+        log.flush_wal().unwrap();
+        assert!(
+            !log.wal_writer.lock().as_ref().unwrap().dirty,
+            "flush_wal clears the dirty flag after syncing"
+        );
+
+        let records = log.read_all().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].seq, 1);
     }
 
     #[test]
