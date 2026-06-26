@@ -144,6 +144,57 @@ let engine = Engine::builder(storage, schema)
 
 > **Note:** `Group` is opt-in; the default `PerRecord` policy is unchanged, so existing code keeps its per-write durability with no changes.
 
+## Commit Durability Ladder & Crash Safety
+
+`commit()` persists state in a fixed order, and the order is what makes a crash
+at any point recoverable. Each lexical/vector store tracks its own `last_wal_seq`
+checkpoint — the sequence number of the last WAL record it has materialized — so
+recovery can skip already-applied records. The persisted `last_wal_seq` lives in
+the store's on-disk metadata and is written **only** during the store's commit.
+
+The commit ladder is:
+
+1. **`flush_wal()`** — force the WAL durable (the hard barrier). Under `Group`
+   this fsyncs any deferred batch; under `PerRecord` it is a no-op.
+2. **`lexical.commit()`** — write the lexical segment and metadata (including
+   `last_wal_seq`), then `sync()`.
+3. **`vector.commit()`** — write the vector segment, then `sync()`.
+4. **`commit_documents()`** — write the document store segment, then `sync()`.
+5. **`truncate()`** — replace the WAL with a fresh, empty, fsync'd file.
+
+This order guarantees two invariants:
+
+- **The WAL is never less durable than any persisted index.** `last_wal_seq` is
+  only persisted in step 2+, which always runs *after* the step-1 barrier, so a
+  committed index can never reference a WAL record that is not yet durable.
+- **Every store is fully durable before the WAL is truncated.** Steps 2–4 each
+  `sync()` before step 5 empties the WAL, so the WAL is only discarded once the
+  data it described is safely materialized.
+
+Recovery replays the WAL on the next `build()`, skipping records at or below each
+store's `last_wal_seq`. Replay is **idempotent** — it re-applies each record
+under its originally recorded `doc_id`, so re-running it overwrites rather than
+duplicates. Because each store keeps its own checkpoint, a commit that fails
+partway leaves the stores at different `last_wal_seq` values and recovery simply
+re-applies what each store is missing. (The vector store currently keeps its
+checkpoint at `0`, so it replays the full retained WAL on every recovery —
+correct and idempotent, just not yet optimized.)
+
+The table below shows the outcome of a crash at each step (identical for
+`PerRecord` and `Group`, because the step-1 barrier has already run):
+
+| Crash point | Durable on disk | Recovery outcome |
+| --- | --- | --- |
+| After step 1, before step 2 | WAL only | Replay all pending records into both stores |
+| After step 2, before step 3 | WAL + lexical (`last_wal_seq = N`) | Lexical skips ≤ N; vector replays from WAL |
+| After step 3, before step 4 | WAL + lexical + vector | Both stores skip; documents restored from WAL |
+| After step 4, before step 5 | WAL + all stores | WAL still present; both stores skip, no duplicates |
+| After step 5 | All stores, WAL empty | Nothing to replay |
+
+No interleaving lets a committed index reference a lost WAL record, so group
+commit introduces no new durability gap beyond its documented contract (a crash
+can lose a *suffix* of writes not yet made durable by `flush_wal()` or `commit()`).
+
 ## Storage Layout
 
 The engine uses `PrefixedStorage` to organize data:
