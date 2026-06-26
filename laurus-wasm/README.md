@@ -80,6 +80,31 @@ const stats = index.stats();
 // } }
 ```
 
+### Durability / WAL
+
+Each change is appended to the engine's in-memory write-ahead log (WAL). By
+default the WAL is flushed on every record. Opt into group commit to batch the
+flush for higher write throughput (a crash can lose up to the last unsynced
+batch, like SQLite's `synchronous = NORMAL`):
+
+```javascript
+import { Index, Schema, WalSyncPolicy } from "./pkg/laurus_wasm.js";
+
+// maxRecords, maxBytes, maxIntervalMs (all optional)
+const policy = WalSyncPolicy.group(4096, undefined, 1000);
+const index = await Index.open("my-index", schema, policy);
+
+await index.putDocument("doc1", { title: "Hello" });
+await index.flushWal(); // flushes the engine WAL only
+await index.commit();   // makes changes searchable AND persists to OPFS
+```
+
+WASM caveats: the `maxIntervalMs` background timer is a **no-op** on wasm (no
+background threads), and `flushWal()` flushes the in-memory engine WAL only —
+OPFS persistence still happens at `commit()`. Call `commit()` for durable
+persistence. Omit `walSyncPolicy` (or pass `WalSyncPolicy.perRecord()`) to keep
+the default per-record behaviour.
+
 ### Schema
 
 ```javascript

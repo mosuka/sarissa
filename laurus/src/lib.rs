@@ -106,7 +106,7 @@ pub use lexical::search::searcher::{
 };
 pub use maintenance::deletion::DeletionConfig;
 pub use storage::{Storage, StorageConfig, StorageFactory};
-pub use store::log::WalSyncPolicy;
+pub use store::log::{DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, WalSyncPolicy};
 pub use vector::core::distance::DistanceMetric;
 pub use vector::core::field::{FlatOption, HnswOption, IvfOption};
 pub use vector::core::quantization::QuantizationMethod;

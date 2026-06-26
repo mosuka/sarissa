@@ -83,6 +83,28 @@ const stats = index.stats();
 // } }
 ```
 
+### Durability / WAL
+
+A persistent index writes every change to a write-ahead log (WAL). By default
+the WAL is `fsync`-ed on every record, so each write is fully durable. Opt into
+group commit to batch `fsync` for higher write throughput (a crash can lose up
+to the last unsynced batch, like SQLite's `synchronous = NORMAL`):
+
+```javascript
+import { Index, WalSyncPolicy } from "laurus-nodejs";
+
+// maxRecords, maxBytes, maxIntervalMs (all optional)
+const policy = WalSyncPolicy.group(4096, undefined, 1000);
+const index = await Index.create("./myindex", schema, policy);
+
+await index.putDocument("doc1", { title: "Hello" });
+await index.flushWal(); // force a durable barrier on demand
+await index.commit();   // also flushes the WAL
+```
+
+Omit `walSyncPolicy` (or pass `WalSyncPolicy.perRecord()`) to keep the default
+per-record durability.
+
 ### Schema
 
 ```javascript

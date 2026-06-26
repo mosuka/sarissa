@@ -7,6 +7,7 @@ use crate::convert::{document_to_hash, hash_to_document};
 use crate::errors::laurus_err;
 use crate::schema::RbSchema;
 use crate::search::{build_request_from_rb, to_rb_search_result};
+use crate::wal::RbWalSyncPolicy;
 use laurus::{Engine, EngineStats, Storage, StorageConfig, StorageFactory};
 use magnus::prelude::*;
 use magnus::scan_args::{get_kwargs, scan_args};
@@ -54,17 +55,27 @@ impl RbIndex {
     ///   - `path:` (String, optional): Directory path for persistent storage.
     ///     Pass `nil` (default) for an ephemeral in-memory index.
     ///   - `schema:` (Schema, optional): Schema definition.
+    ///   - `wal_sync_policy:` (WalSyncPolicy, optional): WAL durability policy.
+    ///     Defaults to per-record fsync (highest durability). Pass
+    ///     `Laurus::WalSyncPolicy.group(...)` to enable group commit for higher
+    ///     write throughput; use `flush_wal` to force durability on demand.
     fn new(args: &[Value]) -> Result<Self, Error> {
         let ruby = Ruby::get().expect("called from Ruby thread");
         let args = scan_args::<(), (), (), (), RHash, ()>(args)?;
-        let kwargs = get_kwargs::<_, (), (Option<Option<String>>, Option<Option<&RbSchema>>), ()>(
-            args.keywords,
-            &[],
-            &["path", "schema"],
-        )?;
-        let (path, schema) = kwargs.optional;
+        let kwargs = get_kwargs::<
+            _,
+            (),
+            (
+                Option<Option<String>>,
+                Option<Option<&RbSchema>>,
+                Option<Option<&RbWalSyncPolicy>>,
+            ),
+            (),
+        >(args.keywords, &[], &["path", "schema", "wal_sync_policy"])?;
+        let (path, schema, wal_sync_policy) = kwargs.optional;
         let path = path.flatten();
         let schema_ref = schema.flatten();
+        let wal_sync_policy = wal_sync_policy.flatten();
 
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
@@ -74,9 +85,12 @@ impl RbIndex {
             .map(|s| s.inner.borrow().clone())
             .unwrap_or_default();
 
-        let engine = rt
-            .block_on(Engine::new(storage, schema))
-            .map_err(laurus_err)?;
+        let mut builder = Engine::builder(storage, schema);
+        if let Some(policy) = wal_sync_policy {
+            builder = builder.wal_sync_policy(policy.inner);
+        }
+
+        let engine = rt.block_on(builder.build()).map_err(laurus_err)?;
 
         Ok(Self {
             engine: Arc::new(engine),
@@ -163,6 +177,30 @@ impl RbIndex {
     fn commit(&self) -> Result<(), Error> {
         let engine = self.engine.clone();
         self.rt.block_on(engine.commit()).map_err(laurus_err)
+    }
+
+    /// Force any buffered Write-Ahead Log (WAL) appends to durable storage.
+    ///
+    /// This is an on-demand durability barrier and runs synchronously (no async
+    /// runtime is involved). Its effect depends on the configured
+    /// `wal_sync_policy`:
+    ///
+    /// * Under the default `Laurus::WalSyncPolicy.per_record`, every append is
+    ///   already fsync'd as it happens, so this is effectively a no-op.
+    /// * Under `Laurus::WalSyncPolicy.group(...)`, appends are buffered and
+    ///   their fsync is deferred for throughput; `flush_wal` fsyncs the
+    ///   outstanding batch immediately, guaranteeing those records survive a
+    ///   crash without waiting for a threshold or the next `commit`.
+    ///
+    /// Unlike `commit`, this does **not** make pending documents searchable; it
+    /// only guarantees their durability in the WAL. Call `commit` to publish
+    /// changes to searches.
+    ///
+    /// # Returns
+    ///
+    /// `nil` on success, or raises if the underlying fsync fails.
+    fn flush_wal(&self) -> Result<(), Error> {
+        self.engine.flush_wal().map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -364,6 +402,7 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
         magnus::method!(RbIndex::delete_documents, 1),
     )?;
     class.define_method("commit", magnus::method!(RbIndex::commit, 0))?;
+    class.define_method("flush_wal", magnus::method!(RbIndex::flush_wal, 0))?;
     class.define_method("search", magnus::method!(RbIndex::search, -1))?;
     class.define_method("search_batch", magnus::method!(RbIndex::search_batch, -1))?;
     class.define_method("stats", magnus::method!(RbIndex::stats, 0))?;

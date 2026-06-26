@@ -6,21 +6,27 @@
 
 ### 静的メソッド
 
-#### `Index.create(schema?)`
+#### `Index.create(schema?, walSyncPolicy?)`
 
 新しいインメモリ（一時）インデックスを作成します。
 
 - **引数:**
   - `schema` (Schema, 省略可) -- スキーマ定義
+  - `walSyncPolicy` (WalSyncPolicy, 省略可) -- WAL の永続性ポリシー。省略すると
+    デフォルトのレコードごとの同期を使用します。
+    [WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照してください。
 - **戻り値:** `Promise<Index>`
 
-#### `Index.open(name, schema?)`
+#### `Index.open(name, schema?, walSyncPolicy?)`
 
 OPFS で永続化されたインデックスを開くか、新規作成します。
 
 - **引数:**
   - `name` (string) -- インデックス名（OPFS サブディレクトリ）
   - `schema` (Schema, 省略可) -- スキーマ定義
+  - `walSyncPolicy` (WalSyncPolicy, 省略可) -- WAL の永続性ポリシー。省略すると
+    デフォルトのレコードごとの同期を使用します。
+    [WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照してください。
 - **戻り値:** `Promise<Index>`
 
 ### インスタンスメソッド
@@ -58,6 +64,15 @@ OPFS で永続化されたインデックスを開くか、新規作成します
 
 書き込みをフラッシュし、変更を検索可能にします。
 `Index.open()` で作成したインデックスの場合、OPFS にも自動永続化されます。
+
+- **戻り値:** `Promise<void>`
+
+#### `flushWal()`
+
+インメモリエンジンの WAL に対して永続性バリアを強制します。wasm 固有の
+注意点については [WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性) を
+参照してください — 特にこれは OPFS への永続化を**行いません**。永続的な
+永続化には `commit()` を呼び出してください。
 
 - **戻り値:** `Promise<void>`
 
@@ -143,6 +158,79 @@ DSL 文字列クエリで検索します。
 インデックス統計を返します。
 
 - **戻り値:** `{ documentCount: number, vectorFields: { [name]: { count, dimension } } }`
+
+## WAL 同期ポリシー / 永続性
+
+各書き込みは、エンジンのインメモリ先行書き込みログ（WAL）に追記されます。
+`Index.create` と `Index.open` はオプションの `walSyncPolicy` を受け付け、
+WAL をどの頻度でフラッシュするかを制御します。デフォルト（引数を省略）は
+レコードごとの同期です。
+
+```typescript
+class WalSyncPolicy {
+  static perRecord(): WalSyncPolicy;
+  static group(
+    maxRecords?: number,
+    maxBytes?: number,
+    maxIntervalMs?: number,
+  ): WalSyncPolicy;
+}
+```
+
+| コンストラクタ | 説明 |
+| :--- | :--- |
+| `WalSyncPolicy.perRecord()` | デフォルト。WAL レコードごとにフラッシュします。 |
+| `WalSyncPolicy.group(...)` | グループコミット。複数の書き込みにまたがってフラッシュをまとめます。 |
+
+`group(...)` のパラメータ（引数を省略するとそのデフォルトを維持）:
+
+| パラメータ | デフォルト | 説明 |
+| :--- | :--- | :--- |
+| `maxRecords` | `1024` | この件数のレコードが蓄積されたらフラッシュします。 |
+| `maxBytes` | `1048576`（1 MiB） | この量の未同期バイトが蓄積されたらフラッシュします。 |
+| `maxIntervalMs` | なし | 定期フラッシュタイマー（ミリ秒）。**wasm では no-op**（注意点を参照）。 |
+
+グループコミットでは、`maxRecords` または `maxBytes` の**いずれか**に達した
+時点でエンジン WAL がフラッシュされ、`commit()` 時にも必ずフラッシュされます。
+クラッシュ時には最後の未同期バッチまでを失う可能性があります — これは
+SQLite の `synchronous = NORMAL` と同じトレードオフです。
+
+### `flushWal()`（永続性バリア）
+
+`flushWal()` はインメモリエンジンの WAL を必要なときにフラッシュします。
+
+- **戻り値:** `Promise<void>`
+
+### WASM の注意点
+
+WebAssembly にはバックグラウンドスレッドや直接のファイルシステムがないため、
+ネイティブバインディングとは 2 点で動作が異なります:
+
+- **`maxIntervalMs` は no-op です。** 定期フラッシュタイマーには
+  バックグラウンドスレッドが必要ですが、wasm では利用できません。
+  グループコミットは `maxRecords` / `maxBytes` のしきい値到達時と
+  `commit()` 時にはフラッシュされます。
+- **`flushWal()` はインメモリエンジンの WAL のみをフラッシュします。**
+  OPFS への永続化は引き続き `commit()` で行われます。wasm で永続的に
+  永続化するには `commit()` を呼び出してください。
+
+```javascript
+import { Index, Schema, WalSyncPolicy } from "./pkg/laurus_wasm.js";
+
+const schema = new Schema();
+schema.addTextField("title");
+
+// グループコミットを有効化。maxIntervalMs は受け付けられますが wasm では無視されます。
+const policy = WalSyncPolicy.group(4096, undefined, 1000);
+const index = await Index.open("my-index", schema, policy);
+
+for (let i = 0; i < 10000; i++) {
+  await index.putDocument(`doc${i}`, { title: `Document ${i}` });
+}
+
+await index.flushWal(); // エンジン WAL をフラッシュ（OPFS ではない）
+await index.commit();   // 変更を検索可能にし、かつ OPFS に永続化する
+```
 
 ## Schema
 

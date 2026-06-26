@@ -103,3 +103,15 @@ pub async fn commit(State(mut state): State<GatewayState>) -> Result<Json<Value>
 
     Ok(Json(json!({})))
 }
+
+/// `POST /v1/flush_wal` — Forces buffered WAL records durable without a full
+/// commit (group-commit on-demand barrier; near no-op under per-record sync).
+pub async fn flush_wal(State(mut state): State<GatewayState>) -> Result<Json<Value>, Response> {
+    state
+        .document_client
+        .flush_wal(v1::FlushWalRequest {})
+        .await
+        .map_err(|s| GatewayError(s).into_response())?;
+
+    Ok(Json(json!({})))
+}

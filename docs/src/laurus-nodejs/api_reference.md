@@ -9,6 +9,7 @@ class Index {
   static create(
     path?: string | null,
     schema?: Schema,
+    walSyncPolicy?: WalSyncPolicy,
   ): Promise<Index>;
 }
 ```
@@ -19,6 +20,7 @@ class Index {
 | :--- | :--- | :--- | :--- |
 | `path` | `string \| null` | `null` | Directory for persistent storage. `null` creates an in-memory index. |
 | `schema` | `Schema` | empty | Schema definition. |
+| `walSyncPolicy` | `WalSyncPolicy` | per-record | WAL durability policy. Omit to keep the default per-record `fsync`. See [WAL sync policy / durability](#wal-sync-policy--durability). |
 
 ### Methods
 
@@ -29,6 +31,7 @@ class Index {
 | `getDocuments(id)` | Return all stored versions for the given ID. |
 | `deleteDocuments(id)` | Delete all versions for the given ID. |
 | `commit()` | Flush writes and make pending changes searchable. |
+| `flushWal()` | Force a durable WAL barrier. See [WAL sync policy / durability](#wal-sync-policy--durability). |
 | `search(query, limit?, offset?)` | Search with a DSL string. |
 | `searchTerm(field, term, limit?, offset?)` | Search with an exact term match. |
 | `searchVector(field, vector, limit?, offset?)` | Search with a pre-computed vector. |
@@ -48,6 +51,68 @@ interface IndexStats {
   vectorFields: Record<string, { count: number; dimension: number }>;
 }
 ```
+
+### WAL sync policy / durability
+
+For a persistent index, every write is appended to a write-ahead log (WAL).
+By default the WAL is `fsync`-ed on **every** record, so each write is fully
+durable as soon as its Promise resolves. `Index.create` accepts an optional
+`walSyncPolicy` to trade some durability for higher write throughput, and
+`flushWal()` forces a durable barrier on demand.
+
+```typescript
+class WalSyncPolicy {
+  static perRecord(): WalSyncPolicy;
+  static group(
+    maxRecords?: number,
+    maxBytes?: number,
+    maxIntervalMs?: number,
+  ): WalSyncPolicy;
+}
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `WalSyncPolicy.perRecord()` | Default. `fsync` after every WAL record; fully durable per write. |
+| `WalSyncPolicy.group(...)` | Group commit. Batches `fsync` across writes. |
+
+`group(...)` parameters (omit any argument to keep its default):
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `maxRecords` | `1024` | Flush once this many records have accumulated. |
+| `maxBytes` | `1048576` (1 MiB) | Flush once this many unsynced bytes have accumulated. |
+| `maxIntervalMs` | none | Optional periodic flush timer (milliseconds). Omit to disable the timer. |
+
+With group commit the WAL is flushed when **either** `maxRecords` or
+`maxBytes` is reached, and always at `commit()`. A crash can lose up to the
+last unsynced batch — the same trade-off as SQLite's `synchronous = NORMAL`.
+Call `flushWal()` to force everything written so far to disk without a full
+`commit()`.
+
+| Method | Description |
+| :--- | :--- |
+| `flushWal()` | Force a durable WAL barrier now. Returns `Promise<void>`. |
+
+```javascript
+import { Index, WalSyncPolicy } from "laurus-nodejs";
+
+// Opt into group commit with a 1-second periodic flush timer.
+const policy = WalSyncPolicy.group(4096, undefined, 1000);
+const index = await Index.create("./myindex", schema, policy);
+
+for (let i = 0; i < 10000; i++) {
+  await index.putDocument(`doc${i}`, { title: `Document ${i}` });
+}
+
+// Force a durable barrier without committing yet.
+await index.flushWal();
+
+await index.commit(); // also flushes the WAL
+```
+
+Omit `walSyncPolicy` (or pass `WalSyncPolicy.perRecord()`) to keep the
+default, fully durable behaviour.
 
 ---
 

@@ -81,6 +81,29 @@ const stats = index.stats();
 // } }
 ```
 
+### 永続性 / WAL
+
+永続インデックスはすべての変更を先行書き込みログ（WAL）に書き込みます。
+デフォルトでは WAL はレコードごとに `fsync` されるため、各書き込みは完全に
+永続化されます。書き込みスループットを高めるためにグループコミットを有効化
+すると `fsync` をまとめられます（クラッシュ時には SQLite の
+`synchronous = NORMAL` と同様に最後の未同期バッチまでを失う可能性があります）:
+
+```javascript
+import { Index, WalSyncPolicy } from "laurus-nodejs";
+
+// maxRecords, maxBytes, maxIntervalMs（いずれも省略可）
+const policy = WalSyncPolicy.group(4096, undefined, 1000);
+const index = await Index.create("./myindex", schema, policy);
+
+await index.putDocument("doc1", { title: "Hello" });
+await index.flushWal(); // 必要なときに永続性バリアを強制
+await index.commit();   // WAL もフラッシュされます
+```
+
+`walSyncPolicy` を省略する（または `WalSyncPolicy.perRecord()` を渡す）と、
+デフォルトのレコードごとの永続性が維持されます。
+
 ### Schema
 
 ```javascript

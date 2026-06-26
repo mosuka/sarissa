@@ -227,6 +227,32 @@ $stats = $index->stats();
 echo "Document count: " . $stats["documentCount"] . "\n";
 ```
 
+## Durability / WAL
+
+The write-ahead log (WAL) is fully durable by default: every record is
+`fsync`ed before the write returns. To trade some durability for higher write
+throughput, opt into **group commit** by passing a `WalSyncPolicy` to the
+`Index` constructor. Group commit batches `fsync` calls, flushing when either
+the record count (default 1024) or byte threshold (default 1 MiB) is reached,
+and on every `commit()`. A crash can lose at most the last unsynced batch
+(like SQLite's `synchronous = NORMAL`); the index never corrupts. Call
+`flushWal()` to force a durable barrier on demand.
+
+```php
+use Laurus\Index;
+use Laurus\WalSyncPolicy;
+
+// Default: per-record fsync (omit the argument entirely).
+$index = new Index();
+
+// Opt into group commit, then force a flush when needed.
+$policy = WalSyncPolicy::group(4096, 4 * 1024 * 1024);
+$index = new Index("./myindex", null, $policy);
+
+$index->putDocument("doc1", ["title" => "Hello"]);
+$index->flushWal(); // persist now, without waiting for the batch to fill
+```
+
 ## Feature Flags
 
 Optional Cargo feature flags enable additional embedding backends:

@@ -227,6 +227,33 @@ $stats = $index->stats();
 echo "ドキュメント数: " . $stats["documentCount"] . "\n";
 ```
 
+## 耐久性 / WAL
+
+先行書き込みログ（WAL）はデフォルトで完全に耐久的です。すべてのレコードは
+書き込みが返る前に `fsync` されます。耐久性をいくらか引き換えに書き込み
+スループットを向上させたい場合は、`Index` コンストラクタに `WalSyncPolicy`
+を渡して **group commit（グループコミット）** を有効にします。group commit は
+`fsync` をまとめ、レコード数（デフォルト 1024）またはバイト数（デフォルト
+1 MiB）のいずれかに達したとき、および毎回の `commit()` 時にフラッシュします。
+クラッシュ時に失われるのは最後の未同期バッチまでで（SQLite の
+`synchronous = NORMAL` と同様）、インデックスが破損することはありません。
+オンデマンドで耐久バリアを強制するには `flushWal()` を呼び出します。
+
+```php
+use Laurus\Index;
+use Laurus\WalSyncPolicy;
+
+// デフォルト: レコードごとの fsync（引数を省略する）。
+$index = new Index();
+
+// group commit を有効にし、必要なときにフラッシュを強制する。
+$policy = WalSyncPolicy::group(4096, 4 * 1024 * 1024);
+$index = new Index("./myindex", null, $policy);
+
+$index->putDocument("doc1", ["title" => "Hello"]);
+$index->flushWal(); // バッチが満杯になるのを待たずに今すぐ永続化
+```
+
 ## 機能フラグ
 
 オプションの Cargo 機能フラグで追加のエンベディングバックエンドを有効にできます:

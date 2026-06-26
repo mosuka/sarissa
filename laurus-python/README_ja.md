@@ -69,6 +69,28 @@ schema.add_hnsw_field("embedding", dimension=384)
 index = laurus.Index(path="./myindex", schema=schema)
 ```
 
+## 永続性 / WAL
+
+永続インデックスはすべての変更を先行書き込みログ（WAL）に書き込みます。
+デフォルトでは WAL はレコードごとに `fsync` されるため、各書き込みは完全に
+永続化されます。書き込みスループットを高めるためにグループコミットを有効化
+すると `fsync` をまとめられます（クラッシュ時には SQLite の
+`synchronous = NORMAL` と同様に最後の未同期バッチまでを失う可能性があります）:
+
+```python
+import laurus
+
+policy = laurus.WalSyncPolicy.group(max_records=4096, max_interval_ms=1000)
+index = laurus.Index(path="./myindex", schema=schema, wal_sync_policy=policy)
+
+index.put_document("doc1", {"title": "Hello"})
+index.flush_wal()  # 必要なときに永続性バリアを強制
+index.commit()     # WAL もフラッシュされます
+```
+
+`wal_sync_policy` を省略する（または `laurus.WalSyncPolicy.per_record()` を
+渡す）と、デフォルトのレコードごとの永続性が維持されます。
+
 ## クエリタイプ
 
 | クエリクラス | 説明 |

@@ -40,6 +40,12 @@ http_port = 8080  # オプション: HTTP ゲートウェイを有効化
 
 [index]
 data_dir = "./laurus_data"
+
+[index.wal]
+sync_policy = "group"          # "per_record"（デフォルト） | "group"
+group_max_records = 1024       # オプション; デフォルト 1024
+group_max_bytes = 1048576      # オプション; デフォルト 1 MiB
+group_max_interval_ms = 1000   # オプション; 未設定時は background timer なし（native のみ）
 ```
 
 ログの詳細度は設定ファイルではなく、`RUST_LOG` 環境変数で制御します（デフォルト: `info`）。
@@ -59,6 +65,28 @@ data_dir = "./laurus_data"
 | フィールド | 型 | デフォルト | 説明 |
 | :--- | :--- | :--- | :--- |
 | `data_dir` | String | `"./laurus_data"` | インデックスデータディレクトリのパス |
+
+#### `[index.wal]` セクション
+
+Write-Ahead Log（WAL）の耐久性ポリシーを制御します。セクション全体を省略した場合、
+WAL は **per-record** fsync を使用します（各書き込みは返る前に durable 化されます）。
+このポリシーは、起動時に開かれるインデックスと、後から `CreateIndex` で作成される
+インデックスの両方に適用されます。耐久性のトレードオフについては
+[永続化と WAL → WAL 耐久性ポリシー](../laurus/persistence.md#wal-耐久性ポリシー)
+を参照してください。
+
+| フィールド | 型 | デフォルト | 説明 |
+| :--- | :--- | :--- | :--- |
+| `sync_policy` | String | `"per_record"` | 耐久性ポリシー: `"per_record"`（書き込みごとに fsync）または `"group"`（fsync をバッチ化） |
+| `group_max_records` | Integer | `1024` | グループコミットのみ。前回 sync 以降にこの件数のレコードが蓄積したら flush |
+| `group_max_bytes` | Integer | `1048576` | グループコミットのみ。前回 sync 以降にこのバイト数が蓄積したら flush（デフォルト 1 MiB） |
+| `group_max_interval_ms` | Integer | -- | グループコミットのみ。定期 background flush の間隔（ミリ秒）。未設定時は timer なし。**native ターゲットのみ** — `wasm32` では無視される |
+
+`sync_policy = "group"` の場合、WAL は前回 sync 以降に **`group_max_records` 件**または
+**`group_max_bytes` バイト**のいずれか（先に到達した方）が蓄積した時点、および commit 時に
+無条件で flush します。クラッシュ時には未 sync の最終バッチまで失う可能性があります
+（SQLite `synchronous = NORMAL` に相当）。途中で切れた末尾レコードはリカバリ時に
+破棄されるため、復旧後のログにはギャップが生じません。
 
 ## 環境変数
 

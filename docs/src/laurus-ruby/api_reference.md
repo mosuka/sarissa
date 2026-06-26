@@ -5,7 +5,7 @@
 The primary entry point. Wraps the Laurus search engine.
 
 ```ruby
-Laurus::Index.new(path: nil, schema: nil)
+Laurus::Index.new(path: nil, schema: nil, wal_sync_policy: nil)
 ```
 
 ### Constructor
@@ -14,6 +14,7 @@ Laurus::Index.new(path: nil, schema: nil)
 | :--- | :--- | :--- | :--- |
 | `path:` | `String \| nil` | `nil` | Directory path for persistent storage. `nil` creates an in-memory index. |
 | `schema:` | `Schema \| nil` | `nil` | Schema definition. An empty schema is used when omitted. |
+| `wal_sync_policy:` | `WalSyncPolicy \| nil` | `nil` | Write-ahead log (WAL) durability policy. `nil` keeps the default per-record fsync. See [WAL sync policy & durability](#wal-sync-policy--durability). |
 
 ### Methods
 
@@ -24,6 +25,7 @@ Laurus::Index.new(path: nil, schema: nil)
 | `get_documents(id) -> Array<Hash>` | Return all stored versions for the given ID. |
 | `delete_documents(id)` | Delete all versions for the given ID. |
 | `commit` | Flush buffered writes and make all pending changes searchable. |
+| `flush_wal` | Force a durable WAL barrier on demand. Synchronously fsyncs any unsynced WAL records and returns `nil`. Useful when running under a group-commit policy (see below). |
 | `search(query, limit: 10, offset: 0) -> Array<SearchResult>` | Execute a search query. |
 | `search_batch(queries, limit: 10, offset: 0) -> Array<Array<SearchResult>>` | Execute multiple independent searches in one call. Each query is dispatched in parallel on the underlying tokio runtime. `results[i]` corresponds to `queries[i]`. Empty input returns `[]`. |
 | `stats -> Hash` | Return index statistics (`"document_count"`, `"vector_fields"`). |
@@ -38,6 +40,56 @@ The `query` parameter accepts any of the following:
 - A **`SearchRequest`** for full control
 
 The same value kinds are accepted as the elements of `search_batch`'s `queries` Array — DSL strings, query objects, and `SearchRequest` instances may be mixed within a single batch.
+
+### WAL sync policy & durability
+
+The write-ahead log (WAL) protects committed data against crashes. By
+default the WAL is fully durable: every record is `fsync`ed before the write
+returns. You can trade some durability for higher write throughput by opting
+into **group commit**, which batches `fsync` calls.
+
+#### WalSyncPolicy
+
+`Laurus::WalSyncPolicy` is an immutable value object describing how the WAL
+is flushed. Pass it to `Index.new(wal_sync_policy:)`.
+
+```ruby
+# Default: durable per write (each record is fsynced individually).
+Laurus::WalSyncPolicy.per_record
+
+# Group commit: batch fsyncs to amortise their cost.
+Laurus::WalSyncPolicy.group(
+  max_records: nil,      # flush after this many records (default 1024)
+  max_bytes: nil,        # flush after this many bytes (default 1 MiB)
+  max_interval_ms: nil,  # also flush periodically after this many ms
+)
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `WalSyncPolicy.per_record` | Default. Every record is `fsync`ed before the write returns — fully durable per write. |
+| `WalSyncPolicy.group(max_records:, max_bytes:, max_interval_ms:)` | Batch `fsync`s. With no arguments uses the defaults (`max_records: 1024`, `max_bytes: 1 MiB`, no timer). The WAL is flushed when **either** `max_records` **or** `max_bytes` accumulate, and on every `commit`. Pass `max_interval_ms:` to also flush on a periodic timer. |
+
+Group commit is analogous to SQLite's `synchronous = NORMAL`: a crash can lose
+at most the last unsynced batch of records, but the index never corrupts.
+Records are always made durable at `commit`, so a successful `commit` is a
+durability barrier regardless of policy.
+
+#### Forcing a flush
+
+Call `flush_wal` to force a durable barrier between commits — for example
+before signalling that a batch has been safely persisted. It synchronously
+`fsync`s any unsynced records and returns `nil`. Under the default
+per-record policy it is effectively a no-op.
+
+```ruby
+# Opt into group commit, then force durability on demand.
+policy = Laurus::WalSyncPolicy.group(max_records: 4096, max_bytes: 4 * 1024 * 1024)
+index = Laurus::Index.new(path: "./myindex", wal_sync_policy: policy)
+
+index.put_document("doc1", { "title" => "Hello" })
+index.flush_wal  # records persisted even though the group batch is not full
+```
 
 ---
 

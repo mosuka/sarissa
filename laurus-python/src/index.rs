@@ -7,10 +7,130 @@ use crate::convert::{dict_to_document, document_to_dict};
 use crate::errors::laurus_err;
 use crate::schema::PySchema;
 use crate::search::{PySearchResult, build_request_from_py, to_py_search_result};
-use laurus::{Engine, EngineStats, Storage, StorageConfig, StorageFactory};
+use laurus::{
+    DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Engine, EngineStats, Storage,
+    StorageConfig, StorageFactory, WalSyncPolicy,
+};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+
+// ---------------------------------------------------------------------------
+// WalSyncPolicy
+// ---------------------------------------------------------------------------
+
+/// Durability policy that controls when Write-Ahead Log (WAL) appends are
+/// flushed (`fsync`'d) to durable storage.
+///
+/// This is a value object wrapping the Rust [`laurus::WalSyncPolicy`]. It is
+/// passed to [`Index`] at construction time via the `wal_sync_policy` keyword
+/// argument. It trades the durability of an *individual* write against ingest
+/// throughput; [`Index.commit`] is always a hard durability barrier regardless
+/// of the policy in effect.
+///
+/// ## Constructing a policy
+///
+/// ```python
+/// import laurus
+///
+/// # Per-record durability (the default): every append is fsync'd
+/// # before it returns. Safest, lowest ingest throughput.
+/// policy = laurus.WalSyncPolicy.per_record()
+///
+/// # Group-commit durability with default thresholds (batch fsyncs).
+/// policy = laurus.WalSyncPolicy.group()
+///
+/// # Group-commit with explicit thresholds and a flush interval.
+/// policy = laurus.WalSyncPolicy.group(
+///     max_records=4096,
+///     max_bytes=4 * 1024 * 1024,
+///     max_interval_ms=1000,
+/// )
+///
+/// index = laurus.Index(wal_sync_policy=policy)
+/// ```
+#[pyclass(name = "WalSyncPolicy", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyWalSyncPolicy {
+    /// The wrapped Rust durability policy.
+    pub inner: WalSyncPolicy,
+}
+
+#[pymethods]
+impl PyWalSyncPolicy {
+    /// Create a per-record durability policy.
+    ///
+    /// Every WAL append is fsync'd to durable storage before the write call
+    /// returns. This is the safest policy and the default behaviour when no
+    /// `wal_sync_policy` is supplied to [`Index`], at the cost of the lowest
+    /// ingest throughput.
+    ///
+    /// Returns:
+    ///     A `WalSyncPolicy` wrapping `WalSyncPolicy::PerRecord`.
+    #[staticmethod]
+    pub fn per_record() -> Self {
+        Self {
+            inner: WalSyncPolicy::PerRecord,
+        }
+    }
+
+    /// Create a group-commit durability policy.
+    ///
+    /// WAL appends are batched and fsync'd together once any of the configured
+    /// thresholds is reached, rather than one fsync per record. This increases
+    /// ingest throughput at the cost of potentially losing the last unsynced
+    /// batch on a crash. [`Index.commit`] remains a hard durability barrier,
+    /// and [`Index.flush_wal`] forces a flush on demand.
+    ///
+    /// Args:
+    ///     max_records: Flush after this many records accumulate since the last
+    ///         flush. Defaults to laurus' built-in
+    ///         `DEFAULT_GROUP_MAX_RECORDS` (1024) when `None`.
+    ///     max_bytes: Flush after this many bytes accumulate since the last
+    ///         flush. Defaults to laurus' built-in `DEFAULT_GROUP_MAX_BYTES`
+    ///         (1 MiB) when `None`.
+    ///     max_interval_ms: Optional time-based flush interval in milliseconds.
+    ///         When set, a background timer flushes the WAL at least this often
+    ///         even if the size thresholds have not been reached. When `None`
+    ///         (the default) no time-based flushing occurs.
+    ///
+    /// Returns:
+    ///     A `WalSyncPolicy` wrapping `WalSyncPolicy::Group { .. }`.
+    #[staticmethod]
+    #[pyo3(signature = (max_records=None, max_bytes=None, max_interval_ms=None))]
+    pub fn group(
+        max_records: Option<usize>,
+        max_bytes: Option<usize>,
+        max_interval_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            inner: WalSyncPolicy::Group {
+                max_records: max_records.unwrap_or(DEFAULT_GROUP_MAX_RECORDS),
+                max_bytes: max_bytes.unwrap_or(DEFAULT_GROUP_MAX_BYTES),
+                max_interval: max_interval_ms.map(std::time::Duration::from_millis),
+            },
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        match self.inner {
+            WalSyncPolicy::PerRecord => "WalSyncPolicy.per_record()".to_string(),
+            WalSyncPolicy::Group {
+                max_records,
+                max_bytes,
+                max_interval,
+            } => format!(
+                "WalSyncPolicy.group(max_records={}, max_bytes={}, max_interval_ms={})",
+                max_records,
+                max_bytes,
+                match max_interval {
+                    Some(d) => d.as_millis().to_string(),
+                    None => "None".to_string(),
+                }
+            ),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Index
@@ -76,18 +196,29 @@ impl PyIndex {
     ///     path: Directory path for persistent storage.
     ///           Pass `None` (default) for an ephemeral in-memory index.
     ///     schema: Schema definition.  If omitted, an empty schema is used.
+    ///     wal_sync_policy: Optional [`WalSyncPolicy`] controlling when WAL
+    ///           appends are fsync'd. When `None` (the default), laurus uses
+    ///           per-record durability (every append is fsync'd before it
+    ///           returns).
     #[new]
-    #[pyo3(signature = (path=None, schema=None))]
-    pub fn new(path: Option<String>, schema: Option<&PySchema>) -> PyResult<Self> {
+    #[pyo3(signature = (path=None, schema=None, wal_sync_policy=None))]
+    pub fn new(
+        path: Option<String>,
+        schema: Option<&PySchema>,
+        wal_sync_policy: Option<&PyWalSyncPolicy>,
+    ) -> PyResult<Self> {
         let rt =
             tokio::runtime::Runtime::new().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
         let storage = create_storage(path.as_deref())?;
         let schema = schema.map(|s| s.inner.clone()).unwrap_or_default();
 
-        let engine = rt
-            .block_on(Engine::new(storage, schema))
-            .map_err(laurus_err)?;
+        let mut builder = Engine::builder(storage, schema);
+        if let Some(p) = wal_sync_policy {
+            builder = builder.wal_sync_policy(p.inner);
+        }
+
+        let engine = rt.block_on(builder.build()).map_err(laurus_err)?;
 
         Ok(Self {
             engine: Arc::new(engine),
@@ -158,6 +289,32 @@ impl PyIndex {
     pub fn commit(&self, _py: Python) -> PyResult<()> {
         let engine = self.engine.clone();
         self.rt.block_on(engine.commit()).map_err(laurus_err)
+    }
+
+    /// Force any buffered Write-Ahead Log (WAL) appends to be flushed
+    /// (`fsync`'d) to durable storage.
+    ///
+    /// This matters only under a group-commit [`WalSyncPolicy`]
+    /// ([`WalSyncPolicy.group`]), where individual appends are batched and not
+    /// fsync'd immediately. Under the default per-record policy
+    /// ([`WalSyncPolicy.per_record`]) every append is already durable, so this
+    /// call is effectively a no-op.
+    ///
+    /// Durability trade-off: with group commit, a crash can lose the most
+    /// recent unsynced batch of appends. Call `flush_wal()` to bound that
+    /// window on demand without paying for a full [`commit`], which would also
+    /// materialize the in-memory index state. Use `flush_wal()` when you want
+    /// the WAL durable but do not yet need the pending changes to be
+    /// searchable; use [`commit`] when you need both.
+    ///
+    /// This call is synchronous and does not make any pending changes
+    /// searchable; use [`commit`] for that.
+    ///
+    /// Raises:
+    ///     An exception if the underlying WAL flush fails (for example, an I/O
+    ///     error while fsync'ing).
+    pub fn flush_wal(&self, _py: Python) -> PyResult<()> {
+        self.engine.flush_wal().map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────

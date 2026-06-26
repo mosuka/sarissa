@@ -6,7 +6,12 @@ The primary entry point. Wraps the Laurus search engine.
 
 ```python
 class Index:
-    def __init__(self, path: str | None = None, schema: Schema | None = None) -> None: ...
+    def __init__(
+        self,
+        path: str | None = None,
+        schema: Schema | None = None,
+        wal_sync_policy: WalSyncPolicy | None = None,
+    ) -> None: ...
 ```
 
 ### Constructor
@@ -15,6 +20,7 @@ class Index:
 | :--- | :--- | :--- | :--- |
 | `path` | `str \| None` | `None` | Directory path for persistent storage. `None` creates an in-memory index. |
 | `schema` | `Schema \| None` | `None` | Schema definition. An empty schema is used when omitted. |
+| `wal_sync_policy` | `WalSyncPolicy \| None` | `None` | WAL durability policy. `None` keeps the default per-record `fsync`. See [WAL sync policy / durability](#wal-sync-policy--durability). |
 
 ### Methods
 
@@ -25,6 +31,7 @@ class Index:
 | `get_documents(id) -> list[dict]` | Return all stored versions for the given ID. |
 | `delete_documents(id)` | Delete all versions for the given ID. |
 | `commit()` | Flush buffered writes and make all pending changes searchable. |
+| `flush_wal()` | Force a durable WAL barrier. See [WAL sync policy / durability](#wal-sync-policy--durability). |
 | `search(query, *, limit=10, offset=0) -> list[SearchResult]` | Execute a search query. |
 | `search_batch(queries, *, limit=10, offset=0) -> list[list[SearchResult]]` | Execute multiple independent searches in one call. Each query is dispatched in parallel on the underlying tokio runtime. `results[i]` corresponds to `queries[i]`. Empty input returns `[]`. |
 | `stats() -> dict` | Return index statistics (`document_count`, `vector_fields`). |
@@ -39,6 +46,68 @@ The `query` parameter accepts any of the following:
 - A **`SearchRequest`** for full control
 
 The same value kinds are accepted as the elements of `search_batch`'s `queries` list — DSL strings, query objects, and `SearchRequest` instances may be mixed within a single batch.
+
+### WAL sync policy / durability
+
+For a persistent index, every write is appended to a write-ahead log (WAL).
+By default the WAL is `fsync`-ed on **every** record, so each write is fully
+durable as soon as the call returns. The constructor accepts an optional
+`wal_sync_policy` to trade some durability for higher write throughput, and
+`flush_wal()` forces a durable barrier on demand.
+
+```python
+class WalSyncPolicy:
+    @staticmethod
+    def per_record() -> WalSyncPolicy: ...
+    @staticmethod
+    def group(
+        max_records: int | None = None,
+        max_bytes: int | None = None,
+        max_interval_ms: int | None = None,
+    ) -> WalSyncPolicy: ...
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `WalSyncPolicy.per_record()` | Default. `fsync` after every WAL record; fully durable per write. |
+| `WalSyncPolicy.group(...)` | Group commit. Batches `fsync` across writes. |
+
+`group()` parameters (all keyword-friendly, `None` keeps the default):
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `max_records` | `1024` | Flush once this many records have accumulated. |
+| `max_bytes` | `1048576` (1 MiB) | Flush once this many unsynced bytes have accumulated. |
+| `max_interval_ms` | `None` | Optional periodic flush timer (milliseconds). `None` disables the timer. |
+
+With group commit the WAL is flushed when **either** `max_records` or
+`max_bytes` is reached, and always at `commit()`. A crash can lose up to the
+last unsynced batch — the same trade-off as SQLite's `synchronous = NORMAL`.
+Call `flush_wal()` to force everything written so far to disk without a full
+`commit()`.
+
+| Method | Description |
+| :--- | :--- |
+| `flush_wal()` | Force a durable WAL barrier now. Synchronous; returns `None`. |
+
+```python
+import laurus
+
+# Opt into group commit with a 1-second periodic flush timer.
+policy = laurus.WalSyncPolicy.group(max_records=4096, max_interval_ms=1000)
+index = laurus.Index(path="./myindex", wal_sync_policy=policy)
+
+for i in range(10_000):
+    index.put_document(f"doc{i}", {"title": f"Document {i}"})
+
+# Force a durable barrier without committing yet.
+index.flush_wal()
+
+index.commit()  # also flushes the WAL
+```
+
+Omit `wal_sync_policy` (or pass `WalSyncPolicy.per_record()`) to keep the
+default, fully durable behaviour.
 
 ---
 

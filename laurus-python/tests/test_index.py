@@ -90,6 +90,57 @@ def test_get_documents_unknown_id(index):
 
 
 # ---------------------------------------------------------------------------
+# WAL sync policy
+# ---------------------------------------------------------------------------
+
+
+def test_wal_sync_policy_constructors():
+    """All WalSyncPolicy constructors build without error."""
+    assert laurus.WalSyncPolicy.per_record() is not None
+    assert laurus.WalSyncPolicy.group() is not None
+    assert (
+        laurus.WalSyncPolicy.group(
+            max_records=4096, max_bytes=2 * 1024 * 1024, max_interval_ms=1000
+        )
+        is not None
+    )
+
+
+def test_index_accepts_wal_sync_policies():
+    """Index construction accepts every WalSyncPolicy variant."""
+    assert laurus.Index(wal_sync_policy=laurus.WalSyncPolicy.per_record()) is not None
+    assert laurus.Index(wal_sync_policy=laurus.WalSyncPolicy.group()) is not None
+    assert (
+        laurus.Index(
+            wal_sync_policy=laurus.WalSyncPolicy.group(
+                max_records=8, max_bytes=4096, max_interval_ms=500
+            )
+        )
+        is not None
+    )
+
+
+def test_index_group_commit_flush_wal_then_commit():
+    """A document written under group commit is retrievable after flush+commit."""
+    idx = laurus.Index(wal_sync_policy=laurus.WalSyncPolicy.group())
+    idx.put_document("doc1", {"title": "Group Commit"})
+    idx.flush_wal()
+    idx.commit()
+    docs = idx.get_documents("doc1")
+    assert len(docs) == 1
+
+
+def test_flush_wal_per_record_is_noop():
+    """flush_wal() is a harmless no-op under the default per-record policy."""
+    idx = laurus.Index()
+    idx.put_document("doc1", {"title": "Per Record"})
+    idx.flush_wal()
+    idx.commit()
+    docs = idx.get_documents("doc1")
+    assert len(docs) == 1
+
+
+# ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
 

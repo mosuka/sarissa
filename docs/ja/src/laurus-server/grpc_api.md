@@ -8,7 +8,7 @@
 | :--- | :--- | :--- |
 | `HealthService` | `Check` | ヘルスチェック |
 | `IndexService` | `CreateIndex`, `GetIndex`, `GetSchema`, `AddField`, `DeleteField` | インデックスのライフサイクルとスキーマ |
-| `DocumentService` | `PutDocument`, `AddDocument`, `GetDocuments`, `DeleteDocuments`, `Commit` | ドキュメント CRUD とコミット |
+| `DocumentService` | `PutDocument`, `AddDocument`, `GetDocuments`, `DeleteDocuments`, `Commit`, `FlushWal` | ドキュメント CRUD・コミット・WAL flush |
 | `SearchService` | `Search`, `SearchStream` | 単発検索とストリーミング検索 |
 
 ---
@@ -317,6 +317,22 @@ rpc DeleteDocuments(DeleteDocumentsRequest) returns (DeleteDocumentsResponse);
 ```protobuf
 rpc Commit(CommitRequest) returns (CommitResponse);
 ```
+
+### `FlushWal`
+
+バッファされた WAL レコードを full commit なしで durable 化します。両メッセージとも空です。デフォルトの per-record sync ポリシーでは near no-op です（各書き込みは既に fsync 済み）。グループコミットポリシーでは、現在の partial batch をオンデマンドで flush し、クラッシュ時の損失窓を抑えます。`Commit` と異なりセグメントを materialize しないため、バッファされた変更は後続の `Commit` まで検索に反映されません。
+
+```protobuf
+rpc FlushWal(FlushWalRequest) returns (FlushWalResponse);
+
+message FlushWalRequest {}
+
+message FlushWalResponse {}
+```
+
+WAL の耐久性ポリシーはサーバ側の `[index.wal]` 設定セクションで構成します。[設定 → `[index.wal]` セクション](configuration.md#indexwal-セクション) および [永続化と WAL → WAL 耐久性ポリシー](../laurus/persistence.md#wal-耐久性ポリシー) を参照してください。
+
+**HTTP ゲートウェイ:** `POST /v1/flush_wal`
 
 ---
 

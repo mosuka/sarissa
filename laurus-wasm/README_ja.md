@@ -80,6 +80,33 @@ const stats = index.stats();
 // } }
 ```
 
+### 永続性 / WAL
+
+各変更は、エンジンのインメモリ先行書き込みログ（WAL）に追記されます。
+デフォルトでは WAL はレコードごとにフラッシュされます。書き込みスループットを
+高めるためにグループコミットを有効化するとフラッシュをまとめられます
+（クラッシュ時には SQLite の `synchronous = NORMAL` と同様に最後の未同期
+バッチまでを失う可能性があります）:
+
+```javascript
+import { Index, Schema, WalSyncPolicy } from "./pkg/laurus_wasm.js";
+
+// maxRecords, maxBytes, maxIntervalMs（いずれも省略可）
+const policy = WalSyncPolicy.group(4096, undefined, 1000);
+const index = await Index.open("my-index", schema, policy);
+
+await index.putDocument("doc1", { title: "Hello" });
+await index.flushWal(); // エンジン WAL のみをフラッシュ
+await index.commit();   // 変更を検索可能にし、かつ OPFS に永続化する
+```
+
+WASM の注意点: `maxIntervalMs` のバックグラウンドタイマーは wasm では
+**no-op** です（バックグラウンドスレッドがないため）。また `flushWal()` は
+インメモリエンジンの WAL のみをフラッシュし、OPFS への永続化は引き続き
+`commit()` で行われます。永続的な永続化には `commit()` を呼び出してください。
+`walSyncPolicy` を省略する（または `WalSyncPolicy.perRecord()` を渡す）と、
+デフォルトのレコードごとの動作が維持されます。
+
 ### Schema
 
 ```javascript

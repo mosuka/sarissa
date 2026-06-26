@@ -8,7 +8,7 @@ All services are defined under the `laurus.v1` protobuf package.
 | :--- | :--- | :--- |
 | `HealthService` | `Check` | Health checking |
 | `IndexService` | `CreateIndex`, `GetIndex`, `GetSchema`, `AddField`, `DeleteField` | Index lifecycle and schema |
-| `DocumentService` | `PutDocument`, `AddDocument`, `GetDocuments`, `DeleteDocuments`, `Commit` | Document CRUD and commit |
+| `DocumentService` | `PutDocument`, `AddDocument`, `GetDocuments`, `DeleteDocuments`, `Commit`, `FlushWal` | Document CRUD, commit, and WAL flush |
 | `SearchService` | `Search`, `SearchStream` | Unary and streaming search |
 
 ---
@@ -318,6 +318,22 @@ Commit pending changes (additions and deletions) to the index. Changes are not v
 ```protobuf
 rpc Commit(CommitRequest) returns (CommitResponse);
 ```
+
+### `FlushWal`
+
+Force buffered WAL records durable without a full commit. Both messages are empty. This is a near no-op under the default per-record sync policy (every write is already fsync'd); under the group-commit policy it flushes the current partial batch on demand, bounding the crash-loss window. Unlike `Commit`, it does not materialize segments, so buffered changes remain invisible to search until a subsequent `Commit`.
+
+```protobuf
+rpc FlushWal(FlushWalRequest) returns (FlushWalResponse);
+
+message FlushWalRequest {}
+
+message FlushWalResponse {}
+```
+
+The WAL durability policy is configured server-side via the `[index.wal]` config section. See [Configuration → `[index.wal]` Section](configuration.md#indexwal-section) and [Persistence & WAL → WAL Durability Policy](../laurus/persistence.md#wal-durability-policy).
+
+**HTTP gateway:** `POST /v1/flush_wal`
 
 ---
 

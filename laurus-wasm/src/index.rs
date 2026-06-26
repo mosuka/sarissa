@@ -11,6 +11,7 @@ use crate::query::{
 use crate::schema::WasmSchema;
 use crate::search::{build_dsl_request, build_lexical_request, build_vector_request};
 use crate::storage::OpfsPersistence;
+use crate::wal::WasmWalSyncPolicy;
 use laurus::embedding::embedder::Embedder;
 use laurus::embedding::per_field::PerFieldEmbedder;
 use laurus::embedding::precomputed::PrecomputedEmbedder;
@@ -142,12 +143,18 @@ impl WasmIndex {
     /// # Arguments
     ///
     /// * `schema` - Schema definition.
+    /// * `wal_sync_policy` - Optional WAL durability policy. Defaults to
+    ///   per-record fsync when omitted. Pass `WalSyncPolicy.group()` to opt into
+    ///   group-commit batching.
     ///
     /// # Returns
     ///
     /// A new `Index` instance backed by in-memory storage.
     #[wasm_bindgen]
-    pub async fn create(schema: WasmSchema) -> Result<WasmIndex, JsValue> {
+    pub async fn create(
+        schema: WasmSchema,
+        wal_sync_policy: Option<WasmWalSyncPolicy>,
+    ) -> Result<WasmIndex, JsValue> {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let js_embedders = schema.js_embedders;
         let runtime_analyzers = schema.runtime_analyzers;
@@ -166,6 +173,9 @@ impl WasmIndex {
         }
         for (name, analyzer) in runtime_analyzers {
             builder = builder.register_runtime_analyzer(name, analyzer);
+        }
+        if let Some(policy) = wal_sync_policy {
+            builder = builder.wal_sync_policy(policy.inner);
         }
 
         let engine = builder.build().await.map_err(laurus_err)?;
@@ -188,12 +198,19 @@ impl WasmIndex {
     ///
     /// * `name` - Index name (used as the OPFS subdirectory name).
     /// * `schema` - Schema definition.
+    /// * `wal_sync_policy` - Optional WAL durability policy. Defaults to
+    ///   per-record fsync when omitted. Pass `WalSyncPolicy.group()` to opt into
+    ///   group-commit batching.
     ///
     /// # Returns
     ///
     /// A new `Index` instance backed by OPFS-persistent storage.
     #[wasm_bindgen]
-    pub async fn open(name: String, schema: WasmSchema) -> Result<WasmIndex, JsValue> {
+    pub async fn open(
+        name: String,
+        schema: WasmSchema,
+        wal_sync_policy: Option<WasmWalSyncPolicy>,
+    ) -> Result<WasmIndex, JsValue> {
         let opfs = OpfsPersistence::open(&name).await?;
         let storage = opfs.load().await?;
         let js_embedders = schema.js_embedders;
@@ -212,6 +229,9 @@ impl WasmIndex {
         }
         for (name, analyzer) in runtime_analyzers {
             builder = builder.register_runtime_analyzer(name, analyzer);
+        }
+        if let Some(policy) = wal_sync_policy {
+            builder = builder.wal_sync_policy(policy.inner);
         }
 
         let engine = builder.build().await.map_err(laurus_err)?;
@@ -302,6 +322,28 @@ impl WasmIndex {
         }
 
         Ok(())
+    }
+
+    /// Force every appended-but-unsynced WAL record durable, without a full
+    /// `commit()` (Issue #542 / #820).
+    ///
+    /// Under the default per-record policy this is a near-no-op: each
+    /// `putDocument` / `addDocument` / `deleteDocuments` already fsyncs, so there
+    /// is nothing pending. Under `WalSyncPolicy.group()` appends defer their
+    /// fsync, so this is the way to bound the crash-loss window at an
+    /// application-chosen point without paying the cost of materializing the
+    /// lexical/vector indexes that `commit()` entails.
+    ///
+    /// Unlike `commit()`, this does **not** rebuild the searchable indexes and
+    /// does **not** persist to OPFS — OPFS durability still requires `commit()`.
+    ///
+    /// **wasm note:** the `maxIntervalMs` background flush timer configured via
+    /// `WalSyncPolicy.group()` is a no-op under WebAssembly (it is native-only in
+    /// the core), so `flushWal()` and `commit()` are the only ways to flush a
+    /// deferred group-commit batch on this target.
+    #[wasm_bindgen(js_name = "flushWal")]
+    pub async fn flush_wal(&self) -> Result<(), JsValue> {
+        self.engine.flush_wal().map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────

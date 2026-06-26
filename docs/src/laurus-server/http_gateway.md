@@ -39,6 +39,7 @@ If `http_port` is not set, only the gRPC server starts.
 | GET | `/v1/documents/{id}` | `DocumentService/GetDocuments` | Get documents by ID |
 | DELETE | `/v1/documents/{id}` | `DocumentService/DeleteDocuments` | Delete documents by ID |
 | POST | `/v1/commit` | `DocumentService/Commit` | Commit pending changes |
+| POST | `/v1/flush_wal` | `DocumentService/FlushWal` | Force buffered WAL records durable without a full commit |
 | POST | `/v1/search` | `SearchService/Search` | Search (unary) |
 | POST | `/v1/search/stream` | `SearchService/SearchStream` | Search (Server-Sent Events) |
 
@@ -160,6 +161,14 @@ curl -X DELETE http://localhost:8080/v1/documents/doc1
 
 ```bash
 curl -X POST http://localhost:8080/v1/commit
+```
+
+### Flush WAL
+
+Forces buffered WAL records durable without a full commit. Returns `{}` on success. This is a near no-op under the default per-record sync policy; under the group-commit policy it flushes the current partial batch on demand. Buffered changes stay invisible to search until a subsequent `POST /v1/commit`.
+
+```bash
+curl -X POST http://localhost:8080/v1/flush_wal
 ```
 
 ### Search

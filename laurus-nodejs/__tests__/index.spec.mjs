@@ -21,6 +21,7 @@ import {
   SynonymDictionary,
   WhitespaceTokenizer,
   SynonymGraphFilter,
+  WalSyncPolicy,
 } from "../index.js";
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,39 @@ describe("Index creation", () => {
     schema.addTextField("title");
     const index = await Index.create(null, schema);
     expect(index).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WAL sync policy
+// ---------------------------------------------------------------------------
+
+describe("WAL sync policy", () => {
+  it("accepts perRecord() and group(...) factories", () => {
+    expect(WalSyncPolicy.perRecord()).toBeDefined();
+    expect(WalSyncPolicy.group()).toBeDefined();
+    expect(WalSyncPolicy.group(256, 4096, 1000)).toBeDefined();
+  });
+
+  it("creates a group-commit index, flushes the WAL, and retrieves docs", async () => {
+    const schema = new Schema();
+    schema.addTextField("title");
+    const index = await Index.create(null, schema, WalSyncPolicy.group());
+    await index.putDocument("doc1", { title: "Group commit" });
+    await index.flushWal();
+    await index.commit();
+    const docs = await index.getDocuments("doc1");
+    expect(docs).toHaveLength(1);
+    expect(docs[0].title).toBe("Group commit");
+  });
+
+  it("flushWal is a no-op fast path under perRecord", async () => {
+    const index = await Index.create(null, undefined, WalSyncPolicy.perRecord());
+    await index.putDocument("doc1", { title: "Per record" });
+    await index.flushWal();
+    await index.commit();
+    const docs = await index.getDocuments("doc1");
+    expect(docs).toHaveLength(1);
   });
 });
 
