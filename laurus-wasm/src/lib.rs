@@ -22,3 +22,4 @@ mod query;
 mod schema;
 mod search;
 mod storage;
+mod wal;

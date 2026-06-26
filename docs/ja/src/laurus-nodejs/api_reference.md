@@ -9,6 +9,7 @@ class Index {
   static create(
     path?: string | null,
     schema?: Schema,
+    walSyncPolicy?: WalSyncPolicy,
   ): Promise<Index>;
 }
 ```
@@ -19,6 +20,7 @@ class Index {
 | :--- | :--- | :--- | :--- |
 | `path` | `string \| null` | `null` | 永続化ストレージのディレクトリ。`null` でインメモリ。 |
 | `schema` | `Schema` | 空 | スキーマ定義。 |
+| `walSyncPolicy` | `WalSyncPolicy` | レコードごと | WAL の永続性ポリシー。省略するとデフォルトのレコードごとの `fsync` を使用します。[WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照。 |
 
 ### メソッド
 
@@ -29,6 +31,7 @@ class Index {
 | `getDocuments(id)` | 指定 ID の全バージョンを取得。 |
 | `deleteDocuments(id)` | 指定 ID の全バージョンを削除。 |
 | `commit()` | 書き込みをフラッシュし変更を検索可能にする。 |
+| `flushWal()` | WAL の永続性バリアを強制する。[WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照。 |
 | `search(query, limit?, offset?)` | DSL 文字列で検索。 |
 | `searchTerm(field, term, limit?, offset?)` | 完全一致 Term 検索。 |
 | `searchVector(field, vector, limit?, offset?)` | 事前計算ベクトルで検索。 |
@@ -48,6 +51,70 @@ interface IndexStats {
   vectorFields: Record<string, { count: number; dimension: number }>;
 }
 ```
+
+### WAL 同期ポリシー / 永続性
+
+永続インデックスでは、すべての書き込みが先行書き込みログ（WAL）に追記されます。
+デフォルトでは WAL は**すべての**レコードごとに `fsync` されるため、Promise が
+解決した時点で各書き込みは完全に永続化されます。`Index.create` はオプションの
+`walSyncPolicy` を受け付け、永続性を一部犠牲にして書き込みスループットを
+向上させることができます。また `flushWal()` で必要なときに永続性バリアを
+強制できます。
+
+```typescript
+class WalSyncPolicy {
+  static perRecord(): WalSyncPolicy;
+  static group(
+    maxRecords?: number,
+    maxBytes?: number,
+    maxIntervalMs?: number,
+  ): WalSyncPolicy;
+}
+```
+
+| コンストラクタ | 説明 |
+| :--- | :--- |
+| `WalSyncPolicy.perRecord()` | デフォルト。WAL レコードごとに `fsync` し、書き込みごとに完全に永続化します。 |
+| `WalSyncPolicy.group(...)` | グループコミット。複数の書き込みにまたがって `fsync` をまとめます。 |
+
+`group(...)` のパラメータ（引数を省略するとそのデフォルトを維持）:
+
+| パラメータ | デフォルト | 説明 |
+| :--- | :--- | :--- |
+| `maxRecords` | `1024` | この件数のレコードが蓄積されたらフラッシュします。 |
+| `maxBytes` | `1048576`（1 MiB） | この量の未同期バイトが蓄積されたらフラッシュします。 |
+| `maxIntervalMs` | なし | 任意の定期フラッシュタイマー（ミリ秒）。省略するとタイマー無効。 |
+
+グループコミットでは、`maxRecords` または `maxBytes` の**いずれか**に達した
+時点で WAL がフラッシュされ、`commit()` 時にも必ずフラッシュされます。
+クラッシュ時には最後の未同期バッチまでを失う可能性があります — これは
+SQLite の `synchronous = NORMAL` と同じトレードオフです。完全な `commit()` を
+行わずにこれまで書き込んだ内容をディスクへ強制するには `flushWal()` を
+呼び出します。
+
+| メソッド | 説明 |
+| :--- | :--- |
+| `flushWal()` | 今すぐ WAL の永続性バリアを強制します。`Promise<void>` を返します。 |
+
+```javascript
+import { Index, WalSyncPolicy } from "laurus-nodejs";
+
+// 1 秒の定期フラッシュタイマー付きでグループコミットを有効化します。
+const policy = WalSyncPolicy.group(4096, undefined, 1000);
+const index = await Index.create("./myindex", schema, policy);
+
+for (let i = 0; i < 10000; i++) {
+  await index.putDocument(`doc${i}`, { title: `Document ${i}` });
+}
+
+// まだコミットせずに永続性バリアを強制します。
+await index.flushWal();
+
+await index.commit(); // WAL もフラッシュされます
+```
+
+`walSyncPolicy` を省略する（または `WalSyncPolicy.perRecord()` を渡す）と、
+デフォルトの完全に永続的な動作が維持されます。
 
 ---
 

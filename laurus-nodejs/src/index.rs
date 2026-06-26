@@ -11,6 +11,7 @@ use crate::search::{
     JsSearchRequest, JsSearchResult, build_dsl_request, build_lexical_request,
     build_vector_request, to_js_search_result,
 };
+use crate::wal::JsWalSyncPolicy;
 use laurus::{Engine, Storage, StorageConfig, StorageFactory};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -74,16 +75,27 @@ impl JsIndex {
     /// * `path` - Directory path for persistent storage.
     ///     Pass `null` or omit for an ephemeral in-memory index.
     /// * `schema` - Schema definition. If omitted, an empty schema is used.
+    /// * `wal_sync_policy` - Optional WAL durability policy (see
+    ///     `WalSyncPolicy`). When omitted, the default per-record policy is
+    ///     used, where every append is fsync'd before it returns.
     ///
     /// # Returns
     ///
     /// A new `Index` instance.
     #[napi(factory)]
-    pub async fn create(path: Option<String>, schema: Option<&JsSchema>) -> Result<Self> {
+    pub async fn create(
+        path: Option<String>,
+        schema: Option<&JsSchema>,
+        wal_sync_policy: Option<&JsWalSyncPolicy>,
+    ) -> Result<Self> {
         let storage = create_storage(path.as_deref())?;
         let schema = schema.map(|s| s.inner.clone()).unwrap_or_default();
 
-        let engine = Engine::new(storage, schema).await.map_err(laurus_err)?;
+        let mut builder = Engine::builder(storage, schema);
+        if let Some(policy) = wal_sync_policy {
+            builder = builder.wal_sync_policy(policy.inner);
+        }
+        let engine = builder.build().await.map_err(laurus_err)?;
 
         Ok(Self {
             engine: Arc::new(engine),
@@ -167,6 +179,26 @@ impl JsIndex {
     #[napi]
     pub async fn commit(&self) -> Result<()> {
         self.engine.commit().await.map_err(laurus_err)
+    }
+
+    /// Force the write-ahead log durable on demand.
+    ///
+    /// Under the default `WalSyncPolicy.perRecord()` policy every append is
+    /// already fsync'd, so this is a no-op fast path. Under
+    /// `WalSyncPolicy.group(...)` the fsync of each append is deferred and
+    /// batched for throughput, which means a crash can lose the last unsynced
+    /// batch; calling `flushWal()` forces the current batch durable without the
+    /// heavier work of a full `commit()` (which also materializes the index).
+    /// Use it to bound the durability window of a group-commit index — for
+    /// example after a logical unit of ingest — when you do not yet want the
+    /// changes to become searchable.
+    ///
+    /// # Returns
+    ///
+    /// Resolves once the WAL has been fsync'd, or rejects if the flush fails.
+    #[napi]
+    pub async fn flush_wal(&self) -> Result<()> {
+        self.engine.flush_wal().map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────

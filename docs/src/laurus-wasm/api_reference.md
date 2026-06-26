@@ -6,21 +6,27 @@ The main entry point for creating and querying search indexes.
 
 ### Static Methods
 
-#### `Index.create(schema?)`
+#### `Index.create(schema?, walSyncPolicy?)`
 
 Create a new in-memory (ephemeral) index.
 
 - **Parameters:**
   - `schema` (Schema, optional) -- Schema definition.
+  - `walSyncPolicy` (WalSyncPolicy, optional) -- WAL durability policy. Omit
+    to keep the default per-record sync. See
+    [WAL sync policy / durability](#wal-sync-policy--durability).
 - **Returns:** `Promise<Index>`
 
-#### `Index.open(name, schema?)`
+#### `Index.open(name, schema?, walSyncPolicy?)`
 
 Open or create a persistent index backed by OPFS.
 
 - **Parameters:**
   - `name` (string) -- Index name (OPFS subdirectory).
   - `schema` (Schema, optional) -- Schema definition.
+  - `walSyncPolicy` (WalSyncPolicy, optional) -- WAL durability policy. Omit
+    to keep the default per-record sync. See
+    [WAL sync policy / durability](#wal-sync-policy--durability).
 - **Returns:** `Promise<Index>`
 
 ### Instance Methods
@@ -60,6 +66,15 @@ Delete all versions of a document.
 
 Flush writes and make changes searchable. If opened with
 `Index.open()`, data is also persisted to OPFS.
+
+- **Returns:** `Promise<void>`
+
+#### `flushWal()`
+
+Force a durable WAL barrier on the in-memory engine WAL. See
+[WAL sync policy / durability](#wal-sync-policy--durability) for the wasm
+caveats — notably, this does **not** persist to OPFS; call `commit()` for
+durable persistence.
 
 - **Returns:** `Promise<void>`
 
@@ -145,6 +160,77 @@ documents closest to `(x, y, z)`. The optional `initialRadiusM` and
 Return index statistics.
 
 - **Returns:** `{ documentCount: number, vectorFields: { [name]: { count, dimension } } }`
+
+## WAL sync policy / durability
+
+Each write is appended to the engine's in-memory write-ahead log (WAL).
+`Index.create` and `Index.open` accept an optional `walSyncPolicy` that
+controls how often that WAL is flushed. The default (omit the argument) is
+per-record sync.
+
+```typescript
+class WalSyncPolicy {
+  static perRecord(): WalSyncPolicy;
+  static group(
+    maxRecords?: number,
+    maxBytes?: number,
+    maxIntervalMs?: number,
+  ): WalSyncPolicy;
+}
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `WalSyncPolicy.perRecord()` | Default. Flush after every WAL record. |
+| `WalSyncPolicy.group(...)` | Group commit. Batch the flush across writes. |
+
+`group(...)` parameters (omit any argument to keep its default):
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `maxRecords` | `1024` | Flush once this many records have accumulated. |
+| `maxBytes` | `1048576` (1 MiB) | Flush once this many unsynced bytes have accumulated. |
+| `maxIntervalMs` | none | Periodic flush timer (milliseconds). **No-op on wasm** (see caveats). |
+
+With group commit the engine WAL is flushed when **either** `maxRecords` or
+`maxBytes` is reached, and always at `commit()`. A crash can lose up to the
+last unsynced batch — the same trade-off as SQLite's `synchronous = NORMAL`.
+
+### `flushWal()` (durable barrier)
+
+`flushWal()` forces a flush of the in-memory engine WAL on demand.
+
+- **Returns:** `Promise<void>`
+
+### WASM caveats
+
+WebAssembly has no background threads or direct filesystem, so two behaviours
+differ from the native bindings:
+
+- **`maxIntervalMs` is a no-op.** The periodic flush timer requires a
+  background thread, which is unavailable on wasm. Group commit still flushes
+  on the `maxRecords` / `maxBytes` thresholds and at `commit()`.
+- **`flushWal()` flushes the in-memory engine WAL only.** OPFS persistence
+  still happens at `commit()`. For durable persistence on wasm, call
+  `commit()`.
+
+```javascript
+import { Index, Schema, WalSyncPolicy } from "./pkg/laurus_wasm.js";
+
+const schema = new Schema();
+schema.addTextField("title");
+
+// Opt into group commit. maxIntervalMs is accepted but ignored on wasm.
+const policy = WalSyncPolicy.group(4096, undefined, 1000);
+const index = await Index.open("my-index", schema, policy);
+
+for (let i = 0; i < 10000; i++) {
+  await index.putDocument(`doc${i}`, { title: `Document ${i}` });
+}
+
+await index.flushWal(); // flushes the engine WAL (not OPFS)
+await index.commit();   // makes changes searchable AND persists to OPFS
+```
 
 ## Schema
 

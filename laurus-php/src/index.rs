@@ -5,12 +5,135 @@ use std::sync::Arc;
 
 use ext_php_rs::prelude::*;
 use ext_php_rs::types::{ZendHashTable, Zval};
-use laurus::{Engine, EngineStats, Storage, StorageConfig, StorageFactory};
+use laurus::{
+    DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Engine, EngineStats, Storage,
+    StorageConfig, StorageFactory, WalSyncPolicy,
+};
 
 use crate::convert::{document_to_hashtable, hashtable_to_document};
 use crate::errors::laurus_err;
 use crate::schema::PhpSchema;
 use crate::search::{PhpSearchResult, build_request_from_php, to_php_search_result};
+
+// ---------------------------------------------------------------------------
+// WalSyncPolicy
+// ---------------------------------------------------------------------------
+
+/// Write-ahead-log (WAL) durability policy (`Laurus\WalSyncPolicy`).
+///
+/// This is a value object wrapping the Rust [`laurus::WalSyncPolicy`]. It is
+/// passed to [`PhpIndex::__construct`] as the optional third argument and
+/// controls when the engine forces appended records durable (fsync).
+///
+/// Construct one with the static factory methods rather than `new`:
+///
+/// ```php
+/// use Laurus\Index;
+/// use Laurus\WalSyncPolicy;
+///
+/// // Per-record durability (the default): every add/put is fsynced before
+/// // it returns, so a successful write can never be lost to a crash.
+/// $policy = WalSyncPolicy::perRecord();
+///
+/// // Group commit with the built-in default thresholds.
+/// $policy = WalSyncPolicy::group();
+///
+/// // Group commit with custom thresholds and a 1 s periodic flush.
+/// $policy = WalSyncPolicy::group(4096, 4 * 1024 * 1024, 1000);
+///
+/// $index = new Index(null, null, $policy);
+/// ```
+#[php_class]
+#[php(name = "Laurus\\WalSyncPolicy")]
+#[derive(Clone, Copy)]
+pub struct PhpWalSyncPolicy {
+    /// The wrapped Rust durability policy passed to the engine builder.
+    pub inner: WalSyncPolicy,
+}
+
+#[php_impl]
+impl PhpWalSyncPolicy {
+    /// Create a per-record durability policy.
+    ///
+    /// Every `addDocument` / `putDocument` is fsynced before it returns, so a
+    /// successful write can never be lost to a crash. This is the safest policy
+    /// and the engine default when no `wal_sync_policy` is supplied to
+    /// [`PhpIndex::__construct`], at the cost of the lowest ingest throughput.
+    ///
+    /// # Returns
+    ///
+    /// A `WalSyncPolicy` wrapping [`WalSyncPolicy::PerRecord`].
+    pub fn per_record() -> Self {
+        Self {
+            inner: WalSyncPolicy::PerRecord,
+        }
+    }
+
+    /// Create a group-commit durability policy.
+    ///
+    /// The engine defers the fsync and amortizes it over a batch: it flushes
+    /// when **either** `max_records` records **or** `max_bytes` bytes have
+    /// accumulated since the last sync (whichever comes first), and
+    /// unconditionally at `commit()`. This trades per-record durability for
+    /// ingest throughput — a crash can lose the most recent unsynced batch of
+    /// appends. `commit()` is still a hard durability barrier, and `flushWal()`
+    /// forces a flush on demand.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_records` - Flush after this many records accumulate since the
+    ///   last sync. Defaults to laurus' built-in
+    ///   [`DEFAULT_GROUP_MAX_RECORDS`] (1024) when null.
+    /// * `max_bytes` - Flush after this many appended bytes accumulate since
+    ///   the last sync. Defaults to laurus' built-in
+    ///   [`DEFAULT_GROUP_MAX_BYTES`] (1 MiB) when null.
+    /// * `max_interval_ms` - Optional periodic flush interval in milliseconds.
+    ///   When provided, the engine runs a background timer that forces the WAL
+    ///   durable at least this often so a trailing partial batch under a low
+    ///   ingest rate is not left unsynced indefinitely. Null disables the
+    ///   timer.
+    ///
+    /// # Returns
+    ///
+    /// A `WalSyncPolicy` wrapping [`WalSyncPolicy::Group`].
+    pub fn group(
+        max_records: Option<i64>,
+        max_bytes: Option<i64>,
+        max_interval_ms: Option<i64>,
+    ) -> Self {
+        Self {
+            inner: WalSyncPolicy::Group {
+                max_records: max_records
+                    .map(|v| v as usize)
+                    .unwrap_or(DEFAULT_GROUP_MAX_RECORDS),
+                max_bytes: max_bytes
+                    .map(|v| v as usize)
+                    .unwrap_or(DEFAULT_GROUP_MAX_BYTES),
+                max_interval: max_interval_ms.map(|v| std::time::Duration::from_millis(v as u64)),
+            },
+        }
+    }
+
+    /// Return a string representation.
+    pub fn __to_string(&self) -> String {
+        match self.inner {
+            WalSyncPolicy::PerRecord => "WalSyncPolicy.perRecord()".to_string(),
+            WalSyncPolicy::Group {
+                max_records,
+                max_bytes,
+                max_interval,
+            } => format!(
+                "WalSyncPolicy.group(max_records={}, max_bytes={}, max_interval_ms={})",
+                max_records,
+                max_bytes,
+                match max_interval {
+                    Some(d) => d.as_millis().to_string(),
+                    None => "null".to_string(),
+                }
+            ),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Index
@@ -56,7 +179,15 @@ impl PhpIndex {
     /// * `path` - Directory path for persistent storage. Pass null (default)
     ///   for an ephemeral in-memory index.
     /// * `schema` - Schema definition (optional).
-    pub fn __construct(path: Option<String>, schema: Option<&PhpSchema>) -> PhpResult<Self> {
+    /// * `wal_sync_policy` - Optional [`PhpWalSyncPolicy`] controlling when the
+    ///   write-ahead log is forced durable. Defaults to per-record durability
+    ///   ([`WalSyncPolicy::PerRecord`]) when null. Use
+    ///   [`PhpWalSyncPolicy::group`] for higher-throughput group commit.
+    pub fn __construct(
+        path: Option<String>,
+        schema: Option<&PhpSchema>,
+        wal_sync_policy: Option<&PhpWalSyncPolicy>,
+    ) -> PhpResult<Self> {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| ext_php_rs::exception::PhpException::default(e.to_string()))?;
 
@@ -67,9 +198,12 @@ impl PhpIndex {
             None => laurus::Schema::default(),
         };
 
-        let engine = rt
-            .block_on(Engine::new(storage, schema_val))
-            .map_err(laurus_err)?;
+        let mut builder = Engine::builder(storage, schema_val);
+        if let Some(policy) = wal_sync_policy {
+            builder = builder.wal_sync_policy(policy.inner);
+        }
+
+        let engine = rt.block_on(builder.build()).map_err(laurus_err)?;
 
         Ok(Self {
             engine: Arc::new(engine),
@@ -158,6 +292,30 @@ impl PhpIndex {
     pub fn commit(&self) -> PhpResult<()> {
         let engine = self.engine.clone();
         self.rt.block_on(engine.commit()).map_err(laurus_err)
+    }
+
+    /// Force the write-ahead log (WAL) durable without materializing the index.
+    ///
+    /// This synchronously fsyncs any appended-but-unsynced records and returns
+    /// once they are on stable storage. It runs directly on the calling thread
+    /// (the underlying `Engine::flush_wal` is synchronous), so unlike
+    /// `commit()` it does not block on the tokio runtime.
+    ///
+    /// # Durability trade-off
+    ///
+    /// This matters only under a group-commit [`PhpWalSyncPolicy`]
+    /// ([`PhpWalSyncPolicy::group`]), where individual appends are batched and
+    /// not yet durable. Under the default per-record policy
+    /// ([`PhpWalSyncPolicy::per_record`]) every append is already durable, so
+    /// this call is a cheap no-op-ish flush.
+    ///
+    /// With group commit a crash can lose the most recent unsynced batch of
+    /// appends. Call `flushWal()` to bound that window on demand without paying
+    /// the cost of a full `commit()` (which also fsyncs the WAL but additionally
+    /// materializes the in-memory index state). Use `flushWal()` when you want
+    /// the WAL durable but do not yet need the new documents to be searchable.
+    pub fn flush_wal(&self) -> PhpResult<()> {
+        self.engine.flush_wal().map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────

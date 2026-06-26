@@ -20,3 +20,4 @@ mod index;
 mod query;
 mod schema;
 mod search;
+mod wal;

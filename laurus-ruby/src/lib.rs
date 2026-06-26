@@ -18,6 +18,7 @@ mod index;
 mod query;
 mod schema;
 mod search;
+mod wal;
 
 use magnus::{Error, Ruby};
 
@@ -29,6 +30,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // Core
     index::define(ruby, &module)?;
     schema::define(ruby, &module)?;
+    wal::define(ruby, &module)?;
 
     // Search result & request, fusion algorithms
     search::define(ruby, &module)?;

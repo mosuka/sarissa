@@ -13,8 +13,9 @@ use laurus::Engine;
 use crate::convert::{document as doc_convert, error};
 use crate::proto::laurus::v1::{
     AddDocumentRequest, AddDocumentResponse, CommitRequest, CommitResponse, DeleteDocumentsRequest,
-    DeleteDocumentsResponse, GetDocumentsRequest, GetDocumentsResponse, PutDocumentRequest,
-    PutDocumentResponse, document_service_server::DocumentService as DocumentServiceTrait,
+    DeleteDocumentsResponse, FlushWalRequest, FlushWalResponse, GetDocumentsRequest,
+    GetDocumentsResponse, PutDocumentRequest, PutDocumentResponse,
+    document_service_server::DocumentService as DocumentServiceTrait,
 };
 
 /// gRPC DocumentService implementation.
@@ -125,5 +126,69 @@ impl DocumentServiceTrait for DocumentService {
         engine.commit().await.map_err(error::to_status)?;
 
         Ok(Response::new(CommitResponse {}))
+    }
+
+    /// Forces any buffered WAL records durable without a full commit.
+    ///
+    /// A near no-op under the default per-record sync policy; under the
+    /// group-commit policy it flushes a partial batch on demand.
+    async fn flush_wal(
+        &self,
+        _request: Request<FlushWalRequest>,
+    ) -> Result<Response<FlushWalResponse>, Status> {
+        let guard = self.engine.read().await;
+        let engine = Self::get_engine_ref(&guard)?;
+        engine.flush_wal().map_err(error::to_status)?;
+
+        Ok(Response::new(FlushWalResponse {}))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use laurus::storage::memory::MemoryStorage;
+    use laurus::{Schema, Storage, WalSyncPolicy};
+
+    async fn service_with_engine(policy: WalSyncPolicy) -> DocumentService {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let engine = Engine::builder(storage, Schema::default())
+            .wal_sync_policy(policy)
+            .build()
+            .await
+            .unwrap();
+        DocumentService {
+            engine: Arc::new(RwLock::new(Some(engine))),
+        }
+    }
+
+    #[tokio::test]
+    async fn flush_wal_fails_without_an_index() {
+        let service = DocumentService {
+            engine: Arc::new(RwLock::new(None)),
+        };
+        let status = service
+            .flush_wal(Request::new(FlushWalRequest {}))
+            .await
+            .unwrap_err();
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn flush_wal_succeeds_under_per_record_policy() {
+        let service = service_with_engine(WalSyncPolicy::PerRecord).await;
+        service
+            .flush_wal(Request::new(FlushWalRequest {}))
+            .await
+            .expect("flush_wal must succeed (near no-op) under per-record policy");
+    }
+
+    #[tokio::test]
+    async fn flush_wal_succeeds_under_group_policy() {
+        let service = service_with_engine(WalSyncPolicy::group_with_defaults()).await;
+        service
+            .flush_wal(Request::new(FlushWalRequest {}))
+            .await
+            .expect("flush_wal must act as a durability barrier under group policy");
     }
 }

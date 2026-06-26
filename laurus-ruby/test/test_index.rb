@@ -44,6 +44,34 @@ class TestIndex < Minitest::Test
   end
 
   # ---------------------------------------------------------------------------
+  # WAL sync policy / group commit
+  # ---------------------------------------------------------------------------
+
+  def test_wal_sync_policy_constructors
+    # Both constructors build accepted value objects.
+    per_record = Laurus::WalSyncPolicy.per_record
+    refute_nil per_record
+
+    group = Laurus::WalSyncPolicy.group(max_records: 256, max_bytes: 4096, max_interval_ms: 1000)
+    refute_nil group
+
+    # group with no args == defaults; both are accepted by Index.new.
+    refute_nil Laurus::Index.new(wal_sync_policy: Laurus::WalSyncPolicy.per_record)
+    refute_nil Laurus::Index.new(wal_sync_policy: Laurus::WalSyncPolicy.group)
+    refute_nil Laurus::Index.new(wal_sync_policy: group)
+  end
+
+  def test_index_with_group_commit_flush_and_commit
+    idx = Laurus::Index.new(wal_sync_policy: Laurus::WalSyncPolicy.group)
+    idx.put_document("doc1", { "title" => "Group commit" })
+    # flush_wal forces WAL durability without publishing to searches.
+    idx.flush_wal
+    idx.commit
+    docs = idx.get_documents("doc1")
+    assert_equal 1, docs.length
+  end
+
+  # ---------------------------------------------------------------------------
   # Document CRUD
   # ---------------------------------------------------------------------------
 

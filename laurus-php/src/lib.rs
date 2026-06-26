@@ -28,6 +28,7 @@ pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
     module
         // Core
         .class::<index::PhpIndex>()
+        .class::<index::PhpWalSyncPolicy>()
         .class::<schema::PhpSchema>()
         // Search result & request, fusion algorithms
         .class::<search::PhpRRF>()

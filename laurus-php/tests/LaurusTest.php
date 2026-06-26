@@ -691,4 +691,74 @@ class LaurusTest extends TestCase
         $this->expectException(\Throwable::class);
         $schema->addHnswField("embedding", 4, null, 16, 200, null, null, null, null, "bogus");
     }
+
+    // ── WAL group-commit / WalSyncPolicy (#820) ───────────────────────────
+
+    public function testIndexWithGroupCommitWalPolicy(): void
+    {
+        // An index built with a group-commit policy must still behave
+        // identically: documents survive flushWal() + commit() and remain
+        // retrievable.
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+        $idx = new Laurus\Index(null, $schema, Laurus\WalSyncPolicy::group());
+
+        $idx->putDocument("doc1", ["title" => "Hello"]);
+        // flushWal() forces the WAL durable without materializing the index.
+        $idx->flushWal();
+        // commit() makes the document searchable / retrievable.
+        $idx->commit();
+
+        $docs = $idx->getDocuments("doc1");
+        $this->assertCount(1, $docs);
+        $this->assertEquals("Hello", $docs[0]["title"]);
+    }
+
+    public function testFlushWalUnderPerRecordPolicy(): void
+    {
+        // flushWal() is also valid under the default per-record policy, where
+        // it is effectively a no-op since every append is already durable.
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+        $idx = new Laurus\Index(null, $schema, Laurus\WalSyncPolicy::perRecord());
+
+        $idx->putDocument("doc1", ["title" => "World"]);
+        $idx->flushWal();
+        $idx->commit();
+
+        $docs = $idx->getDocuments("doc1");
+        $this->assertCount(1, $docs);
+    }
+
+    public function testWalSyncPolicyFactoriesAccepted(): void
+    {
+        // Both factories build a value object that the Index constructor
+        // accepts. group() with explicit thresholds + interval must also work.
+        $perRecord = Laurus\WalSyncPolicy::perRecord();
+        $this->assertNotNull($perRecord);
+
+        $group = Laurus\WalSyncPolicy::group(256, 4096, 1000);
+        $this->assertNotNull($group);
+
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+
+        $idx1 = new Laurus\Index(null, $schema, $perRecord);
+        $this->assertNotNull($idx1);
+
+        $idx2 = new Laurus\Index(null, $schema, $group);
+        $this->assertNotNull($idx2);
+    }
+
+    public function testWalSyncPolicyDefaultsOmittedConstruct(): void
+    {
+        // Omitting wal_sync_policy entirely keeps the existing behavior
+        // (per-record durability), preserving backward compatibility.
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+        $idx = new Laurus\Index(null, $schema);
+        $idx->putDocument("doc1", ["title" => "Backward compatible"]);
+        $idx->commit();
+        $this->assertCount(1, $idx->getDocuments("doc1"));
+    }
 }

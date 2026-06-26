@@ -5,7 +5,7 @@
 The primary entry point. Wraps the Laurus search engine.
 
 ```php
-new \Laurus\Index(?string $path = null, ?Schema $schema = null)
+new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $wal_sync_policy = null)
 ```
 
 ### Constructor
@@ -14,6 +14,7 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null)
 | :--- | :--- | :--- | :--- |
 | `$path` | `string\|null` | `null` | Directory path for persistent storage. `null` creates an in-memory index. |
 | `$schema` | `Schema\|null` | `null` | Schema definition. An empty schema is used when omitted. |
+| `$wal_sync_policy` | `WalSyncPolicy\|null` | `null` | Write-ahead log (WAL) durability policy. `null` keeps the default per-record fsync. See [WAL sync policy & durability](#wal-sync-policy--durability). |
 
 ### Methods
 
@@ -24,6 +25,7 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null)
 | `getDocuments(string $id): array` | Return all stored versions for the given ID. |
 | `deleteDocuments(string $id): void` | Delete all versions for the given ID. |
 | `commit(): void` | Flush buffered writes and make all pending changes searchable. |
+| `flushWal(): void` | Force a durable WAL barrier on demand. Synchronously fsyncs any unsynced WAL records. Useful when running under a group-commit policy (see below). |
 | `search(mixed $query, int $limit = 10, int $offset = 0): array` | Execute a search query. Returns an array of `SearchResult`. |
 | `searchBatch(array $queries, int $limit = 10, int $offset = 0): array` | Execute multiple independent searches in one call. Each query is dispatched in parallel on the underlying tokio runtime. `results[i]` corresponds to `queries[i]`. Returns an array of arrays of `SearchResult`. Empty input returns `[]`. |
 | `stats(): array` | Return index statistics (`"documentCount"`, `"vectorFields"`). |
@@ -38,6 +40,56 @@ The `$query` parameter accepts any of the following:
 - A **`SearchRequest`** for full control
 
 The same value kinds are accepted as the elements of `searchBatch`'s `$queries` array — DSL strings, query objects, and `SearchRequest` instances may be mixed within a single batch.
+
+### WAL sync policy & durability
+
+The write-ahead log (WAL) protects committed data against crashes. By
+default the WAL is fully durable: every record is `fsync`ed before the write
+returns. You can trade some durability for higher write throughput by opting
+into **group commit**, which batches `fsync` calls.
+
+#### WalSyncPolicy
+
+`Laurus\WalSyncPolicy` is an immutable value object describing how the WAL is
+flushed. Pass it to the `Index` constructor's `$wal_sync_policy` argument.
+
+```php
+// Default: durable per write (each record is fsynced individually).
+\Laurus\WalSyncPolicy::perRecord(): WalSyncPolicy
+
+// Group commit: batch fsyncs to amortise their cost.
+\Laurus\WalSyncPolicy::group(
+    ?int $max_records = null,      // flush after this many records (default 1024)
+    ?int $max_bytes = null,        // flush after this many bytes (default 1 MiB)
+    ?int $max_interval_ms = null,  // also flush periodically after this many ms
+): WalSyncPolicy
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `WalSyncPolicy::perRecord()` | Default. Every record is `fsync`ed before the write returns — fully durable per write. |
+| `WalSyncPolicy::group($max_records, $max_bytes, $max_interval_ms)` | Batch `fsync`s. With all arguments `null` uses the defaults (`max_records = 1024`, `max_bytes = 1 MiB`, no timer). The WAL is flushed when **either** `$max_records` **or** `$max_bytes` accumulate, and on every `commit()`. Pass `$max_interval_ms` to also flush on a periodic timer. |
+
+Group commit is analogous to SQLite's `synchronous = NORMAL`: a crash can lose
+at most the last unsynced batch of records, but the index never corrupts.
+Records are always made durable at `commit()`, so a successful `commit()` is a
+durability barrier regardless of policy.
+
+#### Forcing a flush
+
+Call `flushWal()` to force a durable barrier between commits — for example
+before signalling that a batch has been safely persisted. It synchronously
+`fsync`s any unsynced records. Under the default per-record policy it is
+effectively a no-op.
+
+```php
+// Opt into group commit, then force durability on demand.
+$policy = \Laurus\WalSyncPolicy::group(4096, 4 * 1024 * 1024);
+$index = new \Laurus\Index("./myindex", null, $policy);
+
+$index->putDocument("doc1", ["title" => "Hello"]);
+$index->flushWal(); // records persisted even though the group batch is not full
+```
 
 ---
 

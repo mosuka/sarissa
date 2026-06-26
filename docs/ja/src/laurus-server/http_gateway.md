@@ -39,6 +39,7 @@ laurus serve --config config.toml
 | GET | `/v1/documents/{id}` | `DocumentService/GetDocuments` | ID でドキュメントを取得 |
 | DELETE | `/v1/documents/{id}` | `DocumentService/DeleteDocuments` | ID でドキュメントを削除 |
 | POST | `/v1/commit` | `DocumentService/Commit` | 保留中の変更をコミット |
+| POST | `/v1/flush_wal` | `DocumentService/FlushWal` | full commit なしでバッファされた WAL レコードを durable 化 |
 | POST | `/v1/search` | `SearchService/Search` | 検索（単発） |
 | POST | `/v1/search/stream` | `SearchService/SearchStream` | 検索（Server-Sent Events） |
 
@@ -156,6 +157,14 @@ curl -X DELETE http://localhost:8080/v1/documents/doc1
 
 ```bash
 curl -X POST http://localhost:8080/v1/commit
+```
+
+### WAL のフラッシュ
+
+バッファされた WAL レコードを full commit なしで durable 化します。成功時は `{}` を返します。デフォルトの per-record sync ポリシーでは near no-op です。グループコミットポリシーでは、現在の partial batch をオンデマンドで flush します。バッファされた変更は後続の `POST /v1/commit` まで検索に反映されません。
+
+```bash
+curl -X POST http://localhost:8080/v1/flush_wal
 ```
 
 ### 検索

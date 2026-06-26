@@ -19,6 +19,11 @@ service DocumentService {
 
   // Commit pending changes to persistent storage.
   rpc Commit(CommitRequest) returns (CommitResponse);
+
+  // Force any buffered WAL records durable without a full commit. Useful under
+  // the group-commit sync policy to flush a partial batch on demand; a near
+  // no-op under the default per-record policy.
+  rpc FlushWal(FlushWalRequest) returns (FlushWalResponse);
 }
 
 message PutDocumentRequest {
@@ -52,3 +57,7 @@ message DeleteDocumentsResponse {}
 message CommitRequest {}
 
 message CommitResponse {}
+
+message FlushWalRequest {}
+
+message FlushWalResponse {}

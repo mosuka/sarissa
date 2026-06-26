@@ -69,6 +69,27 @@ schema.add_hnsw_field("embedding", dimension=384)
 index = laurus.Index(path="./myindex", schema=schema)
 ```
 
+## Durability / WAL
+
+A persistent index writes every change to a write-ahead log (WAL). By default
+the WAL is `fsync`-ed on every record, so each write is fully durable. Opt into
+group commit to batch `fsync` for higher write throughput (a crash can lose up
+to the last unsynced batch, like SQLite's `synchronous = NORMAL`):
+
+```python
+import laurus
+
+policy = laurus.WalSyncPolicy.group(max_records=4096, max_interval_ms=1000)
+index = laurus.Index(path="./myindex", schema=schema, wal_sync_policy=policy)
+
+index.put_document("doc1", {"title": "Hello"})
+index.flush_wal()  # force a durable barrier on demand
+index.commit()     # also flushes the WAL
+```
+
+Omit `wal_sync_policy` (or pass `laurus.WalSyncPolicy.per_record()`) to keep
+the default per-record durability.
+
 ## Query Types
 
 | Query class | Description |

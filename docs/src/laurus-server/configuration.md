@@ -40,6 +40,12 @@ http_port = 8080  # Optional: enables HTTP Gateway
 
 [index]
 data_dir = "./laurus_data"
+
+[index.wal]
+sync_policy = "group"          # "per_record" (default) | "group"
+group_max_records = 1024       # optional; default 1024
+group_max_bytes = 1048576      # optional; default 1 MiB
+group_max_interval_ms = 1000   # optional; no background timer when unset (native only)
 ```
 
 Log verbosity is controlled by the `RUST_LOG` environment variable (default: `info`), not through the config file.
@@ -59,6 +65,28 @@ Log verbosity is controlled by the `RUST_LOG` environment variable (default: `in
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `data_dir` | String | `"./laurus_data"` | Path to the index data directory |
+
+#### `[index.wal]` Section
+
+Controls the Write-Ahead Log (WAL) durability policy. When the whole section is
+omitted, the WAL uses **per-record** fsync (every write is durable before it
+returns). The policy applies to both an index opened at boot and any index
+created later through `CreateIndex`. See
+[Persistence & WAL → WAL Durability Policy](../laurus/persistence.md#wal-durability-policy)
+for the durability trade-off.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `sync_policy` | String | `"per_record"` | Durability policy: `"per_record"` (fsync every write) or `"group"` (batch fsyncs) |
+| `group_max_records` | Integer | `1024` | Group commit only. Flush once this many records accumulate since the last sync |
+| `group_max_bytes` | Integer | `1048576` | Group commit only. Flush once this many bytes accumulate since the last sync (default 1 MiB) |
+| `group_max_interval_ms` | Integer | -- | Group commit only. Periodic background flush interval in milliseconds. No timer runs when unset. **Native targets only** — ignored on `wasm32` |
+
+Under `sync_policy = "group"`, the WAL flushes when **either** `group_max_records`
+records **or** `group_max_bytes` bytes have accumulated since the last sync
+(whichever comes first), and unconditionally on commit. A crash can lose up to
+the last unsynced batch (comparable to SQLite `synchronous = NORMAL`); a torn
+trailing record is dropped on recovery, so the recovered log is gap-free.
 
 ## Environment Variables
 

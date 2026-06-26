@@ -5,7 +5,7 @@
 Laurus 検索エンジンをラップするメインクラスです。
 
 ```ruby
-Laurus::Index.new(path: nil, schema: nil)
+Laurus::Index.new(path: nil, schema: nil, wal_sync_policy: nil)
 ```
 
 ### コンストラクタ
@@ -14,6 +14,7 @@ Laurus::Index.new(path: nil, schema: nil)
 | :--- | :--- | :--- | :--- |
 | `path:` | `String \| nil` | `nil` | 永続ストレージのディレクトリパス。`nil` の場合はインメモリインデックスを作成します。 |
 | `schema:` | `Schema \| nil` | `nil` | スキーマ定義。省略時は空のスキーマが使用されます。 |
+| `wal_sync_policy:` | `WalSyncPolicy \| nil` | `nil` | 先行書き込みログ（WAL）の耐久性ポリシー。`nil` の場合はデフォルトのレコードごと fsync を維持します。[WAL 同期ポリシーと耐久性](#wal-同期ポリシーと耐久性) を参照。 |
 
 ### メソッド
 
@@ -24,6 +25,7 @@ Laurus::Index.new(path: nil, schema: nil)
 | `get_documents(id) -> Array<Hash>` | 指定 ID の全保存バージョンを返します。 |
 | `delete_documents(id)` | 指定 ID の全バージョンを削除します。 |
 | `commit` | バッファリングされた書き込みをフラッシュし、すべての保留中の変更を検索可能にします。 |
+| `flush_wal` | WAL の耐久バリアをオンデマンドで強制します。未同期の WAL レコードを同期的に fsync し、`nil` を返します。group-commit ポリシー下で実行する場合に有用です（下記参照）。 |
 | `search(query, limit: 10, offset: 0) -> Array<SearchResult>` | 検索クエリを実行します。 |
 | `search_batch(queries, limit: 10, offset: 0) -> Array<Array<SearchResult>>` | 独立した複数の検索を 1 回の呼び出しで実行します。各クエリは内部の tokio ランタイム上で並列に dispatch されます。`results[i]` は `queries[i]` に対応し、入力が空の配列の場合は `[]` を返します。 |
 | `stats -> Hash` | インデックス統計（`"document_count"`、`"vector_fields"`）を返します。 |
@@ -38,6 +40,57 @@ Laurus::Index.new(path: nil, schema: nil)
 - **`SearchRequest`**（完全な制御が必要な場合）
 
 `search_batch` の `queries` 配列の各要素も同じ種類の値を受け付けます。DSL 文字列・クエリオブジェクト・`SearchRequest` を 1 つのバッチ内で混在させることもできます。
+
+### WAL 同期ポリシーと耐久性
+
+先行書き込みログ（WAL: Write-Ahead Log）は、コミット済みデータをクラッシュ
+から保護します。デフォルトでは WAL は完全に耐久的で、すべてのレコードは
+書き込みが返る前に `fsync` されます。**group commit（グループコミット）**
+を有効にすると、`fsync` 呼び出しをまとめることで、耐久性をいくらか引き換えに
+書き込みスループットを向上させられます。
+
+#### WalSyncPolicy
+
+`Laurus::WalSyncPolicy` は WAL のフラッシュ方法を記述するイミュータブルな
+値オブジェクトです。`Index.new(wal_sync_policy:)` に渡します。
+
+```ruby
+# デフォルト: 書き込みごとに耐久（各レコードを個別に fsync）。
+Laurus::WalSyncPolicy.per_record
+
+# Group commit: fsync をまとめてコストを償却。
+Laurus::WalSyncPolicy.group(
+  max_records: nil,      # このレコード数でフラッシュ（デフォルト 1024）
+  max_bytes: nil,        # このバイト数でフラッシュ（デフォルト 1 MiB）
+  max_interval_ms: nil,  # このミリ秒ごとに定期的にもフラッシュ
+)
+```
+
+| コンストラクタ | 説明 |
+| :--- | :--- |
+| `WalSyncPolicy.per_record` | デフォルト。すべてのレコードは書き込みが返る前に `fsync` されます。書き込みごとに完全に耐久的です。 |
+| `WalSyncPolicy.group(max_records:, max_bytes:, max_interval_ms:)` | `fsync` をまとめます。引数なしの場合はデフォルト（`max_records: 1024`、`max_bytes: 1 MiB`、タイマーなし）を使用します。WAL は `max_records` **または** `max_bytes` のいずれかが蓄積したとき、および毎回の `commit` 時にフラッシュされます。`max_interval_ms:` を指定すると、定期タイマーでもフラッシュします。 |
+
+Group commit は SQLite の `synchronous = NORMAL` に相当します。クラッシュ時に
+失われるのは最後の未同期バッチのレコードまでで、インデックスが破損する
+ことはありません。レコードは常に `commit` 時に耐久化されるため、成功した
+`commit` はポリシーに関わらず耐久バリアとなります。
+
+#### フラッシュの強制
+
+コミットの合間に耐久バリアを強制するには `flush_wal` を呼び出します。
+例えば、バッチが安全に永続化されたことを通知する前などです。未同期の
+レコードを同期的に `fsync` し、`nil` を返します。デフォルトのレコードごと
+ポリシーでは実質的に no-op です。
+
+```ruby
+# group commit を有効にし、必要に応じて耐久性を強制する。
+policy = Laurus::WalSyncPolicy.group(max_records: 4096, max_bytes: 4 * 1024 * 1024)
+index = Laurus::Index.new(path: "./myindex", wal_sync_policy: policy)
+
+index.put_document("doc1", { "title" => "Hello" })
+index.flush_wal  # group バッチが満杯でなくてもレコードが永続化される
+```
 
 ---
 

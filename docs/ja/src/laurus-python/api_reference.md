@@ -6,7 +6,12 @@ Laurus 検索エンジンをラップするメインクラスです。
 
 ```python
 class Index:
-    def __init__(self, path: str | None = None, schema: Schema | None = None) -> None: ...
+    def __init__(
+        self,
+        path: str | None = None,
+        schema: Schema | None = None,
+        wal_sync_policy: WalSyncPolicy | None = None,
+    ) -> None: ...
 ```
 
 ### コンストラクタ
@@ -15,6 +20,7 @@ class Index:
 | :--- | :--- | :--- | :--- |
 | `path` | `str \| None` | `None` | 永続ストレージのディレクトリパス。`None` の場合はインメモリインデックスを作成します。 |
 | `schema` | `Schema \| None` | `None` | スキーマ定義。省略時は空のスキーマが使用されます。 |
+| `wal_sync_policy` | `WalSyncPolicy \| None` | `None` | WAL の永続性ポリシー。`None` の場合はデフォルトのレコードごとの `fsync` を使用します。[WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照してください。 |
 
 ### メソッド
 
@@ -25,6 +31,7 @@ class Index:
 | `get_documents(id) -> list[dict]` | 指定 ID の全保存バージョンを返します。 |
 | `delete_documents(id)` | 指定 ID の全バージョンを削除します。 |
 | `commit()` | バッファリングされた書き込みをフラッシュし、すべての保留中の変更を検索可能にします。 |
+| `flush_wal()` | WAL の永続性バリアを強制します。[WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照してください。 |
 | `search(query, *, limit=10, offset=0) -> list[SearchResult]` | 検索クエリを実行します。 |
 | `search_batch(queries, *, limit=10, offset=0) -> list[list[SearchResult]]` | 独立した複数の検索を 1 回の呼び出しで実行します。各クエリは内部の tokio ランタイム上で並列に dispatch されます。`results[i]` は `queries[i]` に対応し、入力が空のリストの場合は `[]` を返します。 |
 | `stats() -> dict` | インデックス統計（`document_count`、`vector_fields`）を返します。 |
@@ -39,6 +46,70 @@ class Index:
 - **`SearchRequest`**（完全な制御が必要な場合）
 
 `search_batch` の `queries` リストの各要素も同じ種類の値を受け付けます。DSL 文字列・クエリオブジェクト・`SearchRequest` を 1 つのバッチ内で混在させることもできます。
+
+### WAL 同期ポリシー / 永続性
+
+永続インデックスでは、すべての書き込みが先行書き込みログ（WAL）に追記されます。
+デフォルトでは WAL は**すべての**レコードごとに `fsync` されるため、呼び出しが
+返った時点で各書き込みは完全に永続化されます。コンストラクタはオプションの
+`wal_sync_policy` を受け付け、永続性を一部犠牲にして書き込みスループットを
+向上させることができます。また `flush_wal()` で必要なときに永続性バリアを
+強制できます。
+
+```python
+class WalSyncPolicy:
+    @staticmethod
+    def per_record() -> WalSyncPolicy: ...
+    @staticmethod
+    def group(
+        max_records: int | None = None,
+        max_bytes: int | None = None,
+        max_interval_ms: int | None = None,
+    ) -> WalSyncPolicy: ...
+```
+
+| コンストラクタ | 説明 |
+| :--- | :--- |
+| `WalSyncPolicy.per_record()` | デフォルト。WAL レコードごとに `fsync` し、書き込みごとに完全に永続化します。 |
+| `WalSyncPolicy.group(...)` | グループコミット。複数の書き込みにまたがって `fsync` をまとめます。 |
+
+`group()` のパラメータ（いずれもキーワード指定可。`None` はデフォルトを維持）:
+
+| パラメータ | デフォルト | 説明 |
+| :--- | :--- | :--- |
+| `max_records` | `1024` | この件数のレコードが蓄積されたらフラッシュします。 |
+| `max_bytes` | `1048576`（1 MiB） | この量の未同期バイトが蓄積されたらフラッシュします。 |
+| `max_interval_ms` | `None` | 任意の定期フラッシュタイマー（ミリ秒）。`None` でタイマー無効。 |
+
+グループコミットでは、`max_records` または `max_bytes` の**いずれか**に達した
+時点で WAL がフラッシュされ、`commit()` 時にも必ずフラッシュされます。
+クラッシュ時には最後の未同期バッチまでを失う可能性があります — これは
+SQLite の `synchronous = NORMAL` と同じトレードオフです。完全な `commit()` を
+行わずにこれまで書き込んだ内容をディスクへ強制するには `flush_wal()` を
+呼び出します。
+
+| メソッド | 説明 |
+| :--- | :--- |
+| `flush_wal()` | 今すぐ WAL の永続性バリアを強制します。同期メソッドで `None` を返します。 |
+
+```python
+import laurus
+
+# 1 秒の定期フラッシュタイマー付きでグループコミットを有効化します。
+policy = laurus.WalSyncPolicy.group(max_records=4096, max_interval_ms=1000)
+index = laurus.Index(path="./myindex", wal_sync_policy=policy)
+
+for i in range(10_000):
+    index.put_document(f"doc{i}", {"title": f"Document {i}"})
+
+# まだコミットせずに永続性バリアを強制します。
+index.flush_wal()
+
+index.commit()  # WAL もフラッシュされます
+```
+
+`wal_sync_policy` を省略する（または `WalSyncPolicy.per_record()` を渡す）と、
+デフォルトの完全に永続的な動作が維持されます。
 
 ---
 

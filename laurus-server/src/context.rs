@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 use laurus::storage::file::FileStorageConfig;
-use laurus::{Engine, Schema, StorageConfig, StorageFactory};
+use laurus::{Engine, Schema, StorageConfig, StorageFactory, WalSyncPolicy};
 
 /// Filename used to persist the index schema inside the data directory.
 const SCHEMA_FILE: &str = "schema.toml";
@@ -24,8 +24,9 @@ const STORE_DIR: &str = "store";
 ///
 /// # Arguments
 ///
-/// * `data_dir` - Root directory where the index files will be stored.
-/// * `schema`   - The schema definition describing the index fields.
+/// * `data_dir`  - Root directory where the index files will be stored.
+/// * `schema`    - The schema definition describing the index fields.
+/// * `wal_policy` - WAL durability policy threaded into the engine builder.
 ///
 /// # Returns
 ///
@@ -35,7 +36,11 @@ const STORE_DIR: &str = "store";
 ///
 /// Returns an error if an index already exists at `data_dir`, if directory
 /// creation fails, or if the engine cannot be initialised.
-pub async fn create_index(data_dir: &Path, schema: &Schema) -> anyhow::Result<Engine> {
+pub async fn create_index(
+    data_dir: &Path,
+    schema: &Schema,
+    wal_policy: WalSyncPolicy,
+) -> anyhow::Result<Engine> {
     let schema_path = data_dir.join(SCHEMA_FILE);
     if schema_path.exists() {
         bail!(
@@ -57,7 +62,10 @@ pub async fn create_index(data_dir: &Path, schema: &Schema) -> anyhow::Result<En
     let store_path = data_dir.join(STORE_DIR);
     let storage_config = StorageConfig::File(FileStorageConfig::new(&store_path));
     let storage = StorageFactory::create(storage_config)?;
-    let engine = Engine::new(storage, schema.clone()).await?;
+    let engine = Engine::builder(storage, schema.clone())
+        .wal_sync_policy(wal_policy)
+        .build()
+        .await?;
 
     Ok(engine)
 }
@@ -69,7 +77,8 @@ pub async fn create_index(data_dir: &Path, schema: &Schema) -> anyhow::Result<En
 ///
 /// # Arguments
 ///
-/// * `data_dir` - Root directory of an existing index.
+/// * `data_dir`  - Root directory of an existing index.
+/// * `wal_policy` - WAL durability policy threaded into the engine builder.
 ///
 /// # Returns
 ///
@@ -80,7 +89,7 @@ pub async fn create_index(data_dir: &Path, schema: &Schema) -> anyhow::Result<En
 /// Returns an error if no index exists at `data_dir` (i.e. `schema.toml` is
 /// missing), if the schema file cannot be read or parsed, or if the engine
 /// fails to initialise.
-pub async fn open_index(data_dir: &Path) -> anyhow::Result<Engine> {
+pub async fn open_index(data_dir: &Path, wal_policy: WalSyncPolicy) -> anyhow::Result<Engine> {
     let schema_path = data_dir.join(SCHEMA_FILE);
     if !schema_path.exists() {
         bail!(
@@ -96,7 +105,10 @@ pub async fn open_index(data_dir: &Path) -> anyhow::Result<Engine> {
     let store_path = data_dir.join(STORE_DIR);
     let storage_config = StorageConfig::File(FileStorageConfig::new(&store_path));
     let storage = StorageFactory::open(storage_config)?;
-    let engine = Engine::new(storage, schema).await?;
+    let engine = Engine::builder(storage, schema)
+        .wal_sync_policy(wal_policy)
+        .build()
+        .await?;
 
     Ok(engine)
 }
