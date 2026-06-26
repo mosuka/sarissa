@@ -144,6 +144,56 @@ let engine = Engine::builder(storage, schema)
 
 > **注意:** `Group` はオプトインです。既定の `PerRecord` ポリシーは変更されないため、既存コードは何も変えずに書き込みごとの耐久性を維持します。
 
+## コミット耐久性ラダーとクラッシュ安全性
+
+`commit()` は固定された順序で状態を永続化します。この順序こそが、どの時点でクラッシュ
+しても復旧可能であることを保証します。lexical/vector の各ストアはそれぞれ独自の
+`last_wal_seq` チェックポイント（materialize 済みの最後の WAL レコードのシーケンス番号）
+を持ち、リカバリで適用済みレコードをスキップできます。永続化される `last_wal_seq` は
+そのストアのオンディスク metadata に保存され、**ストアの commit 時にのみ**書かれます。
+
+コミットラダーは次のとおりです。
+
+1. **`flush_wal()`** — WAL を強制 durable 化（ハードバリア）。`Group` では遅延バッチを
+   fsync し、`PerRecord` では no-op。
+2. **`lexical.commit()`** — lexical セグメントと metadata（`last_wal_seq` を含む）を書き、
+   `sync()`。
+3. **`vector.commit()`** — vector セグメントを書き、`sync()`。
+4. **`commit_documents()`** — document store セグメントを書き、`sync()`。
+5. **`truncate()`** — WAL を空の fsync 済みファイルで置き換える。
+
+この順序は次の 2 つの不変条件を保証します。
+
+- **WAL は永続化された index より durable でないことはない。** `last_wal_seq` はステップ 2
+  以降でのみ永続化され、必ずステップ 1 のバリアの後に実行されるため、コミット済み index が
+  まだ durable でない WAL レコードを参照することはありません。
+- **すべてのストアは WAL が truncate される前に完全に durable 化される。** ステップ 2〜4 は
+  ステップ 5 が WAL を空にする前にそれぞれ `sync()` するため、WAL はそれが記述したデータが
+  安全に materialize された後にのみ破棄されます。
+
+リカバリは次回の `build()` で WAL を replay し、各ストアの `last_wal_seq` 以下のレコードを
+スキップします。replay は**冪等（idempotent）**です。各レコードを元々記録された `doc_id`
+の下で再適用するため、再実行は重複ではなく上書きになります。各ストアが独自のチェックポイント
+を持つため、途中で失敗した commit は各ストアを異なる `last_wal_seq` のまま残し、リカバリは
+各ストアに不足している分だけを再適用します。（vector store は現状チェックポイントを `0` の
+まま保持するため、毎回のリカバリで保持中の WAL を全件 replay します。正しく冪等ですが、
+最適化はまだです。）
+
+次の表は各ステップでクラッシュした場合の結果を示します（ステップ 1 のバリアが既に走っている
+ため、`PerRecord` と `Group` で同一です）。
+
+| クラッシュ地点 | ディスク上で durable | リカバリの結果 |
+| --- | --- | --- |
+| ステップ 1 の後、2 の前 | WAL のみ | 保留中の全レコードを両ストアへ replay |
+| ステップ 2 の後、3 の前 | WAL + lexical（`last_wal_seq = N`） | lexical は ≤ N をスキップ、vector は WAL から replay |
+| ステップ 3 の後、4 の前 | WAL + lexical + vector | 両ストアがスキップ、documents は WAL から復元 |
+| ステップ 4 の後、5 の前 | WAL + 全ストア | WAL は残存、両ストアがスキップ、重複なし |
+| ステップ 5 の後 | 全ストア、WAL は空 | replay 対象なし |
+
+コミット済み index が失われた WAL レコードを参照する interleaving は存在しないため、group
+commit は文書化された契約（`flush_wal()` や `commit()` でまだ durable 化されていない書き込みの
+*末尾* をクラッシュで失い得る）を超える新たな耐久性ギャップを生みません。
+
 ## ストレージレイアウト
 
 エンジンは `PrefixedStorage` を使用してデータを整理します。

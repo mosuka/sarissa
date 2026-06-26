@@ -171,6 +171,15 @@ impl Engine {
     }
 
     /// Recover index state from the document log.
+    ///
+    /// Replays every WAL record that is newer than each store's persisted
+    /// `last_wal_seq` checkpoint. Recovery is **idempotent**: each record is
+    /// re-applied under its originally recorded `doc_id`, so re-running it
+    /// overwrites rather than duplicates. The lexical and vector stores track
+    /// their checkpoints independently, so a commit that failed partway (leaving
+    /// the stores at different `last_wal_seq` values) is reconciled here — each
+    /// store re-applies only what it is missing. See [`Self::commit`] for the
+    /// ordering guarantees that make this safe (Issue #821).
     async fn recover(&self) -> Result<()> {
         // read_all() internally syncs next_doc_id with doc_store segments.
         let records = self.log.read_all()?;
@@ -551,12 +560,24 @@ impl Engine {
 
     /// Commit changes to both stores and truncate the WAL.
     ///
-    /// First forces the WAL durable (a hard barrier, so the WAL is never less
-    /// durable than the indexes about to be committed), then persists all
-    /// pending changes in the lexical store, vector store, and document store
-    /// (in that order), and finally truncates the WAL. After a successful
-    /// commit, the WAL is empty and all data is durable in the underlying
-    /// storage.
+    /// Persists state in a fixed order — the **commit durability ladder** — that
+    /// makes a crash at any step recoverable (Issue #821):
+    ///
+    /// 1. `flush_wal()` — force the WAL durable (the hard barrier).
+    /// 2. `lexical.commit()` — materialize + fsync the lexical store. This is
+    ///    where the lexical `last_wal_seq` checkpoint is persisted.
+    /// 3. `vector.commit()` — materialize + fsync the vector store.
+    /// 4. `commit_documents()` — materialize + fsync the document store.
+    /// 5. `truncate()` — replace the WAL with an empty, fsync'd file.
+    ///
+    /// This order upholds two invariants. First, `last_wal_seq` is persisted
+    /// only in step 2+, always *after* the step-1 barrier, so a committed index
+    /// can never reference a WAL record that is not yet durable. Second, every
+    /// store is fully fsync'd (steps 2–4) before the WAL is truncated (step 5),
+    /// so the WAL is discarded only once the data it described is durable. A
+    /// crash between any two steps therefore leaves enough in the WAL for the
+    /// idempotent replay in [`Self::recover`] to reconstruct a consistent state.
+    /// After a successful commit, the WAL is empty and all data is durable.
     ///
     /// # Errors
     ///
