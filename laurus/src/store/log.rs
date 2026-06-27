@@ -19,17 +19,24 @@
 //!
 //! ## File format
 //!
-//! The WAL log file stores a sequence of length-prefixed records. There are two
-//! framings:
+//! The WAL log file stores a sequence of length-prefixed records. There are
+//! three framings:
 //!
-//! - **v2** (current): a 5-byte file header (`b"LWAL"` magic + 1 version byte),
-//!   then `[u32 len][u32 crc32][json payload]` per entry. The CRC-32 is computed
-//!   over `len || payload` so both a corrupted length and a corrupted body are
-//!   detected.
+//! - **v3** (current, #822): a 5-byte file header (`b"LWAL"` magic + version
+//!   byte `3`), then `[u32 len][u32 crc32][rkyv payload]` per entry. Same CRC
+//!   framing as v2, but each payload is a compact rkyv binary record instead of
+//!   JSON — typically 3-5x smaller (vectors store as raw `f32`, not decimal
+//!   strings) and faster to parse on recovery.
+//! - **v2** (#815): a 5-byte header (`b"LWAL"` magic + version byte `2`), then
+//!   `[u32 len][u32 crc32][json payload]` per entry. Still read for back-compat;
+//!   never written by current code.
 //! - **legacy** (pre-#542): no header, `[u32 len][json payload]` per entry, no
-//!   checksum. Still read for back-compat; a legacy file that survives an
-//!   upgrade keeps its framing until the next commit/truncate recreates it as
-//!   v2 (the two framings are never mixed within one file).
+//!   checksum. Still read for back-compat.
+//!
+//! The CRC-32 (v2/v3) is computed over `len || payload`, so both a corrupted
+//! length and a corrupted body are detected. A file keeps its framing for its
+//! whole life; an older file that survives an upgrade is rewritten as v3 only on
+//! the next commit/truncate, and the framings are never mixed within one file.
 //!
 //! Each entry is followed by `flush_and_sync()` for durability.
 //!
@@ -48,6 +55,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
 use crate::data::Document;
@@ -59,7 +67,7 @@ use crate::store::document::UnifiedDocumentStore;
 pub type SeqNumber = u64;
 
 /// A single operation in the document log.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum LogEntry {
     /// Insert or update a document.
     Upsert {
@@ -79,7 +87,7 @@ pub enum LogEntry {
 }
 
 /// A log record combining a sequence number with an entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct LogRecord {
     pub seq: SeqNumber,
     pub entry: LogEntry,
@@ -179,28 +187,47 @@ impl WalSyncPolicy {
     }
 }
 
-/// Magic bytes at the start of a v2 (CRC-framed) WAL file.
+/// Magic bytes at the start of a CRC-framed (v2/v3) WAL file.
 const WAL_MAGIC: &[u8; 4] = b"LWAL";
 
-/// Current WAL file-format version written into the v2 header.
-const WAL_VERSION: u8 = 2;
+/// Current WAL file-format version stamped into the header of a freshly created
+/// or truncated file. v3 keeps the v2 CRC framing but stores each payload as a
+/// compact rkyv binary record instead of JSON (#822).
+const WAL_VERSION: u8 = 3;
 
-/// Length of the v2 file header: 4-byte [`WAL_MAGIC`] + 1-byte [`WAL_VERSION`].
+/// v2 file-format version: CRC framing with a JSON payload (#815). Still read
+/// for back-compat; never written by current code.
+const WAL_VERSION_V2: u8 = 2;
+
+/// Length of the file header: 4-byte [`WAL_MAGIC`] + 1-byte version.
 const WAL_HEADER_LEN: u64 = 5;
 
 /// On-disk framing of the WAL file currently being appended to / read.
 ///
 /// A WAL file is written in a single, consistent format for its whole life: a
-/// fresh or truncated file is always [`WalFormat::V2`]; a pre-#542 file that
-/// survives an upgrade keeps [`WalFormat::Legacy`] until the next
-/// commit/truncate recreates it as v2. The two formats are never mixed within a
-/// file, so the reader can detect the format once from the file header.
+/// fresh or truncated file is always [`WalFormat::V3`]; an older file that
+/// survives an upgrade keeps its existing format ([`WalFormat::V2`] or
+/// [`WalFormat::Legacy`]) until the next commit/truncate recreates it as v3.
+/// The formats are never mixed within a file, so the reader detects the format
+/// once from the file header.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum WalFormat {
     /// Pre-#542 frames: `[u32 len][json payload]`, no per-record checksum.
     Legacy,
-    /// v2 frames: `[u32 len][u32 crc32][payload]`, CRC over `len || payload`.
+    /// v2 frames (#815): `[u32 len][u32 crc32][json payload]`, CRC over
+    /// `len || payload`.
     V2,
+    /// v3 frames (#822): `[u32 len][u32 crc32][rkyv payload]`, same CRC framing
+    /// as v2 but a compact binary payload.
+    V3,
+}
+
+impl WalFormat {
+    /// Whether this framing carries a per-record CRC-32 (v2 and v3 do; the
+    /// pre-#542 legacy framing does not).
+    fn has_crc(self) -> bool {
+        matches!(self, WalFormat::V2 | WalFormat::V3)
+    }
 }
 
 /// The open WAL append handle together with the framing of the file it points
@@ -328,14 +355,43 @@ impl DocumentLog {
         })
     }
 
+    /// Detect the framing of an existing (non-empty) WAL file from its header.
+    ///
+    /// Reads the 5-byte header and classifies the file: the [`WAL_MAGIC`] magic
+    /// followed by version `3` is [`WalFormat::V3`], version `2` is
+    /// [`WalFormat::V2`], and anything without the magic is the pre-#542
+    /// [`WalFormat::Legacy`] framing. An unknown but magic-prefixed version is
+    /// treated as v2 (CRC-framed JSON), the most conservative readable framing.
+    ///
+    /// # Arguments
+    ///
+    /// * `existing_size` - Size in bytes of the file to classify.
+    fn detect_existing_format(&self, existing_size: u64) -> Result<WalFormat> {
+        if existing_size < WAL_HEADER_LEN {
+            return Ok(WalFormat::Legacy);
+        }
+        let mut header = [0u8; WAL_HEADER_LEN as usize];
+        let mut input = self.wal_storage.open_input(&self.wal_path)?;
+        if input.read_exact(&mut header).is_err() || &header[0..4] != WAL_MAGIC {
+            return Ok(WalFormat::Legacy);
+        }
+        Ok(match header[4] {
+            WAL_VERSION => WalFormat::V3,
+            WAL_VERSION_V2 => WalFormat::V2,
+            // An unknown but magic-prefixed version falls back to the v2 (CRC +
+            // JSON) reader — the most conservative readable CRC framing.
+            _ => WalFormat::V2,
+        })
+    }
+
     /// Open or create the WAL file for appending, detecting its framing.
     ///
     /// Operates on an already-held writer guard so a caller can ensure the
     /// writer and append within a single critical section. A fresh or truncated
-    /// (empty) file is initialized as [`WalFormat::V2`] by writing the 5-byte
-    /// header; an existing file keeps whatever framing it already has (v2 if it
-    /// starts with [`WAL_MAGIC`], else legacy) so the two are never mixed within
-    /// one file.
+    /// (empty) file is initialized as [`WalFormat::V3`] by writing the 5-byte
+    /// header; an existing file keeps whatever framing it already has (v3/v2 by
+    /// header version, else legacy) so the formats are never mixed within one
+    /// file.
     fn ensure_writer(&self, writer_guard: &mut Option<WalWriterState>) -> Result<()> {
         if writer_guard.is_some() {
             return Ok(());
@@ -347,26 +403,18 @@ impl DocumentLog {
         } else {
             0
         };
-        let is_existing_v2 = if existing_size >= WAL_HEADER_LEN {
-            let mut magic = [0u8; 4];
-            let mut input = self.wal_storage.open_input(&self.wal_path)?;
-            input.read_exact(&mut magic).is_ok() && &magic == WAL_MAGIC
-        } else {
-            false
-        };
 
         let mut out = self.wal_storage.create_output_append(&self.wal_path)?;
         let format = if existing_size == 0 {
-            // Fresh/truncated file: stamp the v2 header and use CRC framing.
+            // Fresh/truncated file: stamp the current (v3) header and use CRC
+            // framing with a binary payload.
             out.write_all(WAL_MAGIC)?;
             out.write_all(&[WAL_VERSION])?;
-            WalFormat::V2
-        } else if is_existing_v2 {
-            WalFormat::V2
+            WalFormat::V3
         } else {
-            // Pre-#542 file surviving an upgrade: keep appending legacy frames
-            // until the next commit/truncate recreates the file as v2.
-            WalFormat::Legacy
+            // Existing file: keep appending in its own framing until the next
+            // commit/truncate recreates the file as v3.
+            self.detect_existing_format(existing_size)?
         };
 
         *writer_guard = Some(WalWriterState {
@@ -438,16 +486,78 @@ impl DocumentLog {
         Ok(seq)
     }
 
+    /// Encode a record's payload for the given framing.
+    ///
+    /// v3 emits a compact rkyv binary record; v2 and legacy emit a JSON
+    /// document. The bytes returned here are the *payload* only — the length
+    /// prefix and (for v2/v3) the CRC are added by [`Self::append_record_bytes`].
+    ///
+    /// # Arguments
+    ///
+    /// * `record` - The log record to encode.
+    /// * `format` - The framing of the file being appended to.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`LaurusError::SerializationError`](crate::error::LaurusError::SerializationError)
+    /// if rkyv (v3) or `serde_json` (v2/legacy) encoding fails.
+    fn encode_payload(record: &LogRecord, format: WalFormat) -> Result<Vec<u8>> {
+        match format {
+            WalFormat::V3 => rkyv::to_bytes::<rkyv::rancor::Error>(record)
+                .map(|bytes| bytes.to_vec())
+                .map_err(|e| {
+                    crate::error::LaurusError::SerializationError(format!(
+                        "WAL rkyv encode failed: {e}"
+                    ))
+                }),
+            WalFormat::V2 | WalFormat::Legacy => Ok(serde_json::to_vec(record)?),
+        }
+    }
+
+    /// Decode a record's payload according to the file's framing.
+    ///
+    /// The inverse of [`Self::encode_payload`]: v3 reads a compact rkyv binary
+    /// record (validated by `rkyv`/`bytecheck`), v2 and legacy read a JSON
+    /// document.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer` - The payload bytes (length prefix and CRC already stripped).
+    /// * `format` - The framing of the file being read.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bytes do not decode under `format`; the caller
+    /// ([`Self::read_all`]) treats this as a torn trailing record and stops at
+    /// the last valid record.
+    fn decode_payload(buffer: &[u8], format: WalFormat) -> Result<LogRecord> {
+        match format {
+            WalFormat::V3 => {
+                rkyv::from_bytes::<LogRecord, rkyv::rancor::Error>(buffer).map_err(|e| {
+                    crate::error::LaurusError::SerializationError(format!(
+                        "WAL rkyv decode failed: {e}"
+                    ))
+                })
+            }
+            WalFormat::V2 | WalFormat::Legacy => Ok(serde_json::from_slice(buffer)?),
+        }
+    }
+
     /// Encode and append a record's framed bytes to the WAL buffer **without**
     /// fsyncing.
     ///
-    /// v2 writers emit `[u32 len][u32 crc32][payload]` (CRC over `len ||
-    /// payload`); legacy writers emit `[u32 len][payload]`. Durability is the
-    /// caller's responsibility via [`Self::flush_writer`] — this split lets a
-    /// future group-commit path amortize one fsync over many appended records
-    /// (#542). A no-op if no writer is open.
+    /// v2/v3 writers emit `[u32 len][u32 crc32][payload]` (CRC over `len ||
+    /// payload`); legacy writers emit `[u32 len][payload]`. The payload encoding
+    /// (rkyv binary for v3, JSON for v2/legacy) follows the writer's
+    /// [`WalFormat`]. Durability is the caller's responsibility via
+    /// [`Self::flush_writer`] — this split lets the group-commit path amortize
+    /// one fsync over many appended records (#542). A no-op if no writer is open.
     fn append_record_bytes(state: &mut Option<WalWriterState>, record: &LogRecord) -> Result<()> {
-        let bytes = serde_json::to_vec(record)?;
+        let Some(state) = state.as_mut() else {
+            return Ok(());
+        };
+
+        let bytes = Self::encode_payload(record, state.format)?;
         let len: u32 = bytes.len().try_into().map_err(|_| {
             crate::error::LaurusError::InvalidOperation(format!(
                 "WAL record size {} exceeds u32::MAX",
@@ -456,26 +566,24 @@ impl DocumentLog {
         })?;
         let len_bytes = len.to_le_bytes();
 
-        if let Some(state) = state.as_mut() {
-            // Frame size: length prefix (+ CRC for v2) + payload.
-            let mut frame_len = len_bytes.len() + bytes.len();
-            state.out.write_all(&len_bytes)?;
-            if state.format == WalFormat::V2 {
-                let mut hasher = crc32fast::Hasher::new();
-                hasher.update(&len_bytes);
-                hasher.update(&bytes);
-                let crc = hasher.finalize().to_le_bytes();
-                state.out.write_all(&crc)?;
-                frame_len += crc.len();
-            }
-            state.out.write_all(&bytes)?;
-            // Bytes are now buffered/written but not yet fsynced. Track how much
-            // is pending so a Group policy can flush once its batch threshold is
-            // reached.
-            state.dirty = true;
-            state.unsynced_records += 1;
-            state.unsynced_bytes = state.unsynced_bytes.saturating_add(frame_len);
+        // Frame size: length prefix (+ CRC for v2/v3) + payload.
+        let mut frame_len = len_bytes.len() + bytes.len();
+        state.out.write_all(&len_bytes)?;
+        if state.format.has_crc() {
+            let mut hasher = crc32fast::Hasher::new();
+            hasher.update(&len_bytes);
+            hasher.update(&bytes);
+            let crc = hasher.finalize().to_le_bytes();
+            state.out.write_all(&crc)?;
+            frame_len += crc.len();
         }
+        state.out.write_all(&bytes)?;
+        // Bytes are now buffered/written but not yet fsynced. Track how much
+        // is pending so a Group policy can flush once its batch threshold is
+        // reached.
+        state.dirty = true;
+        state.unsynced_records += 1;
+        state.unsynced_bytes = state.unsynced_bytes.saturating_add(frame_len);
 
         Ok(())
     }
@@ -584,24 +692,21 @@ impl DocumentLog {
 
         let size = self.wal_storage.open_input(&self.wal_path)?.size()?;
 
-        // Detect the framing from the file header: a v2 file starts with the
-        // magic, a legacy file goes straight into `[u32 len]` records.
-        let is_v2 = if size >= WAL_HEADER_LEN {
-            let mut magic = [0u8; 4];
-            let mut probe = self.wal_storage.open_input(&self.wal_path)?;
-            probe.read_exact(&mut magic).is_ok() && &magic == WAL_MAGIC
-        } else {
-            false
-        };
+        // Detect the framing from the file header: v3/v2 files start with the
+        // magic + version byte, a legacy file goes straight into `[u32 len]`
+        // records. The payload encoding (rkyv for v3, JSON for v2/legacy) and
+        // CRC presence (v2/v3 only) follow from the format.
+        let format = self.detect_existing_format(size)?;
+        let has_header = format != WalFormat::Legacy;
 
         let mut reader = self.wal_storage.open_input(&self.wal_path)?;
         let mut records = Vec::new();
         let mut max_seq: u64 = 0;
         let mut max_doc_id: u64 = 0;
 
-        // Skip the v2 header (magic + version) so the loop starts at the first
-        // record in both formats.
-        let mut position = if is_v2 {
+        // Skip the file header (magic + version) so the loop starts at the first
+        // record; legacy files have no header.
+        let mut position = if has_header {
             let mut header = [0u8; WAL_HEADER_LEN as usize];
             reader.read_exact(&mut header)?;
             WAL_HEADER_LEN
@@ -618,8 +723,9 @@ impl DocumentLog {
             let len = u32::from_le_bytes(len_bytes) as u64;
             position += 4;
 
-            // v2 frames carry a CRC-32 (over `len || payload`) after the length.
-            let crc_expected = if is_v2 {
+            // v2/v3 frames carry a CRC-32 (over `len || payload`) after the
+            // length; legacy frames do not.
+            let crc_expected = if format.has_crc() {
                 if position + 4 > size {
                     break;
                 }
@@ -665,7 +771,7 @@ impl DocumentLog {
             // bad record (never skip-and-continue), so a later intact-looking
             // record can never resurrect an op whose predecessors were dropped.
             // (Issue #542, Phase 0.)
-            let record: LogRecord = match serde_json::from_slice(&buffer) {
+            let record: LogRecord = match Self::decode_payload(&buffer, format) {
                 Ok(record) => record,
                 Err(e) => {
                     ::log::warn!(
@@ -924,7 +1030,7 @@ mod tests {
     /// writer before dropping it rather than discarding the handle outright
     /// (Issue #542, Phase 2).
     #[test]
-    fn truncate_recreates_fresh_v2_wal() {
+    fn truncate_recreates_fresh_v3_wal() {
         use std::io::Read as _;
 
         let wal_storage = make_storage();
@@ -939,7 +1045,7 @@ mod tests {
 
         log.truncate().unwrap();
 
-        // Truncate resets the file to empty (the v2 header is re-stamped lazily
+        // Truncate resets the file to empty (the v3 header is re-stamped lazily
         // on the next append), so recovery finds nothing.
         assert_eq!(
             wal_storage.open_input("test.log").unwrap().size().unwrap(),
@@ -948,7 +1054,7 @@ mod tests {
         );
         assert!(log.read_all().unwrap().is_empty());
 
-        // The next append re-initializes the file in v2 framing.
+        // The next append re-initializes the file in v3 framing.
         log.append("ext_3", doc).unwrap();
         let mut header = [0u8; WAL_HEADER_LEN as usize];
         wal_storage
@@ -1254,11 +1360,11 @@ mod tests {
         assert!(records.is_empty(), "no valid prefix to recover");
     }
 
-    /// A fresh WAL is written in v2 framing: the file starts with the magic +
-    /// version header and records round-trip through `read_all` with CRC
-    /// verification (Issue #542, Phase 1).
+    /// A fresh WAL is written in v3 framing: the file starts with the magic +
+    /// version (3) header and records round-trip through `read_all` with CRC
+    /// verification (Issue #542, Phase 1; #822 binary payload).
     #[test]
-    fn wal_v2_fresh_file_has_header_and_round_trips() {
+    fn wal_v3_fresh_file_has_header_and_round_trips() {
         use std::io::Read as _;
 
         let wal_storage = make_storage();
@@ -1287,10 +1393,11 @@ mod tests {
         assert_eq!(records[1].seq, 2);
     }
 
-    /// A v2 record whose payload is corrupted fails CRC verification and is
-    /// dropped as a torn tail, recovering the valid prefix (Issue #542, Phase 1).
+    /// A v3 record whose payload is corrupted fails CRC verification and is
+    /// dropped as a torn tail, recovering the valid prefix (Issue #542, Phase 1;
+    /// #822 binary payload).
     #[test]
-    fn wal_v2_crc_mismatch_recovers_prefix() {
+    fn wal_v3_crc_mismatch_recovers_prefix() {
         use std::io::{Read as _, Write as _};
 
         let wal_storage = make_storage();
@@ -1385,6 +1492,252 @@ mod tests {
         // Both records read back through the legacy path.
         let records = log.read_all().unwrap();
         assert_eq!(records.len(), 2);
+    }
+
+    /// Build a CRC-framed v2 frame (`[u32 len][u32 crc32][payload]`) for a JSON
+    /// payload — the framing produced by pre-#822 writers.
+    fn frame_v2(body: &[u8]) -> Vec<u8> {
+        let len_bytes = (body.len() as u32).to_le_bytes();
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&len_bytes);
+        hasher.update(body);
+        let crc = hasher.finalize().to_le_bytes();
+        let mut out = Vec::with_capacity(4 + 4 + body.len());
+        out.extend_from_slice(&len_bytes);
+        out.extend_from_slice(&crc);
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// Write a complete v2 (CRC-framed JSON) WAL file with the given records.
+    fn write_v2_file(storage: &Arc<dyn Storage>, path: &str, records: &[LogRecord]) {
+        use std::io::Write as _;
+        let mut out = storage.create_output(path).unwrap();
+        out.write_all(WAL_MAGIC).unwrap();
+        out.write_all(&[WAL_VERSION_V2]).unwrap();
+        for rec in records {
+            out.write_all(&frame_v2(&serde_json::to_vec(rec).unwrap()))
+                .unwrap();
+        }
+        out.flush_and_sync().unwrap();
+        out.close().unwrap();
+    }
+
+    fn sample_record(seq: u64, doc_id: u64) -> LogRecord {
+        LogRecord {
+            seq,
+            entry: LogEntry::Upsert {
+                doc_id,
+                external_id: format!("ext_{doc_id}"),
+                document: Document::builder()
+                    .add_field("title", DataValue::Text("hello world".to_string()))
+                    .add_field("score", DataValue::Float64(1.5))
+                    .add_field("embedding", DataValue::Vector(vec![0.25; 64]))
+                    .build(),
+            },
+        }
+    }
+
+    /// A pre-#822 v2 WAL (CRC-framed JSON payloads) still recovers fully through
+    /// the back-compat reader (#822 acceptance: back-compat for JSON WALs).
+    #[test]
+    fn wal_v2_json_payload_recovers() {
+        let wal_storage = make_storage();
+        let doc_storage = make_storage();
+        let records = [sample_record(1, 1), sample_record(2, 2)];
+        write_v2_file(&wal_storage, "test.log", &records);
+
+        let log = DocumentLog::new(wal_storage, "test.log", doc_storage).unwrap();
+        let recovered = log.read_all().unwrap();
+        assert_eq!(recovered.len(), 2, "both v2 JSON records recover");
+        assert_eq!(recovered[0].seq, 1);
+        assert_eq!(recovered[1].seq, 2);
+        // The vector field round-trips through the JSON reader unchanged.
+        if let LogEntry::Upsert { document, .. } = &recovered[0].entry {
+            assert_eq!(
+                document.fields.get("embedding"),
+                Some(&DataValue::Vector(vec![0.25; 64]))
+            );
+        } else {
+            panic!("expected an Upsert");
+        }
+    }
+
+    /// v3 (rkyv binary) records round-trip exactly through `read_all`, including
+    /// a vector field, across both Upsert and Delete entries (#822).
+    #[test]
+    fn wal_v3_binary_round_trips_all_value_types() {
+        let wal_storage = make_storage();
+        let doc_storage = make_storage();
+        let log = DocumentLog::new(wal_storage, "test.log", doc_storage).unwrap();
+
+        let doc = Document::builder()
+            .add_field("title", DataValue::Text("hello".to_string()))
+            .add_field("count", DataValue::Int64(-7))
+            .add_field("score", DataValue::Float64(2.5))
+            .add_field("flag", DataValue::Bool(true))
+            .add_field("embedding", DataValue::Vector(vec![0.1, 0.2, 0.3, 0.4]))
+            .add_field("tags", DataValue::Int64Array(vec![1, 2, 3]))
+            .build();
+        log.append("ext_1", doc.clone()).unwrap();
+        log.append_delete(1, "ext_1").unwrap();
+
+        let records = log.read_all().unwrap();
+        assert_eq!(records.len(), 2);
+        match &records[0].entry {
+            LogEntry::Upsert {
+                doc_id,
+                external_id,
+                document,
+            } => {
+                assert_eq!(*doc_id, 1);
+                assert_eq!(external_id, "ext_1");
+                assert_eq!(document.fields, doc.fields, "all value types round-trip");
+            }
+            _ => panic!("expected Upsert first"),
+        }
+        match &records[1].entry {
+            LogEntry::Delete {
+                doc_id,
+                external_id,
+            } => {
+                assert_eq!(*doc_id, 1);
+                assert_eq!(external_id, "ext_1");
+            }
+            _ => panic!("expected Delete second"),
+        }
+    }
+
+    /// Upgrade path: a v2 file recovers, then a `truncate` recreates the file in
+    /// v3 framing and subsequent appends round-trip — old and new formats are
+    /// never mixed within one file (#822).
+    #[test]
+    fn wal_upgrade_v2_to_v3_after_truncate() {
+        use std::io::Read as _;
+
+        let wal_storage = make_storage();
+        let doc_storage = make_storage();
+        write_v2_file(&wal_storage, "test.log", &[sample_record(1, 1)]);
+
+        let log = DocumentLog::new(wal_storage.clone(), "test.log", doc_storage).unwrap();
+        assert_eq!(log.read_all().unwrap().len(), 1, "v2 record recovers");
+
+        // Truncate recreates the file; the next append stamps a v3 header.
+        log.truncate().unwrap();
+        let doc = Document::builder()
+            .add_field("embedding", DataValue::Vector(vec![0.5; 32]))
+            .build();
+        log.append("ext_2", doc).unwrap();
+
+        let mut header = [0u8; WAL_HEADER_LEN as usize];
+        wal_storage
+            .open_input("test.log")
+            .unwrap()
+            .read_exact(&mut header)
+            .unwrap();
+        assert_eq!(&header[0..4], WAL_MAGIC);
+        assert_eq!(header[4], WAL_VERSION, "recreated file is v3");
+
+        let records = log.read_all().unwrap();
+        assert_eq!(records.len(), 1, "post-upgrade v3 record recovers");
+        assert_eq!(records[0].seq, 2);
+    }
+
+    /// Measurement (#822 acceptance): for a vector-heavy record the v3 rkyv
+    /// payload is materially smaller than the v2 JSON payload, because each
+    /// `f32` is 4 raw bytes instead of a decimal string. Prints the ratio for
+    /// the implementation report (`cargo test -- --nocapture`).
+    #[test]
+    fn wal_v3_payload_smaller_than_v2_for_vectors() {
+        // A 384-dim embedding — the dominant payload in a vector workload.
+        let record = LogRecord {
+            seq: 1,
+            entry: LogEntry::Upsert {
+                doc_id: 1,
+                external_id: "doc-1".to_string(),
+                document: Document::builder()
+                    .add_field(
+                        "title",
+                        DataValue::Text("a representative title".to_string()),
+                    )
+                    .add_field("embedding", DataValue::Vector(vec![0.123_456_7; 384]))
+                    .build(),
+            },
+        };
+
+        let json = DocumentLog::encode_payload(&record, WalFormat::V2).unwrap();
+        let rkyv = DocumentLog::encode_payload(&record, WalFormat::V3).unwrap();
+
+        println!(
+            "WAL payload size (384-dim vector record): v2 JSON = {} B, v3 rkyv = {} B, ratio = {:.2}x",
+            json.len(),
+            rkyv.len(),
+            json.len() as f64 / rkyv.len() as f64,
+        );
+        assert!(
+            rkyv.len() < json.len(),
+            "v3 binary payload ({} B) must be smaller than v2 JSON ({} B)",
+            rkyv.len(),
+            json.len()
+        );
+        // The raw vector alone is 384 * 4 = 1536 B; the binary record should be
+        // close to that, far below JSON's decimal-string encoding.
+        assert!(
+            rkyv.len() < json.len() / 2,
+            "expected a large reduction for vector-heavy records: v2 {} B vs v3 {} B",
+            json.len(),
+            rkyv.len()
+        );
+    }
+
+    /// Measurement (#822 acceptance): replay time of a v3 (rkyv) WAL versus a
+    /// v2 (JSON) WAL of the same vector-heavy records. Print-only — wall-clock is
+    /// environment-dependent, so this asserts nothing and just reports the parse
+    /// speedup for the implementation report (`cargo test -- --nocapture`).
+    #[test]
+    fn wal_v3_replay_time_vs_v2() {
+        use std::time::Instant;
+
+        const N: u64 = 2000;
+        let records: Vec<LogRecord> = (1..=N).map(|i| sample_record(i, i)).collect();
+
+        // v2 (JSON) file.
+        let v2_storage = make_storage();
+        let v2_doc = make_storage();
+        write_v2_file(&v2_storage, "test.log", &records);
+        let v2_log = DocumentLog::new(v2_storage, "test.log", v2_doc).unwrap();
+
+        // v3 (rkyv) file, produced by the current writer.
+        let v3_storage = make_storage();
+        let v3_doc = make_storage();
+        let v3_log = DocumentLog::new(v3_storage, "test.log", v3_doc).unwrap();
+        for rec in &records {
+            if let LogEntry::Upsert {
+                external_id,
+                document,
+                ..
+            } = &rec.entry
+            {
+                v3_log.append(external_id, document.clone()).unwrap();
+            }
+        }
+
+        let t0 = Instant::now();
+        let v2_recovered = v2_log.read_all().unwrap();
+        let v2_elapsed = t0.elapsed();
+
+        let t1 = Instant::now();
+        let v3_recovered = v3_log.read_all().unwrap();
+        let v3_elapsed = t1.elapsed();
+
+        assert_eq!(v2_recovered.len() as u64, N);
+        assert_eq!(v3_recovered.len() as u64, N);
+        println!(
+            "WAL replay ({N} vector records): v2 JSON = {:?}, v3 rkyv = {:?}, speedup = {:.2}x",
+            v2_elapsed,
+            v3_elapsed,
+            v2_elapsed.as_secs_f64() / v3_elapsed.as_secs_f64().max(f64::MIN_POSITIVE),
+        );
     }
 
     #[test]

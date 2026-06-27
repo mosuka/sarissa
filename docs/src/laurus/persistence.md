@@ -52,6 +52,20 @@ The WAL file (`engine.wal`) is an append-only binary log. Each entry is self-con
 - Sequence number
 - Payload (document data or ID)
 
+### On-disk framing
+
+The file begins with a 5-byte header (`b"LWAL"` magic + a version byte) followed by length-prefixed records. There are three framings, and a file keeps a single framing for its whole life (an older file is rewritten to the current format only on the next commit/truncate — formats are never mixed within one file):
+
+| Version | Framing | Payload |
+| :--- | :--- | :--- |
+| **v3** (current) | `[u32 len][u32 crc32][payload]` | compact **rkyv binary** record |
+| **v2** | `[u32 len][u32 crc32][payload]` | JSON record (read-only, back-compat) |
+| **legacy** (pre-CRC) | `[u32 len][payload]` | JSON record, no checksum (read-only) |
+
+The CRC-32 (v2/v3) is computed over `len || payload`, detecting both a corrupted length and a corrupted body. The reader recovers all three formats, so a WAL written by an older build still replays after an upgrade.
+
+Since v3, each payload is a compact rkyv binary record rather than JSON. Vectors store as raw `f32` (4 bytes each) instead of decimal strings, so for vector-heavy documents the WAL is roughly 2-3x smaller and replays correspondingly faster — without changing durability (the CRC framing and recovery semantics are unchanged).
+
 ## Recovery
 
 When an engine is built (`Engine::builder(...).build().await`), it automatically checks for remaining WAL entries and replays them (the WAL is truncated on commit, so any remaining entries are from a crashed session):
