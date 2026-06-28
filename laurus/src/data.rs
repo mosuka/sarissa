@@ -400,7 +400,7 @@ impl From<GeoEcefPoint> for DataValue {
 /// A document is a pure data container — a collection of named fields,
 /// each containing a [`DataValue`]. Document identity (external ID) is
 /// managed by the [`Engine`](crate::Engine), not by the document itself.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct Document {
     /// Field data.
     pub fields: HashMap<String, DataValue>,
