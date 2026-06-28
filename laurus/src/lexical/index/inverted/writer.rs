@@ -118,6 +118,21 @@ pub struct InvertedIndexWriter {
     /// Buffered analyzed documents with their assigned doc IDs.
     buffered_docs: Vec<(u64, AnalyzedDocument)>,
 
+    /// Whether [`Self::inverted_index`] / [`Self::doc_values_writer`] are stale
+    /// relative to [`Self::buffered_docs`] and need a rebuild before flush.
+    ///
+    /// Set by [`Self::remove_pending_document`], which drops the doc from
+    /// `buffered_docs` (cheap, order-preserving `retain`) but **defers** the
+    /// expensive `rebuild_in_memory_index` rather than running it per removal.
+    /// The rebuild runs once at flush time (and eagerly on the same-id re-upsert
+    /// path), turning an `update × M` over an `N`-doc uncommitted buffer from
+    /// `O(M·N)` into `O(M) + O(N)` (Issue #828). While dirty, the in-memory
+    /// index still holds the removed doc's postings, so the NRT lookups
+    /// ([`Self::find_doc_id_by_term`] / [`Self::find_doc_ids_by_term`]) filter
+    /// their results by [`Self::buffered_doc_ids`] (the physically-correct live
+    /// set).
+    index_dirty: bool,
+
     /// Membership index of the doc IDs currently in [`Self::buffered_docs`].
     ///
     /// Kept perfectly in sync with `buffered_docs` (every push inserts, every
@@ -207,6 +222,7 @@ impl InvertedIndexWriter {
             config,
             inverted_index: TermPostingIndex::new(),
             buffered_docs: Vec::new(),
+            index_dirty: false,
             buffered_doc_ids: AHashSet::new(),
             doc_values_writer,
             next_doc_id,
@@ -246,10 +262,26 @@ impl InvertedIndexWriter {
         // Analyze the document
         let analyzed_doc = self.analyze_document(doc)?;
 
+        // Same-id re-upsert detection: if this exact id is already buffered, the
+        // deferred-rebuild scheme cannot distinguish the old version's stale
+        // postings from the new version's (both carry this id), so we must purge
+        // the old version from the in-memory index *before* re-indexing. This
+        // never happens on the production engine path (every add gets a fresh
+        // monotonic doc_id), so the eager rebuild here costs nothing in
+        // production and only restores exact NRT state for direct re-upserts.
+        let was_buffered = self.buffered_doc_ids.contains(&doc_id);
+
         // Upsert: remove any pending document with the same ID before adding
         self.remove_pending_document(doc_id)?;
         // Upsert: mark persisted occurrences as deleted (flushed segments)
         self.mark_persisted_doc_deleted(doc_id)?;
+
+        if was_buffered {
+            // Purge the just-removed old version's postings now (eager), so the
+            // re-added version below is the only one in the in-memory index.
+            self.rebuild_in_memory_index()?;
+            self.index_dirty = false;
+        }
 
         // Add the analyzed document with the specified ID
         self.upsert_analyzed_document(doc_id, analyzed_doc)
@@ -351,15 +383,18 @@ impl InvertedIndexWriter {
     pub fn find_doc_id_by_term(&self, field: &str, term: &str) -> Result<Option<u64>> {
         let full_term = format!("{field}:{term}");
 
-        // 1. Check in-memory inverted index
-        if let Some(posting_list) = self.inverted_index.get_posting_list(&full_term) {
-            // Get the last document ID (most recent version if multiple exist, though upsert usually handles that)
-            // Posting list is sorted by doc_id? Usually yes for inverted index.
-            // But TermPostingIndex might just append.
-            // Let's assume the last one is the latest.
-            if let Some(last_posting) = posting_list.postings.last() {
-                return Ok(Some(last_posting.doc_id));
-            }
+        // 1. Check in-memory inverted index. The index may hold stale postings
+        // for docs removed since the last rebuild (deferred under #828), so keep
+        // only ids still in the live buffer and return the highest (latest).
+        if let Some(posting_list) = self.inverted_index.get_posting_list(&full_term)
+            && let Some(doc_id) = posting_list
+                .postings
+                .iter()
+                .map(|p| p.doc_id)
+                .filter(|id| self.buffered_doc_ids.contains(id))
+                .max()
+        {
+            return Ok(Some(doc_id));
         }
 
         // 2. TODO: Check persisted segments
@@ -378,9 +413,18 @@ impl InvertedIndexWriter {
     fn find_doc_ids_by_term(&self, field: &str, term: &str) -> Result<Option<Vec<u64>>> {
         let full_term = format!("{field}:{term}");
 
-        // 1. Check in-memory inverted index
+        // 1. Check in-memory inverted index. The index may hold stale postings
+        // for docs removed since the last rebuild (deferred under #828), so keep
+        // only ids still in the live buffer; a same-id re-upsert can also leave
+        // two postings for one id, so dedup.
         if let Some(posting_list) = self.inverted_index.get_posting_list(&full_term) {
-            let ids: Vec<u64> = posting_list.postings.iter().map(|p| p.doc_id).collect();
+            let mut seen = AHashSet::new();
+            let ids: Vec<u64> = posting_list
+                .postings
+                .iter()
+                .map(|p| p.doc_id)
+                .filter(|id| self.buffered_doc_ids.contains(id) && seen.insert(*id))
+                .collect();
             if !ids.is_empty() {
                 return Ok(Some(ids));
             }
@@ -667,6 +711,13 @@ impl InvertedIndexWriter {
             return Ok(());
         }
 
+        // Materialize any deferred removals (#828) so the in-memory index +
+        // DocValues match `buffered_docs` before they are written to disk.
+        if self.index_dirty {
+            self.rebuild_in_memory_index()?;
+            self.index_dirty = false;
+        }
+
         let segment_name = format!("{}_{:06}", self.config.segment_prefix, self.current_segment);
 
         self.write_segment_files(&segment_name)?;
@@ -674,6 +725,7 @@ impl InvertedIndexWriter {
         // Clear buffers
         self.buffered_docs.clear();
         self.buffered_doc_ids.clear();
+        self.index_dirty = false;
         self.inverted_index = TermPostingIndex::new();
 
         // Reset DocValuesWriter for next segment
@@ -740,9 +792,17 @@ impl InvertedIndexWriter {
         if self.buffered_docs.is_empty() {
             return Ok(Vec::new());
         }
+        // Materialize any deferred removals (#828) before writing. The merge
+        // path only adds distinct, pre-deduped docs so this is normally a no-op,
+        // but the guard keeps the invariant if that ever changes.
+        if self.index_dirty {
+            self.rebuild_in_memory_index()?;
+            self.index_dirty = false;
+        }
         let paths = self.write_segment_files(segment_name)?;
         self.buffered_docs.clear();
         self.buffered_doc_ids.clear();
+        self.index_dirty = false;
         self.inverted_index = TermPostingIndex::new();
         self.stats.segments_created += 1;
         Ok(paths)
@@ -1294,6 +1354,7 @@ impl InvertedIndexWriter {
         // Clear all buffers
         self.buffered_docs.clear();
         self.buffered_doc_ids.clear();
+        self.index_dirty = false;
         self.inverted_index = TermPostingIndex::new();
 
         Ok(())
@@ -1349,10 +1410,16 @@ impl InvertedIndexWriter {
             return Ok(());
         }
 
-        // The id was buffered: drop every occurrence from the buffer and
-        // rebuild the in-memory inverted index / DocValues from what remains.
+        // The id was buffered: drop it from the buffer (cheap, order-preserving
+        // so postings stay doc-id-ascending for the skip-table encode) and
+        // **defer** the expensive in-memory index / DocValues rebuild. The
+        // rebuild runs once at flush time (and eagerly on the same-id re-upsert
+        // path in `upsert_document`), so updating M docs in an N-doc uncommitted
+        // buffer is O(M)+O(N) instead of O(M·N) (Issue #828). Until the rebuild,
+        // the in-memory index still holds this doc's postings; the NRT lookups
+        // filter them out via `buffered_doc_ids`.
         self.buffered_docs.retain(|(id, _)| *id != doc_id);
-        self.rebuild_in_memory_index()?;
+        self.index_dirty = true;
 
         // Decrement docs_added for the removed (un-done) document.
         if self.stats.docs_added > 0 {

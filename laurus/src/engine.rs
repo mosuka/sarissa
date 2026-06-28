@@ -2637,6 +2637,70 @@ mod tests {
         }
     }
 
+    /// #828: updating many docs that are still in the uncommitted buffer must
+    /// stay correct under the deferred in-memory-index rebuild. Each update goes
+    /// through `delete_documents` → `delete_document(old_buffered_id)` →
+    /// `remove_pending_document`, which now defers the rebuild to flush. After
+    /// commit, every external id must resolve to exactly its latest version and
+    /// the live doc count must equal the number of unique ids (no ghosts from
+    /// the superseded buffered versions).
+    #[tokio::test]
+    async fn test_put_document_update_many_before_commit() {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::TextOption;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        let n = 200usize;
+
+        // Phase 1: add N distinct docs into one uncommitted buffer.
+        for i in 0..n {
+            let mut doc = crate::data::Document::new();
+            doc.fields
+                .insert("title".into(), DataValue::Text(format!("v0-{i}")));
+            engine.put_document(&format!("id{i}"), doc).await.unwrap();
+        }
+
+        // Phase 2: update every one of them BEFORE committing. Each update hits
+        // the deferred-rebuild path (the old version is still buffered).
+        for i in 0..n {
+            let mut doc = crate::data::Document::new();
+            doc.fields
+                .insert("title".into(), DataValue::Text(format!("v1-{i}")));
+            engine.put_document(&format!("id{i}"), doc).await.unwrap();
+        }
+
+        engine.commit().await.unwrap();
+
+        let stats = engine.stats().unwrap();
+        assert_eq!(
+            stats.document_count, n as u64,
+            "every external id must collapse to exactly one live doc after the \
+             pre-commit updates (no ghost versions from the deferred rebuild)"
+        );
+
+        // Each id resolves to exactly one doc carrying the updated content.
+        for i in [0usize, 1, n / 2, n - 1] {
+            let docs = engine.get_documents(&format!("id{i}")).await.unwrap();
+            assert_eq!(docs.len(), 1, "id{i} must resolve to a single doc");
+            let title = docs[0]
+                .fields
+                .get("title")
+                .and_then(|v| v.as_text())
+                .map(String::from);
+            assert_eq!(
+                title.as_deref(),
+                Some(format!("v1-{i}").as_str()),
+                "id{i} must carry the updated (v1) content after commit"
+            );
+        }
+    }
+
     /// Regression test for the geo3d demo's "departure + re-arrival"
     /// pattern: put → commit → delete → commit → put-with-same-id →
     /// commit. The post-commit search must return exactly one doc and

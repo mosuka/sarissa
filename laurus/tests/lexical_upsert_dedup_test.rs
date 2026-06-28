@@ -135,3 +135,55 @@ fn interleaved_new_and_reupsert_stay_consistent() {
     assert_eq!(w.pending_docs(), 4);
     assert_eq!(w.find_doc_id_by_term("title", "four").unwrap(), Some(4));
 }
+
+/// #828: removing a buffered doc defers the in-memory index rebuild, so the
+/// removed doc's postings linger in `inverted_index` until flush. The NRT
+/// lookup must still exclude them (filtered by the live buffer set) while
+/// leaving untouched neighbours resolvable. This is the production
+/// `delete_document(old_id)` path where the new version gets a *different* id.
+#[test]
+fn nrt_find_excludes_deferred_removed_doc() {
+    let mut w = writer();
+
+    w.upsert_document(1, doc("alpha")).unwrap();
+    w.upsert_document(2, doc("beta")).unwrap();
+    assert_eq!(w.pending_docs(), 2);
+
+    // Delete a still-buffered doc by a DIFFERENT id than any survivor — this
+    // takes the deferred path (no eager rebuild).
+    w.delete_document(1).unwrap();
+
+    assert_eq!(w.pending_docs(), 1, "the removed doc must leave the buffer");
+    assert_eq!(
+        w.find_doc_id_by_term("title", "alpha").unwrap(),
+        None,
+        "the deferred-removed doc's term must not resolve via NRT lookup"
+    );
+    assert_eq!(
+        w.find_doc_id_by_term("title", "beta").unwrap(),
+        Some(2),
+        "the surviving doc must still resolve while the index is dirty"
+    );
+}
+
+/// #828: a removal sets the deferred-rebuild dirty flag; `rollback` must clear
+/// the buffer AND that flag so a later batch starts clean and is not corrupted
+/// by leftover deferred state.
+#[test]
+fn rollback_clears_deferred_removed_state() {
+    let mut w = writer();
+
+    w.upsert_document(1, doc("alpha")).unwrap();
+    w.delete_document(1).unwrap(); // sets index_dirty, defers rebuild
+    assert_eq!(w.pending_docs(), 0);
+
+    w.rollback().unwrap();
+    assert_eq!(w.pending_docs(), 0);
+
+    // A fresh batch after rollback resolves normally and is unaffected by the
+    // earlier deferred removal (no stale "alpha", clean new state).
+    w.upsert_document(5, doc("gamma")).unwrap();
+    assert_eq!(w.pending_docs(), 1);
+    assert_eq!(w.find_doc_id_by_term("title", "gamma").unwrap(), Some(5));
+    assert_eq!(w.find_doc_id_by_term("title", "alpha").unwrap(), None);
+}
