@@ -1,7 +1,7 @@
 //! In-memory storage implementation for testing and caching.
 //!
 //! This module provides a complete [`Storage`] implementation backed entirely
-//! by in-process memory (`HashMap<String, Box<[u8]>>`). It is designed for:
+//! by in-process memory (`HashMap<String, Arc<MemFile>>`). It is designed for:
 //!
 //! - **Unit and integration testing** -- fast, deterministic, no filesystem
 //!   side effects.
@@ -57,19 +57,68 @@ impl Default for MemoryStorageConfig {
     }
 }
 
+/// The mutable interior of a [`MemFile`].
+///
+/// `data` is the full backing buffer for one logical file; it grows as an open
+/// writer appends and is **never** truncated. `committed` is the number of
+/// leading bytes that have been flushed (via
+/// [`StorageOutput::flush_and_sync`](crate::storage::StorageOutput::flush_and_sync)
+/// or `close`) and are therefore visible to readers. Bytes in
+/// `data[committed..]` are a written-but-not-yet-flushed tail and stay invisible
+/// to [`MemoryStorage::open_input`] until the next flush advances `committed`.
+#[derive(Debug)]
+struct MemFileInner {
+    /// Full backing buffer; may include a not-yet-flushed tail beyond `committed`.
+    data: Vec<u8>,
+    /// Number of leading bytes flushed and visible to readers.
+    committed: usize,
+}
+
+/// A single in-memory file shared between the storage map and any open writer.
+///
+/// The writer and the [`MemoryStorage`] file map hold the **same** `Arc<MemFile>`,
+/// so a flush only has to advance the `committed` length instead of cloning the
+/// whole buffer — making the WAL append-then-flush pattern amortized O(1) per
+/// flush rather than O(buffer) (Issue #812). `data` and `committed` live under one
+/// [`parking_lot::RwLock`] so a reader holding the read guard always observes a
+/// consistent `(committed, bytes)` pair.
+#[derive(Debug)]
+struct MemFile {
+    /// Backing buffer and committed length under a single lock.
+    inner: RwLock<MemFileInner>,
+}
+
+impl MemFile {
+    /// Create a new `MemFile` from `data` with the first `committed` bytes
+    /// marked as flushed and visible to readers.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The backing buffer.
+    /// * `committed` - Number of leading bytes already flushed/visible.
+    fn new(data: Vec<u8>, committed: usize) -> Self {
+        MemFile {
+            inner: RwLock::new(MemFileInner { data, committed }),
+        }
+    }
+}
+
 /// An in-memory storage implementation.
 ///
-/// All files are held in a shared `HashMap<String, Box<[u8]>>` guarded by a
-/// [`parking_lot::RwLock`]. `Box<[u8]>` is used instead of `Vec<u8>` for
-/// finalized files to avoid wasting memory on unused capacity. The `RwLock`
-/// allows multiple concurrent readers without blocking, which is important
-/// because reads vastly outnumber writes during search operations.
+/// All files are held in a shared `HashMap<String, Arc<MemFile>>` guarded by a
+/// [`parking_lot::RwLock`]. Each [`MemFile`] keeps a growing backing buffer plus
+/// a `committed` length marking the reader-visible prefix; an open writer shares
+/// the same `Arc<MemFile>` as the map, so flushing only advances `committed`
+/// instead of cloning the buffer (Issue #812). The outer `RwLock` allows multiple
+/// concurrent readers without blocking, which is important because reads vastly
+/// outnumber writes during search operations.
 ///
 /// This is useful for testing and for creating temporary indexes in memory.
 #[derive(Debug)]
 pub struct MemoryStorage {
-    /// The files stored in memory with optimized memory layout.
-    files: Arc<RwLock<HashMap<String, Box<[u8]>>>>,
+    /// The files stored in memory, each a shared growing buffer with a committed
+    /// (reader-visible) length.
+    files: Arc<RwLock<HashMap<String, Arc<MemFile>>>>,
     /// Lock manager for coordinating access.
     lock_manager: Arc<MemoryLockManager>,
     /// Storage configuration.
@@ -137,7 +186,10 @@ impl MemoryStorage {
     /// The sum of all file sizes.
     pub fn total_size(&self) -> u64 {
         let files = self.files.read();
-        files.values().map(|data| data.len() as u64).sum()
+        files
+            .values()
+            .map(|file| file.inner.read().committed as u64)
+            .sum()
     }
 
     /// Remove all files from storage.
@@ -158,13 +210,26 @@ impl Storage for MemoryStorage {
     fn open_input(&self, name: &str) -> Result<Box<dyn StorageInput>> {
         self.check_closed()?;
 
-        // Use read lock: concurrent readers do not block each other.
-        let files = self.files.read();
-        let data = files
-            .get(name)
-            .ok_or_else(|| StorageError::FileNotFound(name.to_string()))?;
+        // Use read lock: concurrent readers do not block each other. Clone the
+        // shared `Arc<MemFile>` out and drop the map lock before touching the
+        // file's `inner` lock, so the map lock and the file lock are never held
+        // at the same time (avoids a lock-ordering cycle with `flush_and_sync`).
+        let file = {
+            let files = self.files.read();
+            files
+                .get(name)
+                .cloned()
+                .ok_or_else(|| StorageError::FileNotFound(name.to_string()))?
+        };
 
-        Ok(Box::new(MemoryInput::new(data.clone())))
+        // Snapshot only the committed (flushed) prefix so a not-yet-flushed tail
+        // stays invisible to readers.
+        let snapshot = {
+            let inner = file.inner.read();
+            inner.data[..inner.committed].to_vec()
+        };
+
+        Ok(Box::new(MemoryInput::new(snapshot)))
     }
 
     fn create_output(&self, name: &str) -> Result<Box<dyn StorageOutput>> {
@@ -216,11 +281,11 @@ impl Storage for MemoryStorage {
         self.check_closed()?;
 
         let files = self.files.read();
-        let data = files
+        let file = files
             .get(name)
             .ok_or_else(|| StorageError::FileNotFound(name.to_string()))?;
 
-        Ok(data.len() as u64)
+        Ok(file.inner.read().committed as u64)
     }
 
     /// Returns metadata for the named in-memory file.
@@ -233,11 +298,11 @@ impl Storage for MemoryStorage {
         self.check_closed()?;
 
         let files = self.files.read();
-        if let Some(data) = files.get(name) {
+        if let Some(file) = files.get(name) {
             let now = crate::util::time::now_secs();
 
             Ok(crate::storage::FileMetadata {
-                size: data.len() as u64,
+                size: file.inner.read().committed as u64,
                 modified: now,
                 created: now,
                 readonly: false,
@@ -310,10 +375,18 @@ pub struct MemoryInput {
 }
 
 impl MemoryInput {
-    fn new(data: Box<[u8]>) -> Self {
-        let data_vec = data.into_vec();
-        let size = data_vec.len() as u64;
-        let cursor = Cursor::new(data_vec);
+    /// Build a read handle that owns `data` as its private snapshot.
+    ///
+    /// The buffer is decoupled from the shared [`MemFile`], so subsequent writes
+    /// or map mutations cannot invalidate it (including the zero-copy
+    /// [`as_slice`](StorageInput::as_slice) path).
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The snapshot bytes this input reads over.
+    fn new(data: Vec<u8>) -> Self {
+        let size = data.len() as u64;
+        let cursor = Cursor::new(data);
         MemoryInput { cursor, size }
     }
 }
@@ -336,9 +409,7 @@ impl StorageInput for MemoryInput {
     }
 
     fn clone_input(&self) -> Result<Box<dyn StorageInput>> {
-        Ok(Box::new(MemoryInput::new(
-            self.cursor.get_ref().clone().into_boxed_slice(),
-        )))
+        Ok(Box::new(MemoryInput::new(self.cursor.get_ref().clone())))
     }
 
     fn close(&mut self) -> Result<()> {
@@ -359,17 +430,23 @@ impl StorageInput for MemoryInput {
 
 /// A write handle backed by an in-memory byte buffer.
 ///
-/// `MemoryOutput` accumulates written bytes in a `Vec<u8>`. When the handle
-/// is closed (or dropped), the buffer is stored in the shared file map so
-/// that subsequent [`MemoryStorage::open_input`] calls can read the data.
+/// `MemoryOutput` writes directly into a shared [`MemFile`] buffer. Each
+/// [`flush_and_sync`](StorageOutput::flush_and_sync) (or `close`) advances the
+/// file's `committed` length and publishes the shared `Arc<MemFile>` into the
+/// file map, so the flushed prefix becomes visible to subsequent
+/// [`MemoryStorage::open_input`] calls. Because writer and map share one buffer,
+/// a flush is amortized O(1) instead of cloning the whole buffer (Issue #812).
 #[derive(Debug)]
 pub struct MemoryOutput {
     /// The logical file name.
     name: String,
-    /// Write buffer accumulating output bytes.
-    buffer: Vec<u8>,
-    /// Shared reference to the storage file map for committing on close.
-    files: Arc<RwLock<HashMap<String, Box<[u8]>>>>,
+    /// Shared backing file this handle writes into. Held privately until the
+    /// first flush/close publishes it into the map (preserving truncate
+    /// semantics: a fresh `create_output` does not replace the old map entry
+    /// until the new content is flushed).
+    memfile: Arc<MemFile>,
+    /// Shared reference to the storage file map for publishing on flush/close.
+    files: Arc<RwLock<HashMap<String, Arc<MemFile>>>>,
     /// Current write position within the buffer.
     position: u64,
     /// Whether this output handle has been closed.
@@ -377,31 +454,56 @@ pub struct MemoryOutput {
 }
 
 impl MemoryOutput {
-    fn new(name: String, files: Arc<RwLock<HashMap<String, Box<[u8]>>>>) -> Self {
+    /// Create a truncating write handle.
+    ///
+    /// The handle starts with an empty private [`MemFile`]; the existing map
+    /// entry (if any) stays readable until the first flush/close publishes this
+    /// new content.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The logical file name.
+    /// * `files` - The shared storage file map to publish into on flush/close.
+    fn new(name: String, files: Arc<RwLock<HashMap<String, Arc<MemFile>>>>) -> Self {
         MemoryOutput {
             name,
-            buffer: Vec::new(),
+            memfile: Arc::new(MemFile::new(Vec::new(), 0)),
             files,
             position: 0,
             closed: false,
         }
     }
 
-    fn new_append(name: String, files: Arc<RwLock<HashMap<String, Box<[u8]>>>>) -> Self {
-        // For append mode, load existing data into buffer
+    /// Create an appending write handle.
+    ///
+    /// The committed prefix of the existing file is copied once into a new
+    /// private [`MemFile`] and the write position is set to its end, so appended
+    /// records extend the existing content. This one-time O(existing) copy keeps
+    /// the new handle independent of the live map entry until it is published.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The logical file name.
+    /// * `files` - The shared storage file map to publish into on flush/close.
+    fn new_append(name: String, files: Arc<RwLock<HashMap<String, Arc<MemFile>>>>) -> Self {
+        // Preload only the committed (flushed) prefix of the existing entry.
         let existing_data = {
             let files_guard = files.read();
             files_guard
                 .get(&name)
-                .map(|data| data.to_vec())
+                .map(|file| {
+                    let inner = file.inner.read();
+                    inner.data[..inner.committed].to_vec()
+                })
                 .unwrap_or_default()
         };
 
         let position = existing_data.len() as u64;
+        let committed = existing_data.len();
 
         MemoryOutput {
             name,
-            buffer: existing_data,
+            memfile: Arc::new(MemFile::new(existing_data, committed)),
             files,
             position,
             closed: false,
@@ -419,13 +521,15 @@ impl Write for MemoryOutput {
             .checked_add(buf.len())
             .ok_or_else(|| std::io::Error::other("File too large"))?;
 
-        if end_pos > self.buffer.len() {
-            // Resize buffer if needed, filling gaps with zeros
-            self.buffer.resize(end_pos, 0);
+        // Write into the shared backing buffer. Bytes land in `data` but stay
+        // beyond `committed` (invisible to readers) until `flush_and_sync`.
+        let mut inner = self.memfile.inner.write();
+        if end_pos > inner.data.len() {
+            // Resize buffer if needed, filling gaps with zeros.
+            inner.data.resize(end_pos, 0);
         }
-
-        // Write data at current position
-        self.buffer[self.position as usize..end_pos].copy_from_slice(buf);
+        inner.data[self.position as usize..end_pos].copy_from_slice(buf);
+        drop(inner);
 
         self.position += buf.len() as u64;
         Ok(buf.len())
@@ -446,17 +550,18 @@ impl Seek for MemoryOutput {
         let new_pos = match pos {
             SeekFrom::Start(offset) => offset,
             SeekFrom::End(offset) => {
+                let len = self.memfile.inner.read().data.len() as u64;
                 if offset < 0 {
                     let abs_offset = (-offset) as u64;
-                    if abs_offset > self.buffer.len() as u64 {
+                    if abs_offset > len {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidInput,
                             "Invalid seek position",
                         ));
                     }
-                    self.buffer.len() as u64 - abs_offset
+                    len - abs_offset
                 } else {
-                    self.buffer.len() as u64 + offset as u64
+                    len + offset as u64
                 }
             }
             SeekFrom::Current(offset) => {
@@ -482,11 +587,7 @@ impl Seek for MemoryOutput {
 
 impl StorageOutput for MemoryOutput {
     fn flush_and_sync(&mut self) -> Result<()> {
-        // Update the shared storage with current buffer content.
-        // This mimics filesystem behavior where flushed data is visible to readers
-        // even if the writer is still open.
-        let mut files = self.files.write();
-        files.insert(self.name.clone(), self.buffer.clone().into_boxed_slice());
+        self.publish();
         Ok(())
     }
 
@@ -496,12 +597,39 @@ impl StorageOutput for MemoryOutput {
 
     fn close(&mut self) -> Result<()> {
         if !self.closed {
-            // Store the buffer in the files map, converting Vec<u8> to Box<[u8]>.
-            let mut files = self.files.write();
-            files.insert(self.name.clone(), self.buffer.clone().into_boxed_slice());
+            self.publish();
             self.closed = true;
         }
         Ok(())
+    }
+}
+
+impl MemoryOutput {
+    /// Make every byte written so far visible to readers and publish the shared
+    /// [`MemFile`] into the storage map.
+    ///
+    /// Advances `committed` to the full written extent, then inserts an
+    /// `Arc::clone` of the backing file under this handle's name. This mimics
+    /// filesystem behavior where flushed data is visible to readers even while
+    /// the writer is still open. The insert is O(1) (an `Arc` refcount bump, not
+    /// a buffer copy), so repeated flushes on a growing WAL stay amortized O(1)
+    /// (Issue #812).
+    ///
+    /// Inserting on **every** flush/close (rather than only the first)
+    /// faithfully preserves last-writer-wins and resurrection semantics: a file
+    /// deleted while this writer is open reappears on the next flush.
+    ///
+    /// The `inner` lock is released before the map lock is taken, so the two are
+    /// never held simultaneously — this avoids a lock-ordering cycle with
+    /// [`MemoryStorage::open_input`], which takes the map lock first.
+    fn publish(&mut self) {
+        {
+            let mut inner = self.memfile.inner.write();
+            inner.committed = inner.data.len();
+        }
+        self.files
+            .write()
+            .insert(self.name.clone(), Arc::clone(&self.memfile));
     }
 }
 
@@ -833,5 +961,154 @@ mod tests {
 
         assert_eq!(storage.file_count(), 0);
         assert_eq!(storage.total_size(), 0);
+    }
+
+    /// Reads a file's full bytes via `open_input`.
+    fn read_file(storage: &MemoryStorage, name: &str) -> Vec<u8> {
+        let mut input = storage.open_input(name).unwrap();
+        let mut buf = Vec::new();
+        input.read_to_end(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn flush_then_open_input_sees_only_committed() {
+        // Issue #812: a written-but-not-yet-flushed tail must stay invisible to
+        // readers until the next flush advances the committed length.
+        let storage = MemoryStorage::default();
+        let mut output = storage.create_output("wal").unwrap();
+
+        output.write_all(b"AAAA").unwrap();
+        output.flush_and_sync().unwrap();
+        assert_eq!(read_file(&storage, "wal"), b"AAAA");
+
+        // Write more but do NOT flush: readers still see only the committed prefix.
+        output.write_all(b"BBBB").unwrap();
+        assert_eq!(read_file(&storage, "wal"), b"AAAA");
+        assert_eq!(storage.file_size("wal").unwrap(), 4);
+
+        // Flush makes the tail visible.
+        output.flush_and_sync().unwrap();
+        assert_eq!(read_file(&storage, "wal"), b"AAAABBBB");
+        assert_eq!(storage.file_size("wal").unwrap(), 8);
+    }
+
+    #[test]
+    fn repeated_flush_is_amortized_and_correct() {
+        // The WAL append-then-flush pattern: one long-lived appender, a flush per
+        // record. Each flush must publish exactly the cumulative committed bytes.
+        let storage = MemoryStorage::default();
+        let mut output = storage.create_output_append("wal").unwrap();
+
+        let mut expected = Vec::new();
+        for i in 0u32..64 {
+            let record = i.to_le_bytes();
+            output.write_all(&record).unwrap();
+            output.flush_and_sync().unwrap();
+            expected.extend_from_slice(&record);
+
+            assert_eq!(storage.file_size("wal").unwrap(), expected.len() as u64);
+        }
+        assert_eq!(read_file(&storage, "wal"), expected);
+    }
+
+    #[test]
+    fn truncate_keeps_old_content_until_republish() {
+        // `create_output` (truncate) must not replace the visible map entry until
+        // the new writer flushes/closes.
+        let storage = MemoryStorage::default();
+        let mut old = storage.create_output("f").unwrap();
+        old.write_all(b"oldcontent").unwrap();
+        old.close().unwrap();
+        assert_eq!(read_file(&storage, "f"), b"oldcontent");
+
+        // A fresh truncate handle that has not written/flushed yet leaves the old
+        // content visible.
+        let mut fresh = storage.create_output("f").unwrap();
+        assert_eq!(read_file(&storage, "f"), b"oldcontent");
+
+        // Publishing the new content replaces it.
+        fresh.write_all(b"new").unwrap();
+        fresh.close().unwrap();
+        assert_eq!(read_file(&storage, "f"), b"new");
+        assert_eq!(storage.file_size("f").unwrap(), 3);
+    }
+
+    #[test]
+    fn create_output_close_without_write_publishes_empty_file() {
+        // Closing a fresh handle with no writes must materialize a zero-length
+        // file (the v3 WAL re-stamp path in store/log.rs relies on this).
+        let storage = MemoryStorage::default();
+        let mut output = storage.create_output("empty.log").unwrap();
+        output.close().unwrap();
+
+        assert!(storage.file_exists("empty.log"));
+        assert_eq!(storage.file_size("empty.log").unwrap(), 0);
+        assert_eq!(read_file(&storage, "empty.log"), b"");
+    }
+
+    #[test]
+    fn delete_then_writer_flush_resurrects_file() {
+        // Deleting a file out from under an open writer, then flushing, must
+        // resurrect it with the writer's full content (last-writer-wins).
+        let storage = MemoryStorage::default();
+        let mut output = storage.create_output_append("wal").unwrap();
+
+        output.write_all(b"AAAA").unwrap();
+        output.flush_and_sync().unwrap();
+        assert!(storage.file_exists("wal"));
+
+        storage.delete_file("wal").unwrap();
+        assert!(!storage.file_exists("wal"));
+
+        output.write_all(b"BBBB").unwrap();
+        output.flush_and_sync().unwrap();
+        assert!(storage.file_exists("wal"));
+        assert_eq!(read_file(&storage, "wal"), b"AAAABBBB");
+    }
+
+    #[test]
+    fn seek_back_overwrite_header_then_commit() {
+        // The placeholder-header pattern (e.g. BKD tree writer): reserve a header,
+        // write the payload, seek back to fill the header in place, then commit.
+        let storage = MemoryStorage::default();
+        let mut output = storage.create_output("bkd").unwrap();
+
+        // Reserve a 4-byte header placeholder, then append the payload.
+        output.write_all(&[0u8; 4]).unwrap();
+        output.write_all(b"PAYLOAD").unwrap();
+
+        // Seek back and overwrite the header in place.
+        output.seek(SeekFrom::Start(0)).unwrap();
+        output.write_all(b"HEAD").unwrap();
+
+        // Seek to end and commit.
+        output.seek(SeekFrom::End(0)).unwrap();
+        output.close().unwrap();
+
+        assert_eq!(read_file(&storage, "bkd"), b"HEADPAYLOAD");
+        assert_eq!(storage.file_size("bkd").unwrap(), 11);
+    }
+
+    #[test]
+    fn size_surfaces_report_committed_not_written_tail() {
+        // file_size / total_size / metadata must report the committed (flushed)
+        // length, never the larger in-progress buffer length — the #791/#806
+        // allocation guard depends on `size()` being the true visible length.
+        let storage = MemoryStorage::default();
+        let mut output = storage.create_output("f").unwrap();
+
+        output.write_all(b"AAAA").unwrap();
+        output.flush_and_sync().unwrap();
+
+        // Write an unflushed tail.
+        output.write_all(b"BBBBBB").unwrap();
+
+        assert_eq!(storage.file_size("f").unwrap(), 4);
+        assert_eq!(storage.total_size(), 4);
+        assert_eq!(storage.metadata("f").unwrap().size, 4);
+
+        // The open_input snapshot's size also reflects only the committed prefix.
+        assert_eq!(storage.open_input("f").unwrap().size().unwrap(), 4);
     }
 }
