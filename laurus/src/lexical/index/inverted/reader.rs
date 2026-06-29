@@ -135,27 +135,18 @@ impl Default for InvertedIndexReaderConfig {
 /// - `InvertedIndexPostingIterator`: Advanced iterator for index queries
 #[derive(Debug)]
 pub struct InvertedIndexPostingIterator {
-    /// Doc IDs, sorted ascending. Parallel to `frequencies`.
-    doc_ids: Vec<u32>,
-
-    /// Term frequencies. Parallel to `doc_ids`.
-    frequencies: Vec<u32>,
-
-    /// Optional per-posting positions sidecar. `None` when no posting carries
-    /// positions; otherwise `vec[i]` holds the positions for doc `i`.
-    positions: Option<Vec<Option<Vec<u32>>>>,
+    /// Shared, immutable decoded posting list backing this iterator. Holds the
+    /// SoA arrays (`doc_ids` / `frequencies` / `positions`) and the multi-level
+    /// `skip_levels` table (#503); the iterator only adds a cursor over them.
+    ///
+    /// The posting cache (#612) stores `Arc<DecodedPostingList>`, so both the
+    /// cache-hit and cache-insert paths hand the iterator an `Arc::clone`
+    /// (refcount bump) instead of deep-copying the SoA `Vec<u32>` arrays — the
+    /// deep clone was ~60% of multi-segment BM25 search wall-time (#576).
+    data: Arc<DecodedPostingList>,
 
     /// Current position in the parallel arrays.
     position: usize,
-
-    /// Multi-level skip table over `doc_ids` (#503). `skip_levels[0]` is
-    /// level 0 (one entry per [`crate::lexical::index::inverted::core::posting::SKIP_INTERVAL`]
-    /// postings); each level's stride is `SKIP_INTERVAL` times the
-    /// previous. Empty when the posting list is too short to benefit
-    /// (`doc_ids.len() < SKIP_INTERVAL`) — `skip_to` then falls back to
-    /// a single linear scan over the bottom-level window, which for
-    /// short lists is already O(SKIP_INTERVAL).
-    skip_levels: Vec<Vec<u32>>,
 
     /// Whether `next()` has been called at least once.
     started: bool,
@@ -173,14 +164,21 @@ impl InvertedIndexPostingIterator {
         let (doc_ids, frequencies, positions) = Self::soa_from_aos(&postings);
         let skip_levels =
             crate::lexical::index::inverted::core::posting::build_skip_levels(&doc_ids);
-        InvertedIndexPostingIterator {
+        // Wrap the AoS-derived arrays in a `DecodedPostingList` so the iterator
+        // shares one representation with the SoA hot path. `weights` / `term` /
+        // the frequency aggregates are not read by the iterator, so they are
+        // left at their defaults.
+        let doc_frequency = doc_ids.len() as u64;
+        Self::from_decoded_soa(DecodedPostingList {
+            term: String::new(),
             doc_ids,
             frequencies,
+            weights: Vec::new(),
             positions,
-            position: 0,
             skip_levels,
-            started: false,
-        }
+            total_frequency: 0,
+            doc_frequency,
+        })
     }
 
     /// Create a posting iterator from AoS postings with multi-level
@@ -210,12 +208,22 @@ impl InvertedIndexPostingIterator {
     ///
     /// * `decoded` - SoA-decoded posting data.
     pub fn from_decoded_soa(decoded: DecodedPostingList) -> Self {
+        Self::from_decoded_soa_arc(Arc::new(decoded))
+    }
+
+    /// Construct an iterator that shares an already-`Arc`-wrapped decoded
+    /// posting list. This is the query hot path: [`SegmentReader::postings`]
+    /// hands the iterator an `Arc::clone` of the cached list, so no SoA array
+    /// is copied (#576).
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Shared SoA-decoded posting data (typically the same `Arc`
+    ///   held by the per-segment posting cache).
+    pub fn from_decoded_soa_arc(data: Arc<DecodedPostingList>) -> Self {
         InvertedIndexPostingIterator {
-            doc_ids: decoded.doc_ids,
-            frequencies: decoded.frequencies,
-            positions: decoded.positions,
+            data,
             position: 0,
-            skip_levels: decoded.skip_levels,
             started: false,
         }
     }
@@ -274,25 +282,25 @@ impl InvertedIndexPostingIterator {
     fn skip_via_levels(&self, target_u32: u32) -> usize {
         use crate::lexical::index::inverted::core::posting::SKIP_INTERVAL;
 
-        let n = self.doc_ids.len();
+        let n = self.data.doc_ids.len();
         let cursor = self.position;
         if cursor >= n {
             return n;
         }
-        if self.skip_levels.is_empty() {
+        if self.data.skip_levels.is_empty() {
             // Posting list shorter than SKIP_INTERVAL — the tail scan
             // inside `skip_to` handles the whole list.
             return cursor;
         }
 
-        let top = self.skip_levels.len() - 1;
+        let top = self.data.skip_levels.len() - 1;
         // step at the current level = SKIP_INTERVAL^(level + 1).
         let mut step = SKIP_INTERVAL.saturating_pow((top + 1) as u32);
 
         // Top level: `build_skip_levels` guarantees ≤ SKIP_INTERVAL
         // entries here, so a single `partition_point` already runs in
         // ≤ log_2(SKIP_INTERVAL) comparisons.
-        let top_lvl = &self.skip_levels[top];
+        let top_lvl = &self.data.skip_levels[top];
         let bucket_lo = cursor / step;
         if bucket_lo >= top_lvl.len() {
             // Cursor is past every entry on the top level — descend
@@ -311,7 +319,7 @@ impl InvertedIndexPostingIterator {
         // unbounded slice the naïve descent would search.
         for level in (0..top).rev() {
             step /= SKIP_INTERVAL;
-            let lvl = &self.skip_levels[level];
+            let lvl = &self.data.skip_levels[level];
 
             let parent_lo = bucket_index * SKIP_INTERVAL;
             let parent_hi = (parent_lo + SKIP_INTERVAL).min(lvl.len());
@@ -339,26 +347,26 @@ impl InvertedIndexPostingIterator {
 
 impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
     fn doc_id(&self) -> u64 {
-        if self.position < self.doc_ids.len() {
-            self.doc_ids[self.position] as u64
+        if self.position < self.data.doc_ids.len() {
+            self.data.doc_ids[self.position] as u64
         } else {
             u64::MAX // Convention for exhausted iterator
         }
     }
 
     fn term_freq(&self) -> u64 {
-        if self.position < self.frequencies.len() {
-            self.frequencies[self.position] as u64
+        if self.position < self.data.frequencies.len() {
+            self.data.frequencies[self.position] as u64
         } else {
             0
         }
     }
 
     fn positions(&self) -> Result<Vec<u64>> {
-        if self.position >= self.doc_ids.len() {
+        if self.position >= self.data.doc_ids.len() {
             return Ok(Vec::new());
         }
-        match &self.positions {
+        match &self.data.positions {
             Some(per_doc) => match &per_doc[self.position] {
                 Some(p) => Ok(p.iter().map(|&v| v as u64).collect()),
                 None => Ok(Vec::new()),
@@ -368,7 +376,7 @@ impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
     }
 
     fn next(&mut self) -> Result<bool> {
-        if self.doc_ids.is_empty() {
+        if self.data.doc_ids.is_empty() {
             return Ok(false);
         }
 
@@ -379,7 +387,7 @@ impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
         } else {
             // Move to next document
             self.position += 1;
-            Ok(self.position < self.doc_ids.len())
+            Ok(self.position < self.data.doc_ids.len())
         }
     }
 
@@ -387,7 +395,7 @@ impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
         // Mark as started
         self.started = true;
 
-        let n = self.doc_ids.len();
+        let n = self.data.doc_ids.len();
         if n == 0 {
             return Ok(false);
         }
@@ -411,7 +419,7 @@ impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
         self.position = self.skip_via_levels(target_u32);
 
         while self.position < n {
-            if self.doc_ids[self.position] >= target_u32 {
+            if self.data.doc_ids[self.position] >= target_u32 {
                 return Ok(true);
             }
             self.position += 1;
@@ -420,7 +428,7 @@ impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
     }
 
     fn cost(&self) -> u64 {
-        self.doc_ids.len() as u64
+        self.data.doc_ids.len() as u64
     }
 }
 
@@ -1101,8 +1109,10 @@ impl SegmentReader {
         if let Some(key) = &cache_key
             && let Some(cached) = self.posting_cache.get(key)
         {
+            // Share the cached `Arc<DecodedPostingList>` with the iterator
+            // instead of deep-copying the SoA arrays (#576).
             return Ok(Some(Box::new(
-                InvertedIndexPostingIterator::from_decoded_soa_with_blocks((*cached).clone(), 64),
+                InvertedIndexPostingIterator::from_decoded_soa_arc(cached),
             )));
         }
 
@@ -1139,20 +1149,21 @@ impl SegmentReader {
                 // Empty lists are not cached — `None` is cheap to recompute.
                 Ok(None)
             } else if let Some(key) = cache_key {
-                // Cache the shared decoded list and build the iterator from a
-                // clone (a `Vec` memcpy — cheaper than the decode it replaces).
+                // Cache the shared decoded list and back the iterator with the
+                // same `Arc` — both the cache and the iterator point at one
+                // copy of the SoA arrays, so building the iterator is an
+                // `Arc::clone` (refcount bump) rather than a `Vec` deep copy
+                // (#576).
                 let shared = Arc::new(filtered);
                 self.posting_cache.put(key, Arc::clone(&shared));
                 Ok(Some(Box::new(
-                    InvertedIndexPostingIterator::from_decoded_soa_with_blocks(
-                        (*shared).clone(),
-                        64,
-                    ),
+                    InvertedIndexPostingIterator::from_decoded_soa_arc(shared),
                 )))
             } else {
-                // Cache disabled — build directly from the owned list, no clone.
+                // Cache disabled — build directly from the owned list (a single
+                // `Arc::new`, no array copy).
                 Ok(Some(Box::new(
-                    InvertedIndexPostingIterator::from_decoded_soa_with_blocks(filtered, 64),
+                    InvertedIndexPostingIterator::from_decoded_soa(filtered),
                 )))
             }
         } else {
@@ -2453,6 +2464,59 @@ mod tests {
         // Test skip past end
         assert!(!iter.skip_to(15).unwrap());
         assert_eq!(iter.doc_id(), u64::MAX);
+    }
+
+    /// #576: building an iterator from an `Arc<DecodedPostingList>` must share
+    /// the backing arrays (an `Arc::clone` refcount bump), not deep-copy them —
+    /// this is what removes the per-query SoA clone that dominated multi-segment
+    /// BM25 search. Two iterators over the same shared list must keep
+    /// independent cursors and return identical results.
+    #[test]
+    fn from_decoded_soa_arc_shares_backing_without_deep_clone() {
+        use crate::lexical::index::inverted::core::posting::{
+            DecodedPostingList, build_skip_levels,
+        };
+
+        let doc_ids = vec![2u32, 4, 6, 8, 10];
+        let skip_levels = build_skip_levels(&doc_ids);
+        let shared = Arc::new(DecodedPostingList {
+            term: "t".to_string(),
+            doc_ids: doc_ids.clone(),
+            frequencies: vec![1, 1, 1, 1, 1],
+            weights: Vec::new(),
+            positions: None,
+            skip_levels,
+            total_frequency: 5,
+            doc_frequency: 5,
+        });
+        assert_eq!(Arc::strong_count(&shared), 1);
+
+        // Each iterator must hold an `Arc::clone`, not a deep copy.
+        let mut it_a = InvertedIndexPostingIterator::from_decoded_soa_arc(Arc::clone(&shared));
+        let mut it_b = InvertedIndexPostingIterator::from_decoded_soa_arc(Arc::clone(&shared));
+        assert_eq!(
+            Arc::strong_count(&shared),
+            3,
+            "both iterators must share the cached Arc (no deep clone)"
+        );
+
+        // Independent cursors: advancing one must not move the other.
+        assert!(it_a.skip_to(6).unwrap());
+        assert_eq!(it_a.doc_id(), 6);
+        assert!(it_b.next().unwrap());
+        assert_eq!(it_b.doc_id(), 2);
+
+        // Full sweep over `it_b` matches the source doc ids.
+        let mut seen = vec![it_b.doc_id()];
+        while it_b.next().unwrap() {
+            seen.push(it_b.doc_id());
+        }
+        assert_eq!(seen, vec![2, 4, 6, 8, 10]);
+
+        // Dropping the iterators releases their Arc references.
+        drop(it_a);
+        drop(it_b);
+        assert_eq!(Arc::strong_count(&shared), 1);
     }
 
     /// `skip_to` must agree with a naive linear scan across the full

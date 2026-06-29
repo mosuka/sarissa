@@ -389,7 +389,10 @@ Evaluating a term reads its posting list from the segment's `.post` file and dec
 (varint doc-ids, deletion filtering, skip table). Without caching, every query for the same
 term repeats that read + decode — and on cloud/remote storage the read dominates. Each segment
 reader keeps a small cache of decoded, deletion-filtered posting lists, so a repeated
-`(field, term)` lookup within a snapshot reuses the decoded list.
+`(field, term)` lookup within a snapshot reuses the decoded list. The per-term iterator
+shares the cached list directly (a reference-count bump, not a copy), so evaluating a term
+never duplicates its posting arrays — this removed the dominant allocation cost on the
+multi-segment scoring path.
 
 Because a segment is immutable for a reader snapshot, the cached list is always consistent with
 its deletions; a commit builds new segment readers with empty caches. The cache is **byte-budget
