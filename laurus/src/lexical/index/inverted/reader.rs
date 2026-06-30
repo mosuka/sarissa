@@ -761,14 +761,18 @@ impl SegmentReader {
 
     /// Check whether a global doc_id is marked as deleted in this segment.
     pub fn is_deleted(&self, doc_id: u64) -> Result<bool> {
-        // Find deletion bitmap
+        // Lock-free fast path: a segment with no deletions can never mark a doc
+        // deleted, so skip the `deletion_bitmap` RwLock acquire entirely. This
+        // is hot on the scoring path, which probes deletion status per scored
+        // doc (often redundantly, since the posting iterator is already
+        // deletion-filtered at decode time via `filter_deleted_soa`).
+        if !self.info.has_deletions {
+            return Ok(false);
+        }
+
+        // Find deletion bitmap (load on demand the first time).
         if self.deletion_bitmap.read().unwrap().is_none() {
-            // Try to load bitmap if segment has deletions
-            if self.info.has_deletions {
-                self.load_deletion_bitmap()?;
-            } else {
-                return Ok(false);
-            }
+            self.load_deletion_bitmap()?;
         }
 
         let bitmap_lock = self.deletion_bitmap.read().unwrap();
