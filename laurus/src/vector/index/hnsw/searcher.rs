@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::distance::{DistanceMetric, PreparedQuery};
 #[cfg(feature = "pq-fastscan")]
 use crate::vector::core::distance_pq_fastscan::PqFastScanQuery;
 use crate::vector::core::distance_quantized::{
@@ -530,6 +530,14 @@ impl HnswSearcher {
                 }
             };
 
+        // f32 reference path (no quantized context): cache the query norm once
+        // so `calc_dist` uses `distance_with_prepared` (candidate-norm-only
+        // kernel) instead of recomputing `‖query‖²` per candidate (#835). The
+        // quantized contexts already carry their own prepared query.
+        let prepared_query = quant_ctx
+            .is_none()
+            .then(|| metric.prepare_query(&query.data));
+
         // Retrieve the per-field prefetch index once per search call (O(1), no allocation).
         // `None` for on-demand (disk-backed) storage; the prefetch loop is skipped entirely.
         let field_prefetch = reader.field_prefetch_index(field_name);
@@ -570,7 +578,14 @@ impl HnswSearcher {
                 if reader.is_deleted(doc_id) {
                     continue;
                 }
-                let d = self.calc_dist(reader, query, quant_ctx.as_ref(), doc_id, field_name)?;
+                let d = self.calc_dist(
+                    reader,
+                    query,
+                    quant_ctx.as_ref(),
+                    prepared_query.as_ref(),
+                    doc_id,
+                    field_name,
+                )?;
                 // Skip docs with no vector in this field (Issue #676);
                 // `finalize_graph_results` also guards this, but skipping here
                 // keeps the heap small.
@@ -599,7 +614,14 @@ impl HnswSearcher {
         // Since HNSW here is single-graph for mixed IDs (potentially), we must hope entry point is valid for calc_dist with this field?
         // Ref discussion: assuming HnswIndex is single-field.
 
-        let mut dist = self.calc_dist(reader, query, quant_ctx.as_ref(), curr_obj, field_name)?;
+        let mut dist = self.calc_dist(
+            reader,
+            query,
+            quant_ctx.as_ref(),
+            prepared_query.as_ref(),
+            curr_obj,
+            field_name,
+        )?;
 
         // 2. Greedy descent
         for lc in (1..=graph.max_level).rev() {
@@ -621,6 +643,7 @@ impl HnswSearcher {
                             reader,
                             query,
                             quant_ctx.as_ref(),
+                            prepared_query.as_ref(),
                             neighbor_id,
                             field_name,
                         )?;
@@ -741,6 +764,7 @@ impl HnswSearcher {
                             reader,
                             query,
                             quant_ctx.as_ref(),
+                            prepared_query.as_ref(),
                             neighbor_id,
                             field_name,
                         )?;
@@ -809,6 +833,7 @@ impl HnswSearcher {
                             reader,
                             query,
                             quant_ctx.as_ref(),
+                            prepared_query.as_ref(),
                             neighbor_id,
                             field_name,
                         )?;
@@ -957,6 +982,7 @@ impl HnswSearcher {
         reader: &HnswIndexReader,
         query: &Vector,
         quant_ctx: Option<&QuantizedSearchCtx>,
+        prepared: Option<&PreparedQuery<'_>>,
         doc_id: u64,
         field_name: &str,
     ) -> Result<f32> {
@@ -968,7 +994,15 @@ impl HnswSearcher {
             return Ok(ctx.distance(doc_id));
         }
         if let Some(target) = reader.get_vector(doc_id, field_name)? {
-            reader.distance_metric().distance(&query.data, &target.data)
+            // f32 reference path. Prefer the prepared query (#835): it caches
+            // the query norm once per search so Cosine/Angular skip the
+            // per-candidate `‖query‖²` accumulation (`simd_dot_and_norm_b`
+            // instead of `simd_dot_and_norms`).
+            let metric = reader.distance_metric();
+            match prepared {
+                Some(prepared) => metric.distance_with_prepared(prepared, &target.data),
+                None => metric.distance(&query.data, &target.data),
+            }
         } else {
             // Vector not found in this field?
             // Should return max distance or error?
