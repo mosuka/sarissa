@@ -182,11 +182,12 @@ fn approx_dot_product(query: &QuantizedQuery, cand: &[u8], cand_sum_q: u32) -> f
         + scale * scale * dot_q as f32
 }
 
-/// SIMD `Σ a[i] * b[i]` over u8 inputs, accumulating in i32.
+/// `Σ a[i] * b[i]` over u8 inputs, accumulating in i32.
 ///
-/// Uses [`wide::i32x8`] for an 8-wide accumulator. Per-element
-/// `u8 → i32` zero-extension is folded into the SIMD load. The tail
-/// (≤ 7 elements) falls back to scalar.
+/// Dispatches at runtime to an AVX2 kernel on x86_64 (when the CPU
+/// reports AVX2 support), a NEON kernel on aarch64, and the portable
+/// [`dot_u8_to_i32_scalar`] fallback otherwise. All three produce
+/// bit-identical results because the arithmetic is integer.
 ///
 /// # Overflow
 ///
@@ -195,6 +196,34 @@ fn approx_dot_product(query: &QuantizedQuery, cand: &[u8], cand_sum_q: u32) -> f
 /// covering all realistic vector dimensions.
 #[inline]
 pub fn dot_u8_to_i32(a: &[u8], b: &[u8]) -> i32 {
+    debug_assert_eq!(a.len(), b.len());
+    #[cfg(target_arch = "x86_64")]
+    if crate::vector::core::sq_int8_avx2::is_avx2_supported() {
+        // SAFETY: AVX2 is detected at runtime and `a.len() == b.len()`.
+        return unsafe { crate::vector::core::sq_int8_avx2::dot_u8_to_i32_avx2(a, b) };
+    }
+    #[cfg(target_arch = "aarch64")]
+    if crate::vector::core::sq_int8_neon::is_neon_supported() {
+        // SAFETY: NEON is part of the ARMv8 baseline and `a.len() == b.len()`.
+        return unsafe { crate::vector::core::sq_int8_neon::dot_u8_to_i32_neon(a, b) };
+    }
+    dot_u8_to_i32_scalar(a, b)
+}
+
+/// Portable `wide`-based reference for [`dot_u8_to_i32`].
+///
+/// Uses [`wide::i32x8`] for an 8-wide accumulator. Per-element
+/// `u8 → i32` zero-extension is folded into the SIMD load. The tail
+/// (≤ 7 elements) falls back to scalar. Retained as the fallback for
+/// non-AVX2 / non-NEON targets, as the correctness anchor the SIMD
+/// kernels are asserted against, and as the shared `len % 32` /
+/// `len % 16` tail handler for those kernels.
+///
+/// Exposed (hidden from docs) so the `vector_search_bench` A/B
+/// micro-benchmark can time it against the runtime-dispatched
+/// [`dot_u8_to_i32`]; not part of the stable public API.
+#[doc(hidden)]
+pub fn dot_u8_to_i32_scalar(a: &[u8], b: &[u8]) -> i32 {
     debug_assert_eq!(a.len(), b.len());
     let mut acc = i32x8::ZERO;
     let chunks_a = a.chunks_exact(8);
@@ -231,14 +260,35 @@ pub fn dot_u8_to_i32(a: &[u8], b: &[u8]) -> i32 {
     total
 }
 
-/// SIMD `Σ (a[i] - b[i])²` over u8 inputs, accumulating in i32.
+/// `Σ (a[i] - b[i])²` over u8 inputs, accumulating in i32.
 ///
-/// The subtraction widens to i32 first so the result remains correct
-/// even when `a[i] < b[i]` (would underflow in u8). Per-pair
-/// squared diff is at most `255² = 65025`, identical to the dot-product
-/// kernel's per-pair bound, so the same overflow analysis applies.
+/// Dispatches at runtime to AVX2 / NEON / [`sq_diff_u8_to_i32_scalar`]
+/// exactly like [`dot_u8_to_i32`]. Per-pair squared diff is at most
+/// `255² = 65025`, identical to the dot-product kernel's per-pair
+/// bound, so the same overflow analysis applies.
 #[inline]
 pub fn sq_diff_u8_to_i32(a: &[u8], b: &[u8]) -> i32 {
+    debug_assert_eq!(a.len(), b.len());
+    #[cfg(target_arch = "x86_64")]
+    if crate::vector::core::sq_int8_avx2::is_avx2_supported() {
+        // SAFETY: AVX2 is detected at runtime and `a.len() == b.len()`.
+        return unsafe { crate::vector::core::sq_int8_avx2::sq_diff_u8_to_i32_avx2(a, b) };
+    }
+    #[cfg(target_arch = "aarch64")]
+    if crate::vector::core::sq_int8_neon::is_neon_supported() {
+        // SAFETY: NEON is part of the ARMv8 baseline and `a.len() == b.len()`.
+        return unsafe { crate::vector::core::sq_int8_neon::sq_diff_u8_to_i32_neon(a, b) };
+    }
+    sq_diff_u8_to_i32_scalar(a, b)
+}
+
+/// Portable `wide`-based reference for [`sq_diff_u8_to_i32`].
+///
+/// The subtraction widens to i32 first so the result remains correct
+/// even when `a[i] < b[i]` (would underflow in u8). See
+/// [`dot_u8_to_i32_scalar`] for the fallback / tail-handler role.
+#[doc(hidden)]
+pub fn sq_diff_u8_to_i32_scalar(a: &[u8], b: &[u8]) -> i32 {
     debug_assert_eq!(a.len(), b.len());
     let mut acc = i32x8::ZERO;
     let chunks_a = a.chunks_exact(8);
@@ -277,13 +327,34 @@ pub fn sq_diff_u8_to_i32(a: &[u8], b: &[u8]) -> i32 {
     total
 }
 
-/// SIMD `Σ |a[i] - b[i]|` over u8 inputs, accumulating in i32.
+/// `Σ |a[i] - b[i]|` over u8 inputs, accumulating in i32.
 ///
-/// Uses widened `i32` subtraction + [`i32x8::abs`] for the absolute
-/// value. Per-pair magnitude is at most `255`, so accumulation
-/// safety is the same as the other kernels.
+/// Dispatches at runtime to AVX2 / NEON / [`abs_diff_u8_to_i32_scalar`]
+/// exactly like [`dot_u8_to_i32`]. Per-pair magnitude is at most
+/// `255`, so accumulation safety is the same as the other kernels.
 #[inline]
 pub fn abs_diff_u8_to_i32(a: &[u8], b: &[u8]) -> i32 {
+    debug_assert_eq!(a.len(), b.len());
+    #[cfg(target_arch = "x86_64")]
+    if crate::vector::core::sq_int8_avx2::is_avx2_supported() {
+        // SAFETY: AVX2 is detected at runtime and `a.len() == b.len()`.
+        return unsafe { crate::vector::core::sq_int8_avx2::abs_diff_u8_to_i32_avx2(a, b) };
+    }
+    #[cfg(target_arch = "aarch64")]
+    if crate::vector::core::sq_int8_neon::is_neon_supported() {
+        // SAFETY: NEON is part of the ARMv8 baseline and `a.len() == b.len()`.
+        return unsafe { crate::vector::core::sq_int8_neon::abs_diff_u8_to_i32_neon(a, b) };
+    }
+    abs_diff_u8_to_i32_scalar(a, b)
+}
+
+/// Portable `wide`-based reference for [`abs_diff_u8_to_i32`].
+///
+/// Uses widened `i32` subtraction + [`i32x8::abs`] for the absolute
+/// value. See [`dot_u8_to_i32_scalar`] for the fallback / tail-handler
+/// role.
+#[doc(hidden)]
+pub fn abs_diff_u8_to_i32_scalar(a: &[u8], b: &[u8]) -> i32 {
     debug_assert_eq!(a.len(), b.len());
     let mut acc = i32x8::ZERO;
     let chunks_a = a.chunks_exact(8);
@@ -481,7 +552,9 @@ mod tests {
 
     #[test]
     fn dot_simd_matches_scalar_for_various_lengths() {
-        for &dim in &[1, 7, 8, 9, 16, 17, 64, 65, 128, 384, 768] {
+        for &dim in &[
+            1, 7, 8, 9, 16, 17, 31, 32, 33, 64, 65, 96, 100, 128, 384, 768,
+        ] {
             let a = pseudo_random_u8(1, dim);
             let b = pseudo_random_u8(2, dim);
             assert_eq!(
@@ -494,7 +567,9 @@ mod tests {
 
     #[test]
     fn sq_diff_simd_matches_scalar_for_various_lengths() {
-        for &dim in &[1, 7, 8, 9, 16, 17, 64, 65, 128, 384, 768] {
+        for &dim in &[
+            1, 7, 8, 9, 16, 17, 31, 32, 33, 64, 65, 96, 100, 128, 384, 768,
+        ] {
             let a = pseudo_random_u8(3, dim);
             let b = pseudo_random_u8(4, dim);
             assert_eq!(
@@ -507,7 +582,9 @@ mod tests {
 
     #[test]
     fn abs_diff_simd_matches_scalar_for_various_lengths() {
-        for &dim in &[1, 7, 8, 9, 16, 17, 64, 65, 128, 384, 768] {
+        for &dim in &[
+            1, 7, 8, 9, 16, 17, 31, 32, 33, 64, 65, 96, 100, 128, 384, 768,
+        ] {
             let a = pseudo_random_u8(5, dim);
             let b = pseudo_random_u8(6, dim);
             assert_eq!(
@@ -515,6 +592,85 @@ mod tests {
                 scalar_abs_diff(&a, &b),
                 "dim = {dim}: SIMD abs_diff disagrees with scalar"
             );
+        }
+    }
+
+    /// The portable `wide` fallbacks must match the plain scalar
+    /// reference for every length, independent of which kernel the
+    /// dispatcher selects at runtime. This keeps the non-AVX2 / non-NEON
+    /// path covered on an AVX2 host.
+    #[test]
+    fn scalar_fallbacks_match_reference_for_various_lengths() {
+        for &dim in &[
+            1, 7, 8, 9, 16, 17, 31, 32, 33, 64, 65, 96, 100, 128, 384, 768,
+        ] {
+            let a = pseudo_random_u8(7, dim);
+            let b = pseudo_random_u8(8, dim);
+            assert_eq!(
+                dot_u8_to_i32_scalar(&a, &b),
+                scalar_dot(&a, &b),
+                "dot dim={dim}"
+            );
+            assert_eq!(
+                sq_diff_u8_to_i32_scalar(&a, &b),
+                scalar_sq_diff(&a, &b),
+                "sq_diff dim={dim}"
+            );
+            assert_eq!(
+                abs_diff_u8_to_i32_scalar(&a, &b),
+                scalar_abs_diff(&a, &b),
+                "abs_diff dim={dim}"
+            );
+        }
+    }
+
+    /// Directly exercise the AVX2 kernels (not just the dispatcher) so
+    /// the SIMD path is verified even if the dispatcher's runtime probe
+    /// ever changes. Skipped when the host lacks AVX2. Lengths span the
+    /// 32-byte block boundary (`31/32/33/96/100`) to stress the scalar
+    /// tail delegation.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn avx2_kernels_match_scalar_when_supported() {
+        use crate::vector::core::sq_int8_avx2::{
+            abs_diff_u8_to_i32_avx2, dot_u8_to_i32_avx2, is_avx2_supported, sq_diff_u8_to_i32_avx2,
+        };
+        if !is_avx2_supported() {
+            return;
+        }
+        for &dim in &[
+            1, 7, 8, 9, 16, 17, 31, 32, 33, 64, 65, 96, 100, 128, 384, 768, 4096,
+        ] {
+            let a = pseudo_random_u8(9, dim);
+            let b = pseudo_random_u8(10, dim);
+            // SAFETY: guarded by `is_avx2_supported()` above.
+            unsafe {
+                assert_eq!(
+                    dot_u8_to_i32_avx2(&a, &b),
+                    scalar_dot(&a, &b),
+                    "dot dim={dim}"
+                );
+                assert_eq!(
+                    sq_diff_u8_to_i32_avx2(&a, &b),
+                    scalar_sq_diff(&a, &b),
+                    "sq_diff dim={dim}"
+                );
+                assert_eq!(
+                    abs_diff_u8_to_i32_avx2(&a, &b),
+                    scalar_abs_diff(&a, &b),
+                    "abs_diff dim={dim}"
+                );
+            }
+        }
+        // All-255 extreme at a realistic dim: exercises the i32 / u64
+        // accumulator bounds documented on the kernels.
+        let a = vec![255u8; 4096];
+        let b = vec![0u8; 4096];
+        // SAFETY: guarded by `is_avx2_supported()` above.
+        unsafe {
+            assert_eq!(dot_u8_to_i32_avx2(&a, &a), 255 * 255 * 4096);
+            assert_eq!(sq_diff_u8_to_i32_avx2(&a, &b), 255 * 255 * 4096);
+            assert_eq!(abs_diff_u8_to_i32_avx2(&a, &b), 255 * 4096);
         }
     }
 
