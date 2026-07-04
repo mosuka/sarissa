@@ -126,6 +126,10 @@ use laurus::storage::file::FileStorageConfig;
 use laurus::storage::{StorageConfig, StorageFactory};
 use laurus::vector::HnswIndexReader;
 use laurus::vector::core::distance::DistanceMetric;
+use laurus::vector::core::distance_quantized::{
+    abs_diff_u8_to_i32, abs_diff_u8_to_i32_scalar, dot_u8_to_i32, dot_u8_to_i32_scalar,
+    sq_diff_u8_to_i32, sq_diff_u8_to_i32_scalar,
+};
 use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::vector::core::vector::Vector;
 use laurus::vector::index::ManagedVectorIndex;
@@ -306,8 +310,14 @@ fn cache_is_valid(dir: &Path) -> bool {
 fn open_cached_reader(
     dir: &Path,
     config: &VectorIndexTypeConfig,
+    use_mmap: bool,
 ) -> laurus::Result<Arc<dyn VectorIndexReader>> {
-    let file_config = FileStorageConfig::new(dir);
+    let mut file_config = FileStorageConfig::new(dir);
+    // `use_mmap = false` forces `LoadingMode::Eager`, so scalar-quantized
+    // segments load as `VectorStorage::OwnedQuantized` and the search hot loop
+    // dispatches to the int8 `distance_quantized` kernel; mmap (the default)
+    // yields `LoadingMode::Lazy` -> `OnDemand` dequantize-on-get (f32 path).
+    file_config.use_mmap = use_mmap;
     let storage = StorageFactory::create(StorageConfig::File(file_config))?;
     let distance = config.distance_metric();
     let reader: Arc<dyn VectorIndexReader> = match config {
@@ -334,9 +344,14 @@ fn open_cached_reader(
 fn build_cached_reader(
     dir: &Path,
     config: VectorIndexTypeConfig,
+    use_mmap: bool,
     vectors: Vec<(u64, String, Vector)>,
 ) -> laurus::Result<Arc<dyn VectorIndexReader>> {
-    let file_config = FileStorageConfig::new(dir);
+    let mut file_config = FileStorageConfig::new(dir);
+    // Match the read mode the searcher will use so a fresh build returns a
+    // reader in the same loading mode as a cache-hit reopen (see
+    // `open_cached_reader`).
+    file_config.use_mmap = use_mmap;
     let storage = StorageFactory::create(StorageConfig::File(file_config))?;
     let mut index = ManagedVectorIndex::new(config, storage, CACHE_INDEX_NAME)?;
     index.add_vectors(vectors)?;
@@ -379,11 +394,32 @@ fn cached_vector_reader(
     config: VectorIndexTypeConfig,
     build_vectors: impl FnOnce() -> Vec<(u64, String, Vector)>,
 ) -> Arc<dyn VectorIndexReader> {
+    // Default to mmap (`LoadingMode::Lazy`) to preserve the historical
+    // behaviour of every existing bench. Use
+    // [`cached_vector_reader_with_loading`] with `use_mmap = false` to
+    // force eager loading and exercise the int8 `distance_quantized`
+    // kernel (Issue #652).
+    cached_vector_reader_with_loading(slot, config, true, build_vectors)
+}
+
+/// Like [`cached_vector_reader`] but explicitly selects the storage
+/// loading mode.
+///
+/// `use_mmap = false` forces `LoadingMode::Eager`, so scalar-quantized
+/// segments load as `VectorStorage::OwnedQuantized` and the search hot
+/// loop dispatches to the int8 `distance_quantized` kernel. `use_mmap =
+/// true` yields the mmap `Lazy` / `OnDemand` dequantize-on-get f32 path.
+fn cached_vector_reader_with_loading(
+    slot: &str,
+    config: VectorIndexTypeConfig,
+    use_mmap: bool,
+    build_vectors: impl FnOnce() -> Vec<(u64, String, Vector)>,
+) -> Arc<dyn VectorIndexReader> {
     let dir = cache_dir_for(slot);
     let force_rebuild = std::env::var("LAURUS_BENCH_REBUILD").is_ok();
 
     if !force_rebuild && cache_is_valid(&dir) {
-        match open_cached_reader(&dir, &config) {
+        match open_cached_reader(&dir, &config, use_mmap) {
             Ok(reader) => return reader,
             Err(err) => {
                 eprintln!(
@@ -397,7 +433,8 @@ fn cached_vector_reader(
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create vector bench cache dir");
 
-    build_cached_reader(&dir, config, build_vectors()).expect("vector bench cache build failed")
+    build_cached_reader(&dir, config, use_mmap, build_vectors())
+        .expect("vector bench cache build failed")
 }
 
 // ---------------------------------------------------------------------------
@@ -525,6 +562,111 @@ fn bench_flat_search(c: &mut Criterion) {
                 searcher.search(&request).unwrap()
             });
         });
+    }
+    group.finish();
+}
+
+/// Isolates the int8 `distance_quantized` kernel (Issue #652).
+///
+/// Forces eager loading (`use_mmap = false`) so scalar-quantized
+/// segments load as `VectorStorage::OwnedQuantized`; a field-filtered
+/// Flat search then runs a full linear scan through `distance_quantized`
+/// for every candidate — the purest end-to-end measurement of the int8
+/// kernel with negligible graph-traversal overhead. Sweeps the three
+/// metrics that map to the three kernel shapes:
+/// - `Cosine` → `dot_u8_to_i32`
+/// - `Euclidean` → `sq_diff_u8_to_i32`
+/// - `Manhattan` → `abs_diff_u8_to_i32`
+fn bench_flat_search_int8_kernel(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Flat Search int8 kernel");
+    let dim = 128;
+    // Large corpus so the per-candidate int8 kernel dominates timing.
+    let count = 20_000;
+
+    for &(label, metric) in &[
+        ("cosine_dot", DistanceMetric::Cosine),
+        ("euclidean_sqdiff", DistanceMetric::Euclidean),
+        ("manhattan_absdiff", DistanceMetric::Manhattan),
+    ] {
+        let config = FlatIndexConfig {
+            dimension: dim,
+            distance_metric: metric,
+            ..Default::default()
+        };
+        let slot = format!("flat_int8_eager_n{count}_dim{dim}_{label}");
+        let reader = cached_vector_reader_with_loading(
+            &slot,
+            VectorIndexTypeConfig::Flat(config),
+            false, // eager load -> int8 distance_quantized hot path
+            || generate_vectors(count, dim),
+        );
+        let searcher = FlatVectorSearcher::new(reader).unwrap();
+        let query = generate_query(dim);
+
+        // Sanity check: the field-filtered probe must return top-10 hits
+        // (and therefore engage the quantized scan) before timing.
+        let probe = searcher
+            .search(
+                &VectorIndexQuery::new(query.clone())
+                    .top_k(10)
+                    .field_name("field".to_string()),
+            )
+            .unwrap();
+        assert!(
+            !probe.results.is_empty(),
+            "int8 flat probe must return at least one hit ({label})"
+        );
+
+        group.bench_with_input(BenchmarkId::new("top10", label), &count, |b, _| {
+            b.iter(|| {
+                let request = VectorIndexQuery::new(query.clone())
+                    .top_k(10)
+                    .field_name("field".to_string());
+                searcher.search(&request).unwrap()
+            });
+        });
+    }
+    group.finish();
+}
+
+/// A/B micro-benchmark for the three int8 SQ kernels (Issue #652):
+/// the runtime-dispatched kernel (AVX2 on x86_64, NEON on aarch64) vs
+/// the portable `wide` scalar reference, at representative dimensions.
+/// Isolates the raw kernel speedup with zero search-path overhead —
+/// compare the `dispatch` and `scalar` timings within each
+/// `(kernel, dim)` pair.
+fn bench_int8_kernel_micro(c: &mut Criterion) {
+    use std::hint::black_box;
+
+    type Kernel = fn(&[u8], &[u8]) -> i32;
+    let mut group = c.benchmark_group("int8 kernel micro");
+
+    for &dim in &[128usize, 768] {
+        // Deterministic full-range u8 operands (0..=255).
+        let a: Vec<u8> = (0..dim)
+            .map(|i| (i.wrapping_mul(97).wrapping_add(13) & 0xFF) as u8)
+            .collect();
+        let b: Vec<u8> = (0..dim)
+            .map(|i| (i.wrapping_mul(131).wrapping_add(7) & 0xFF) as u8)
+            .collect();
+
+        let cases: [(&str, Kernel, Kernel); 3] = [
+            ("dot", dot_u8_to_i32, dot_u8_to_i32_scalar),
+            ("sq_diff", sq_diff_u8_to_i32, sq_diff_u8_to_i32_scalar),
+            ("abs_diff", abs_diff_u8_to_i32, abs_diff_u8_to_i32_scalar),
+        ];
+        for (name, dispatch, scalar) in cases {
+            group.bench_with_input(
+                BenchmarkId::new(format!("{name}/dispatch"), dim),
+                &dim,
+                |bch, _| bch.iter(|| dispatch(black_box(&a), black_box(&b))),
+            );
+            group.bench_with_input(
+                BenchmarkId::new(format!("{name}/scalar"), dim),
+                &dim,
+                |bch, _| bch.iter(|| scalar(black_box(&a), black_box(&b))),
+            );
+        }
     }
     group.finish();
 }
@@ -1670,6 +1812,8 @@ criterion_group!(
     bench_ivf_construction,
     bench_hnsw_construction,
     bench_flat_search,
+    bench_flat_search_int8_kernel,
+    bench_int8_kernel_micro,
     bench_ivf_search,
     bench_ivf_search_large_k,
     bench_hnsw_fallback_search,
