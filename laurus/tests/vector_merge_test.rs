@@ -562,3 +562,160 @@ async fn segmented_merge_preserves_rerank_sidecar_f32_losslessly()
 
     Ok(())
 }
+
+/// Build a Cosine-metric `SegmentedVectorField` over in-memory storage
+/// for the active-segment (NRT, unflushed) search tests (Issue #640).
+///
+/// # Arguments
+///
+/// * `dimension` - Vector dimension for the field.
+///
+/// # Returns
+///
+/// The field plus its backing `SegmentManager` (kept alive by the caller).
+fn cosine_field(
+    dimension: usize,
+) -> Result<(SegmentedVectorField, Arc<SegmentManager>), Box<dyn std::error::Error>> {
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let manager = Arc::new(SegmentManager::new(
+        SegmentManagerConfig {
+            max_segments: 8,
+            merge_factor: 2,
+            min_vectors_per_segment: 1,
+            ..Default::default()
+        },
+        storage.clone(),
+    )?);
+    let field_config = VectorFieldConfig {
+        vector: Some(FieldOption::Hnsw(HnswOption {
+            dimension,
+            distance: DistanceMetric::Cosine,
+            m: 16,
+            ef_construction: 200,
+            default_ef_search: None,
+            base_weight: 1.0,
+            quantizer: Default::default(),
+            rerank_storage: None,
+            embedder: None,
+        })),
+        lexical: None,
+    };
+    let field = SegmentedVectorField::create(
+        "embedding",
+        field_config,
+        manager.clone(),
+        storage.clone(),
+        None,
+    )?;
+    Ok((field, manager))
+}
+
+/// One-query search helper for the active-segment tests.
+fn top_k_input(query: Vec<f32>, limit: usize) -> FieldSearchInput {
+    FieldSearchInput {
+        field: "embedding".to_string(),
+        query_vectors: vec![QueryVector {
+            vector: Vector::new(query),
+            weight: 1.0,
+            fields: None,
+        }],
+        limit,
+        allowed_ids: None,
+    }
+}
+
+/// Issue #640: searching BEFORE any flush must return correctly ranked
+/// hits from the active (unflushed) segment. Prior to this test the
+/// active brute-force path had no direct coverage — every existing test
+/// flushed before searching.
+#[tokio::test]
+async fn search_before_flush_returns_active_hits() -> Result<(), Box<dyn std::error::Error>> {
+    let (field, _manager) = cosine_field(4)?;
+
+    // Cosine similarities against query [1, 0, 0, 0]:
+    // doc 1 -> 1.0 (identical direction)
+    // doc 2 -> 0.8 ([0.8, 0.6] direction)
+    // doc 3 -> 0.0 (orthogonal)
+    field
+        .add_stored_vector(1, &StoredVector::new(vec![1.0, 0.0, 0.0, 0.0]), 0)
+        .await?;
+    field
+        .add_stored_vector(2, &StoredVector::new(vec![0.8, 0.6, 0.0, 0.0]), 0)
+        .await?;
+    field
+        .add_stored_vector(3, &StoredVector::new(vec![0.0, 1.0, 0.0, 0.0]), 0)
+        .await?;
+
+    // NO flush: hits must come from the active segment scan.
+    let results = field.search(top_k_input(vec![1.0, 0.0, 0.0, 0.0], 2))?;
+    let ids: Vec<u64> = results.hits.iter().map(|h| h.doc_id).collect();
+    assert_eq!(
+        ids,
+        vec![1, 2],
+        "top-2 must be doc 1 (cos 1.0) then doc 2 (cos 0.8), got {ids:?}"
+    );
+    assert!(
+        results.hits[0].score > results.hits[1].score,
+        "scores must be ranked descending: {} vs {}",
+        results.hits[0].score,
+        results.hits[1].score
+    );
+    Ok(())
+}
+
+/// Issue #640: hits from the active (unflushed) segment must merge with
+/// hits from managed (flushed) segments in one search.
+#[tokio::test]
+async fn search_merges_active_and_managed_hits() -> Result<(), Box<dyn std::error::Error>> {
+    let (field, _manager) = cosine_field(4)?;
+
+    // doc 1 goes to a managed segment via flush...
+    field
+        .add_stored_vector(1, &StoredVector::new(vec![1.0, 0.0, 0.0, 0.0]), 0)
+        .await?;
+    field.flush().await?;
+    // ...doc 2 stays in the active segment (no flush).
+    field
+        .add_stored_vector(2, &StoredVector::new(vec![0.9, 0.1, 0.0, 0.0]), 0)
+        .await?;
+
+    let results = field.search(top_k_input(vec![1.0, 0.0, 0.0, 0.0], 3))?;
+    let mut ids: Vec<u64> = results.hits.iter().map(|h| h.doc_id).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec![1, 2],
+        "search must merge managed (doc 1) and active (doc 2) hits, got {ids:?}"
+    );
+    Ok(())
+}
+
+/// Issue #640: the active-segment scan must stay correct above the
+/// parallel-scan threshold (2048 candidates), where the rayon path runs.
+/// A single distinguished best match keeps the assertion tie-free.
+#[tokio::test]
+async fn search_active_segment_above_parallel_threshold() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (field, _manager) = cosine_field(4)?;
+
+    // 2500 vectors (> PARALLEL_SCAN_THRESHOLD = 2048), all orthogonal to
+    // the query except doc 777, the unique best match.
+    for doc_id in 1..=2500u64 {
+        let v = if doc_id == 777 {
+            vec![1.0, 0.0, 0.0, 0.0]
+        } else {
+            vec![0.0, 1.0, 0.0, 0.0]
+        };
+        field
+            .add_stored_vector(doc_id, &StoredVector::new(v), 0)
+            .await?;
+    }
+
+    let results = field.search(top_k_input(vec![1.0, 0.0, 0.0, 0.0], 1))?;
+    assert_eq!(results.hits.len(), 1, "top-1 must return exactly one hit");
+    assert_eq!(
+        results.hits[0].doc_id, 777,
+        "the unique aligned vector must win the unflushed scan"
+    );
+    Ok(())
+}

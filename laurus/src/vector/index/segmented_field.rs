@@ -316,12 +316,37 @@ impl VectorFieldWriter for SegmentedVectorField {
 }
 
 impl SegmentedVectorField {
+    /// Brute-force top-`limit` search over the active (unflushed)
+    /// segment's buffered vectors (Issue #640).
+    ///
+    /// Mirrors the Flat searcher's scan: the query is prepared once per
+    /// call (`prepare_query` caches `‖query‖²`, so Cosine / Angular run
+    /// two SIMD accumulator chains per candidate instead of three), the
+    /// per-candidate distance runs through
+    /// [`crate::vector::search::searcher::parallel_scan`] (rayon when the
+    /// buffer holds ≥ 2048 vectors, serial below), and top-`limit`
+    /// selection uses `select_nth_unstable_by` instead of sorting the
+    /// whole buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The f32 query vector.
+    /// * `limit` - Maximum number of hits to return.
+    /// * `weight` - Query weight multiplied into each hit's score.
+    ///
+    /// # Returns
+    ///
+    /// Up to `limit` hits ranked by similarity descending; empty when
+    /// there is no active segment (or `limit == 0`).
     fn search_active_segment(
         &self,
         query: &[f32],
         limit: usize,
         weight: f32,
     ) -> Result<Vec<FieldHit>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let active_opt = self.active_segment.read();
         let writer = match active_opt.as_ref() {
             Some((_, w)) => w,
@@ -335,20 +360,27 @@ impl SegmentedVectorField {
         };
 
         let vectors = writer.vectors();
-        let mut candidates = Vec::with_capacity(vectors.len());
+        // Prepare once per query: caches the query norm for Cosine /
+        // Angular; the other metrics pass through unchanged.
+        let prepared = distance_metric.prepare_query(query);
 
-        for (doc_id, _field, vector) in vectors {
-            let distance = distance_metric.distance(query, &vector.data)?;
-            let similarity = distance_metric.distance_to_similarity(distance);
-            candidates.push((*doc_id, similarity, distance));
+        let mut candidates: Vec<(u64, f32, f32)> =
+            crate::vector::search::searcher::parallel_scan(vectors, |(doc_id, _field, vector)| {
+                let distance = distance_metric.distance_with_prepared(&prepared, &vector.data)?;
+                let similarity = distance_metric.distance_to_similarity(distance);
+                Ok(Some((*doc_id, similarity, distance)))
+            })?;
+
+        // Partial top-`limit` selection, then sort only the survivors
+        // (same pattern as the store-level search).
+        if candidates.len() > limit {
+            candidates.select_nth_unstable_by(limit - 1, |a, b| b.1.total_cmp(&a.1));
+            candidates.truncate(limit);
         }
-
-        // Sort by similarity descending
         candidates.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
 
         let hits = candidates
             .into_iter()
-            .take(limit)
             .map(|(doc_id, similarity, distance)| FieldHit {
                 doc_id,
                 field: self.name.clone(),
