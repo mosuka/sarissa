@@ -338,7 +338,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
     fn stats(&self) -> VectorStats {
         let _memory_usage = match &self.vectors {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
-            VectorStorage::OwnedQuantized(pool) => pool.data.len(),
+            VectorStorage::OwnedQuantized(pool) => pool.heap_size(),
             VectorStorage::OwnedPq(pool) => pool.data.len() + pool.codebook.len() * 4,
             #[cfg(feature = "pq-fastscan")]
             VectorStorage::OwnedPqFastScan(_) => {

@@ -39,6 +39,26 @@ use wide::i32x8;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization::{PqParams, QuantizedVectorMeta, ScalarQuantParams};
 
+/// SIMD block size (bytes) the int8 kernels consume per iteration.
+///
+/// The AVX2 / NEON kernels process a whole number of these blocks; a
+/// payload padded to a multiple of `SIMD_BLOCK` has no scalar tail.
+pub const SIMD_BLOCK: usize = 32;
+
+/// Round `dim` up to the next multiple of [`SIMD_BLOCK`].
+///
+/// Used to size the zero-padded int8 payloads so the distance kernels
+/// run over whole 32-byte blocks with no scalar remainder. This is the
+/// canonical definition shared by the in-memory
+/// [`crate::vector::index::quantized_storage::QuantizedVectorPool`] and
+/// the per-query [`QuantizedQuery`] padding, so both agree on the stride.
+#[inline]
+pub const fn padded_dim(dim: usize) -> usize {
+    // SIMD_BLOCK is a power of two, so mask off the low bits after adding
+    // (SIMD_BLOCK - 1) to round up.
+    (dim + SIMD_BLOCK - 1) & !(SIMD_BLOCK - 1)
+}
+
 /// Per-query state cached once per HNSW search invocation.
 ///
 /// Built by [`Self::prepare`] from the f32 query and the segment-level
@@ -48,8 +68,11 @@ use crate::vector::core::quantization::{PqParams, QuantizedVectorMeta, ScalarQua
 /// `norm_query` precomputed here).
 #[derive(Debug, Clone)]
 pub struct QuantizedQuery {
-    /// Query elements quantized with the segment's `(offset, scale)`.
-    /// Length equals the vector dimension.
+    /// Query elements quantized with the segment's `(offset, scale)`,
+    /// zero-padded to [`Self::pad_dim`]. The first [`Self::dim`] bytes
+    /// are the real quantized values; the rest are zero so the padded
+    /// lanes contribute 0 to every kernel (matching the candidate's
+    /// zero padding in the pool).
     pub q_data: Vec<u8>,
     /// `Σ q_data[i]`, used in the affine dot-product reconstruction.
     pub sum_q: u32,
@@ -63,8 +86,14 @@ pub struct QuantizedQuery {
     pub scale: f32,
     /// Cached `params.offset`.
     pub offset: f32,
-    /// Vector dimension. Equal to `q_data.len()`.
+    /// True vector dimension (number of meaningful query elements). Used
+    /// for the `N·offset²` term of the affine dot-product reconstruction,
+    /// which must count real dimensions only, not the zero padding.
     pub dim: usize,
+    /// Padded length of `q_data`, equal to [`padded_dim`]`(dim)`. This is
+    /// also the length of every candidate int8 slice the kernels receive,
+    /// so both operands are the same multiple-of-32 length.
+    pub pad_dim: usize,
 }
 
 impl QuantizedQuery {
@@ -78,7 +107,12 @@ impl QuantizedQuery {
     /// * `params` - Segment-level quantization params recovered from
     ///   the segment header at search time.
     pub fn prepare(query: &[f32], params: &ScalarQuantParams) -> Self {
-        let q_data = params.quantize_slice(query);
+        let dim = query.len();
+        let mut q_data = params.quantize_slice(query);
+        // `sum_q` and `norm_query` are computed over the real `dim`
+        // elements only, before padding. (Zero padding would not change
+        // `sum_q`, but it *would* corrupt `norm_query` because
+        // `dequantize_value(0)` is `offset`, not 0.)
         let sum_q: u32 = q_data.iter().map(|&x| x as u32).sum();
         // Compute the norm of the *dequantized* query so it lives in
         // the same basis as `cand_meta.norm_q` (which is the norm of
@@ -93,13 +127,20 @@ impl QuantizedQuery {
             })
             .sum::<f32>()
             .sqrt();
+        // Zero-pad the quantized query to a multiple of `SIMD_BLOCK` so
+        // the distance kernels run over whole 32-byte blocks with no
+        // scalar tail, matching the candidate padding in
+        // `QuantizedVectorPool`.
+        let pad_dim = padded_dim(dim);
+        q_data.resize(pad_dim, 0);
         Self {
             q_data,
             sum_q,
             norm_query,
             scale: params.scale,
             offset: params.offset,
-            dim: query.len(),
+            dim,
+            pad_dim,
         }
     }
 }
@@ -120,15 +161,17 @@ impl QuantizedQuery {
 ///
 /// # Panics
 ///
-/// In debug mode, panics if `cand.len() != query.dim`. The caller (HNSW
-/// searcher) guarantees this invariant in release mode.
+/// In debug mode, panics if `cand.len() != query.pad_dim`. The candidate
+/// is the zero-padded int8 slice from the pool (length `pad_dim`), and
+/// the query is padded to the same length, so the kernels see matching
+/// multiple-of-32 operands. The caller guarantees this in release mode.
 pub fn distance_quantized(
     metric: DistanceMetric,
     query: &QuantizedQuery,
     cand: &[u8],
     cand_meta: QuantizedVectorMeta,
 ) -> f32 {
-    debug_assert_eq!(cand.len(), query.dim);
+    debug_assert_eq!(cand.len(), query.pad_dim);
     match metric {
         DistanceMetric::Cosine => {
             let approx_dot = approx_dot_product(query, cand, cand_meta.sum_q);
@@ -713,6 +756,39 @@ mod tests {
         );
     }
 
+    /// Padding invariant end-to-end: for a dim that is *not* a multiple
+    /// of 32, the query is zero-padded by `prepare` and the candidate is
+    /// zero-padded exactly as `QuantizedVectorPool` does. The result must
+    /// still match the f32 cosine distance, proving the padded lanes
+    /// contribute 0 and `sum_q` / `norm_query` / `N` are unaffected.
+    #[test]
+    fn cosine_matches_f32_for_non_block_dim_with_padding() {
+        let dim = 100; // padded_dim(100) == 128
+        let a_f32 = pseudo_random_f32(31, dim, -1.0, 1.0);
+        let b_f32 = pseudo_random_f32(32, dim, -1.0, 1.0);
+        let params =
+            ScalarQuantParams::train(&[Vector::new(a_f32.clone()), Vector::new(b_f32.clone())])
+                .unwrap();
+
+        // `meta_a` is derived from the UNPADDED candidate (real dim), as
+        // the writer does; then the candidate is zero-padded to pad_dim,
+        // as the in-memory pool does.
+        let mut q_a = params.quantize_slice(&a_f32);
+        let meta_a = QuantizedVectorMeta::from_quantized(&q_a, &params);
+        q_a.resize(padded_dim(dim), 0);
+
+        let prepared = QuantizedQuery::prepare(&b_f32, &params);
+        assert_eq!(prepared.pad_dim, 128);
+        assert_eq!(q_a.len(), prepared.pad_dim);
+
+        let approx = distance_quantized(DistanceMetric::Cosine, &prepared, &q_a, meta_a);
+        let exact = DistanceMetric::Cosine.distance(&a_f32, &b_f32).unwrap();
+        assert!(
+            (approx - exact).abs() < 0.02,
+            "padded cosine: quantized = {approx}, f32 = {exact}"
+        );
+    }
+
     #[test]
     fn euclidean_quantized_matches_f32_within_tolerance() {
         let dim = 128;
@@ -814,8 +890,10 @@ mod tests {
             offset: 0.0,
             scale: 1.0,
         };
-        let a: Vec<u8> = (0..dim as u8).collect();
+        let mut a: Vec<u8> = (0..dim as u8).collect();
         let meta_a = QuantizedVectorMeta::from_quantized(&a, &params);
+        // Pad the candidate to pad_dim as the in-memory pool does.
+        a.resize(padded_dim(dim), 0);
         let zero_query = vec![0.0_f32; dim];
         let prepared = QuantizedQuery::prepare(&zero_query, &params);
 
@@ -842,7 +920,11 @@ mod tests {
         assert_eq!(prepared.dim, dim);
         assert_eq!(prepared.offset, params.offset);
         assert_eq!(prepared.scale, params.scale);
-        assert_eq!(prepared.q_data.len(), dim);
+        // q_data is zero-padded to pad_dim (dim 8 -> 32).
+        assert_eq!(prepared.pad_dim, padded_dim(dim));
+        assert_eq!(prepared.q_data.len(), prepared.pad_dim);
+        // sum_q counts the real dim only; the zero padding adds nothing,
+        // so summing the whole padded buffer yields the same value.
         let expected_sum: u32 = prepared.q_data.iter().map(|&x| x as u32).sum();
         assert_eq!(prepared.sum_q, expected_sum);
     }
