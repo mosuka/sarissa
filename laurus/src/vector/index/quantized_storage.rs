@@ -2,15 +2,34 @@
 //! of HNSW / Flat / IVF (Issue #481 Stage 1, Step 6 onward).
 //!
 //! Replaces the per-index `Arc<HashMap<(u64, String), Vector>>` that
-//! held f32 vectors until Step 5. Vectors are kept as int8 in one
-//! tightly-packed AoS buffer plus a per-field doc_id -> position
-//! index. The search hot loop pulls `(int8 slice,
-//! QuantizedVectorMeta)` directly out of this buffer and feeds it to
+//! held f32 vectors until Step 5. Vectors are kept as int8 in a
+//! Structure-of-Arrays (SoA) layout (Issue #837): one contiguous int8
+//! payload buffer with each vector padded to a 32-byte boundary, plus
+//! two parallel meta arrays (`sum_q`, `norm_q`). The search hot loop
+//! pulls `(padded int8 slice, QuantizedVectorMeta)` directly out of this
+//! pool and feeds it to
 //! [`crate::vector::core::distance_quantized::distance_quantized`].
 //!
-//! Memory footprint: `dim + 8` bytes per vector (int8 payload +
-//! `sum_q` u32 + `norm_q` f32) plus `O(field_count + vector_count)`
-//! for the lookup tables.
+//! # Why SoA + padding
+//!
+//! - **SoA** keeps `sum_q` / `norm_q` in their own `Vec<u32>` / `Vec<f32>`,
+//!   so the per-candidate meta read is a plain indexed load instead of a
+//!   `try_into`-decode of inline bytes.
+//! - **Padding** each vector's int8 payload to `pad_dim =
+//!   next multiple of 32` means the SIMD kernels
+//!   ([`crate::vector::core::distance_quantized::dot_u8_to_i32`] et al.)
+//!   process a whole number of 32-byte blocks with **no scalar tail**.
+//!   The padded lanes are zero on both the query and the candidate, so
+//!   each padded pair contributes 0 to dot / squared-diff / abs-diff and
+//!   the result is identical to the unpadded computation. `sum_q` is a
+//!   sum over the same zero-padded bytes and is therefore unchanged, and
+//!   the affine dot-product reconstruction uses the *true* `dim` for its
+//!   `N·offset²` term (see
+//!   [`crate::vector::core::distance_quantized::QuantizedQuery`]).
+//!
+//! Memory footprint: `pad_dim` bytes of int8 payload per vector plus 8
+//! bytes of meta (`sum_q` u32 + `norm_q` f32) held in the parallel
+//! arrays, plus `O(field_count + vector_count)` for the lookup tables.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,56 +47,79 @@ use crate::vector::core::vector::Vector;
 pub struct QuantizedVectorPool {
     /// Per-segment quantization params (`offset`, `scale`).
     pub params: ScalarQuantParams,
-    /// Vector dimension.
+    /// True vector dimension (number of meaningful int8 values).
     pub dim: usize,
-    /// Tightly-packed AoS payload: for vector index `i`,
-    /// `data[i * record_size .. i * record_size + dim]` is the int8
-    /// payload and the next 8 bytes are the meta (`sum_q` u32 LE +
-    /// `norm_q` f32 LE).
-    pub data: Vec<u8>,
+    /// Padded per-vector stride in [`Self::int8_data`], equal to
+    /// `dim` rounded up to the 32-byte SIMD block (see
+    /// [`Self::padded_dim`]). The bytes in `[dim, pad_dim)` of each
+    /// record are zero.
+    pub pad_dim: usize,
+    /// Contiguous int8 payload buffer, SoA-style. For vector index `i`
+    /// the payload is `int8_data[i * pad_dim .. i * pad_dim + pad_dim]`,
+    /// whose first `dim` bytes are the real quantized values and the
+    /// remaining `pad_dim - dim` bytes are zero padding.
+    pub int8_data: Vec<u8>,
+    /// Per-vector `sum_q` (`Σ` of the quantized bytes), parallel to
+    /// [`Self::int8_data`] records: `sum_q[i]` belongs to vector `i`.
+    pub sum_q: Vec<u32>,
+    /// Per-vector `norm_q` (f32 norm of the dequantized vector),
+    /// parallel to [`Self::sum_q`].
+    pub norm_q: Vec<f32>,
     /// Per-field doc_id -> vector position.
     ///
     /// `field_index[field][doc_id] = i` such that the int8 payload
-    /// for `(doc_id, field)` lives at `i * record_size`. The outer
+    /// for `(doc_id, field)` lives at `i * pad_dim`. The outer
     /// `String` key allocation only happens on the first lookup per
     /// search; the inner `u64` lookup is the per-candidate hot-path
     /// op.
     pub field_index: HashMap<String, Arc<HashMap<u64, u32>>>,
-    /// Total vector count (matches `data.len() / record_size`).
+    /// Total vector count (matches `int8_data.len() / pad_dim` and the
+    /// length of the `sum_q` / `norm_q` arrays).
     pub vector_count: usize,
 }
 
 impl QuantizedVectorPool {
-    /// Bytes occupied by one vector record (int8 + meta).
+    /// Padded per-vector int8 stride for a given `dim`: `dim` rounded up
+    /// to the SIMD block size (32). Exposed so callers that only know the
+    /// dimension (e.g. the HNSW prefetch-address builder) can compute the
+    /// stride without a pool instance. Delegates to the canonical
+    /// [`crate::vector::core::distance_quantized::padded_dim`] so the pool
+    /// and the per-query padding always agree.
     #[inline]
-    pub const fn record_size(dim: usize) -> usize {
-        dim + QuantizedVectorMeta::SERIALIZED_SIZE
+    pub const fn padded_dim(dim: usize) -> usize {
+        crate::vector::core::distance_quantized::padded_dim(dim)
     }
 
     /// Build from a sequence of `(doc_id, field_name, int8_data, meta)`
     /// records and the per-segment quantization params.
     ///
     /// The records may be in any order; the field index is built from
-    /// the iteration order, and the int8 payload is written at the
-    /// position equal to the iteration index.
+    /// the iteration order, and each int8 payload is written at the
+    /// position equal to the iteration index, zero-padded to
+    /// [`Self::pad_dim`].
     pub fn build(
         params: ScalarQuantParams,
         dim: usize,
         records: impl IntoIterator<Item = (u64, String, Vec<u8>, QuantizedVectorMeta)>,
     ) -> Self {
-        let mut data = Vec::new();
+        let pad_dim = Self::padded_dim(dim);
+        let mut int8_data: Vec<u8> = Vec::new();
+        let mut sum_q: Vec<u32> = Vec::new();
+        let mut norm_q: Vec<f32> = Vec::new();
         let mut by_field: HashMap<String, HashMap<u64, u32>> = HashMap::new();
-        let record_size = Self::record_size(dim);
 
         for (doc_id, field, int8, meta) in records {
-            let pos = (data.len() / record_size) as u32;
-            data.extend_from_slice(&int8);
-            data.extend_from_slice(&meta.sum_q.to_le_bytes());
-            data.extend_from_slice(&meta.norm_q.to_le_bytes());
+            debug_assert_eq!(int8.len(), dim, "int8 payload length must equal dim");
+            let pos = sum_q.len() as u32;
+            int8_data.extend_from_slice(&int8);
+            // Zero-fill the padding tail up to the next pad_dim boundary.
+            int8_data.resize((pos as usize + 1) * pad_dim, 0);
+            sum_q.push(meta.sum_q);
+            norm_q.push(meta.norm_q);
             by_field.entry(field).or_default().insert(doc_id, pos);
         }
 
-        let vector_count = data.len() / record_size;
+        let vector_count = sum_q.len();
         let field_index: HashMap<String, Arc<HashMap<u64, u32>>> = by_field
             .into_iter()
             .map(|(field, map)| (field, Arc::new(map)))
@@ -86,36 +128,41 @@ impl QuantizedVectorPool {
         Self {
             params,
             dim,
-            data,
+            pad_dim,
+            int8_data,
+            sum_q,
+            norm_q,
             field_index,
             vector_count,
         }
     }
 
-    /// Borrow the int8 payload + decoded meta for `(doc_id, field)`.
+    /// Borrow the padded int8 payload + decoded meta for `(doc_id, field)`.
     ///
     /// Returns `None` if the key is not present in this segment.
-    /// The int8 slice has length [`Self::dim`].
+    /// The int8 slice has length [`Self::pad_dim`]; its first
+    /// [`Self::dim`] bytes are the real quantized values and the rest
+    /// are zero padding.
     #[inline]
     pub fn get_record(&self, doc_id: u64, field: &str) -> Option<(&[u8], QuantizedVectorMeta)> {
         let pos = self.field_index.get(field)?.get(&doc_id).copied()?;
         Some(self.record_at(pos))
     }
 
-    /// Borrow the int8 payload + meta at vector position `pos`.
+    /// Borrow the padded int8 payload + meta at vector position `pos`.
     ///
     /// Lower-level than [`Self::get_record`]; useful when the caller
     /// has already cached the per-field doc_id -> position map (the
     /// search hot loop does this once per search via
-    /// [`Self::field_position_index`]).
+    /// [`Self::field_position_index`]). The returned int8 slice has
+    /// length [`Self::pad_dim`] (zero-padded); the meta is read from the
+    /// parallel `sum_q` / `norm_q` arrays with no byte decode.
     #[inline]
     pub fn record_at(&self, pos: u32) -> (&[u8], QuantizedVectorMeta) {
-        let record_size = Self::record_size(self.dim);
-        let start = (pos as usize) * record_size;
-        let int8 = &self.data[start..start + self.dim];
-        let meta_bytes = &self.data[start + self.dim..start + record_size];
-        let sum_q = u32::from_le_bytes(meta_bytes[0..4].try_into().expect("4 bytes"));
-        let norm_q = f32::from_le_bytes(meta_bytes[4..8].try_into().expect("4 bytes"));
+        let start = (pos as usize) * self.pad_dim;
+        let int8 = &self.int8_data[start..start + self.pad_dim];
+        let sum_q = self.sum_q[pos as usize];
+        let norm_q = self.norm_q[pos as usize];
         (int8, QuantizedVectorMeta { sum_q, norm_q })
     }
 
@@ -150,9 +197,12 @@ impl QuantizedVectorPool {
     /// `Vector` (f32). Used by the legacy
     /// [`crate::vector::reader::VectorIndexReader::get_vector`] API
     /// path; the search hot loop never calls this.
+    ///
+    /// Only the first [`Self::dim`] bytes are dequantized; the zero
+    /// padding is dropped.
     pub fn dequantize_to_vector(&self, doc_id: u64, field: &str) -> Option<Vector> {
         let (int8, _meta) = self.get_record(doc_id, field)?;
-        let data: Vec<f32> = int8
+        let data: Vec<f32> = int8[..self.dim]
             .iter()
             .map(|&b| self.params.dequantize_value(b))
             .collect();
@@ -181,6 +231,14 @@ impl QuantizedVectorPool {
         let mut ids: Vec<u64> = map.keys().copied().collect();
         ids.sort_unstable();
         Arc::<[u64]>::from(ids)
+    }
+
+    /// Approximate resident size in bytes (int8 payload + meta arrays).
+    /// Used for reader memory-footprint reporting; excludes the lookup
+    /// tables.
+    #[inline]
+    pub fn heap_size(&self) -> usize {
+        self.int8_data.len() + self.sum_q.len() * 4 + self.norm_q.len() * 4
     }
 }
 
@@ -216,17 +274,39 @@ mod tests {
         );
         assert_eq!(q.vector_count, 2);
         assert_eq!(q.dim, 4);
-        assert_eq!(q.data.len(), 2 * QuantizedVectorPool::record_size(4));
+        // dim 4 pads up to one 32-byte block.
+        assert_eq!(q.pad_dim, 32);
+        assert_eq!(q.int8_data.len(), 2 * q.pad_dim);
 
         let (int8_0, meta_0) = q.get_record(10, "embedding").unwrap();
-        assert_eq!(int8_0, &[0u8, 1, 2, 3]);
+        assert_eq!(int8_0.len(), 32);
+        assert_eq!(&int8_0[..4], &[0u8, 1, 2, 3]);
+        assert!(int8_0[4..].iter().all(|&b| b == 0), "padding is zero");
         assert_eq!(meta_0.sum_q, 6);
         assert_eq!(meta_0.norm_q, 1.0);
 
         let (int8_1, meta_1) = q.get_record(20, "embedding").unwrap();
-        assert_eq!(int8_1, &[10u8, 20, 30, 40]);
+        assert_eq!(&int8_1[..4], &[10u8, 20, 30, 40]);
         assert_eq!(meta_1.sum_q, 100);
         assert_eq!(meta_1.norm_q, 2.0);
+    }
+
+    #[test]
+    fn build_pads_non_multiple_of_32_dim() {
+        // dim 100 -> pad_dim 128 (next multiple of 32).
+        let int8: Vec<u8> = (0..100).map(|i| (i % 256) as u8).collect();
+        let q = QuantizedVectorPool::build(
+            sample_params(),
+            100,
+            vec![(1, "f".to_string(), int8.clone(), meta(42, 1.0))],
+        );
+        assert_eq!(q.pad_dim, 128);
+        assert_eq!(q.int8_data.len(), 128);
+        let (payload, m) = q.record_at(0);
+        assert_eq!(payload.len(), 128);
+        assert_eq!(&payload[..100], &int8[..]);
+        assert!(payload[100..].iter().all(|&b| b == 0), "tail padding zero");
+        assert_eq!(m.sum_q, 42);
     }
 
     #[test]
@@ -255,7 +335,7 @@ mod tests {
         assert_eq!(idx.len(), 2);
         let pos = *idx.get(&2).unwrap();
         let (int8, meta_back) = q.record_at(pos);
-        assert_eq!(int8, &[7u8, 8]);
+        assert_eq!(&int8[..2], &[7u8, 8]);
         assert_eq!(meta_back.sum_q, 15);
     }
 
@@ -267,6 +347,8 @@ mod tests {
             vec![(1, "f".to_string(), vec![0, 128, 255], meta(383, 1.0))],
         );
         let v = q.dequantize_to_vector(1, "f").unwrap();
+        // Padding must not leak into the dequantized vector.
+        assert_eq!(v.data.len(), 3);
         // offset = -1.0, scale = 2/255
         // u8 = 0   -> -1.0
         // u8 = 128 -> -1.0 + 128 * 2/255 = ~0.0039
@@ -323,9 +405,13 @@ mod tests {
     }
 
     #[test]
-    fn record_size_matches_dim_plus_eight() {
-        assert_eq!(QuantizedVectorPool::record_size(0), 8);
-        assert_eq!(QuantizedVectorPool::record_size(128), 136);
+    fn padded_dim_rounds_up_to_block() {
+        assert_eq!(QuantizedVectorPool::padded_dim(0), 0);
+        assert_eq!(QuantizedVectorPool::padded_dim(1), 32);
+        assert_eq!(QuantizedVectorPool::padded_dim(32), 32);
+        assert_eq!(QuantizedVectorPool::padded_dim(33), 64);
+        assert_eq!(QuantizedVectorPool::padded_dim(100), 128);
+        assert_eq!(QuantizedVectorPool::padded_dim(128), 128);
     }
 
     #[test]

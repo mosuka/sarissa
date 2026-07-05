@@ -541,11 +541,13 @@ impl HnswSearcher {
         // Retrieve the per-field prefetch index once per search call (O(1), no allocation).
         // `None` for on-demand (disk-backed) storage; the prefetch loop is skipped entirely.
         let field_prefetch = reader.field_prefetch_index(field_name);
-        // Prefetch payload size: int8 record (dim + 8 bytes meta) for
-        // the SQ hot path; M bytes for PQ; legacy f32 size otherwise.
+        // Prefetch payload size: the padded int8 record (`pad_dim`
+        // bytes) for the SQ hot path; M bytes for PQ; legacy f32 size
+        // otherwise. The meta now lives in separate SoA arrays, so the
+        // int8 stride alone is what the hot loop streams.
         let prefetch_n_bytes = match &quant_ctx {
             Some(QuantizedSearchCtx::Scalar8Bit { .. }) => {
-                QuantizedVectorPool::record_size(reader.dimension())
+                QuantizedVectorPool::padded_dim(reader.dimension())
             }
             Some(QuantizedSearchCtx::Pq { pool, .. }) => PqVectorPool::record_size(pool.params.m),
             #[cfg(feature = "pq-fastscan")]

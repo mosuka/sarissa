@@ -627,16 +627,16 @@ impl HnswIndexReader {
             }
             VectorStorage::OwnedQuantized(pool) => {
                 let mut idx: HashMap<String, HashMap<u64, usize>> = HashMap::new();
-                let record_size = QuantizedVectorPool::record_size(pool.dim);
-                let base = pool.data.as_ptr();
+                let stride = pool.pad_dim;
+                let base = pool.int8_data.as_ptr();
                 for (field_name, doc_map) in pool.field_index.iter() {
                     let entry = idx.entry(field_name.clone()).or_default();
                     for (&doc_id, &pos) in doc_map.iter() {
                         // SAFETY: pool is held alive by self.vectors
                         // (Arc) for the lifetime of self; pos is in
-                        // bounds because it was populated from data.len()
-                        // / record_size at build time.
-                        let addr = unsafe { base.add(pos as usize * record_size) } as usize;
+                        // bounds because it was populated from
+                        // int8_data.len() / pad_dim at build time.
+                        let addr = unsafe { base.add(pos as usize * stride) } as usize;
                         entry.insert(doc_id, addr);
                     }
                 }
@@ -881,7 +881,7 @@ impl VectorIndexReader for HnswIndexReader {
     fn stats(&self) -> VectorStats {
         let memory_usage = match &self.vectors {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
-            VectorStorage::OwnedQuantized(pool) => pool.data.len(),
+            VectorStorage::OwnedQuantized(pool) => pool.heap_size(),
             VectorStorage::OwnedPq(pool) => pool.data.len() + pool.codebook.len() * 4,
             #[cfg(feature = "pq-fastscan")]
             VectorStorage::OwnedPqFastScan(pool) => pool.packed.len() + pool.codebook.len() * 4,
