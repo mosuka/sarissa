@@ -119,7 +119,14 @@ async fn engine_search_with_rerank_factor_succeeds_on_stage2_field() -> laurus::
 
     let query = [0.87, 0.36, 0.21, 0.09];
 
-    let with_rerank = engine.search(vector_request(&query, Some(3))).await?;
+    // rerank_factor = 4 rescans ALL 4 docs against the exact f32 pool
+    // (rerank_count = limit × factor = 4), so the doc1-wins assertion
+    // below cannot depend on which candidates survive the int8 Stage-1
+    // cut under an unlucky (parallel-build) graph topology — the flake
+    // #841 hit with factor 3, where doc1 once fell outside the rescored
+    // top-3. The Stage-2 wiring this test guards (sidecar emitted, pool
+    // loaded, score changed by rerank) is unaffected by the factor.
+    let with_rerank = engine.search(vector_request(&query, Some(4))).await?;
     assert_eq!(with_rerank.len(), 1, "expected exactly 1 hit");
     assert_eq!(
         with_rerank[0].id, "doc1",
