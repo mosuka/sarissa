@@ -385,23 +385,34 @@ impl IvfIndexWriter {
         let first_idx = rng.random_range(0..self.vectors.len());
         self.centroids.push(self.vectors[first_idx].2.clone());
 
+        // Running minimum distance from each vector to its nearest
+        // chosen centroid (Issue #622). The textbook k-means++
+        // formulation folds only the NEWEST centroid into the running
+        // minimum on each pick — O(n·d) per pick, O(n·k·d) total —
+        // replacing the previous full recompute over all chosen
+        // centroids per pick, which was O(n·k²·d). `f32::min` over the
+        // same distance values is exact, so the per-pick weights (and
+        // therefore the RNG sampling sequence and the chosen centroids)
+        // are bit-identical to the previous implementation.
+        let mut min_dists: Vec<f32> = vec![f32::INFINITY; self.vectors.len()];
+
         // Choose remaining centroids with probability proportional to squared distance
         for _ in 1..self.index_config.n_clusters {
+            // Fold the most recently chosen centroid into the running
+            // minima (the only centroid the previous minima have not
+            // seen yet).
+            let newest = self
+                .centroids
+                .last()
+                .expect("k-means++ always has at least the first centroid")
+                .clone();
+            self.fold_min_dists(&newest, &mut min_dists);
+
+            // Weights are accumulated serially in vector order so the
+            // floating-point sums match the previous implementation.
             let mut distances = Vec::with_capacity(self.vectors.len());
             let mut total_weight = 0.0;
-
-            for (_, _, vector) in &self.vectors {
-                let min_dist = self
-                    .centroids
-                    .iter()
-                    .map(|centroid| {
-                        self.index_config
-                            .distance_metric
-                            .distance(&vector.data, &centroid.data)
-                            .unwrap_or(f32::INFINITY)
-                    })
-                    .fold(f32::INFINITY, f32::min);
-
+            for &min_dist in &min_dists {
                 let weight = min_dist * min_dist;
                 distances.push(weight);
                 total_weight += weight;
@@ -436,6 +447,43 @@ impl IvfIndexWriter {
         }
 
         Ok(())
+    }
+
+    /// Fold `centroid` into the per-vector running minimum distances
+    /// used by k-means++ initialization (Issue #622).
+    ///
+    /// Runs the per-vector scan in parallel under the same gate as
+    /// [`Self::assign_vectors_to_clusters`] (`parallel_build` and more
+    /// than 1000 buffered vectors; always serial on wasm32). Each
+    /// element update is independent, so the parallel result is
+    /// bit-identical to the serial one.
+    ///
+    /// # Arguments
+    ///
+    /// * `centroid` - The newest chosen centroid.
+    /// * `min_dists` - Per-vector running minima, updated in place.
+    fn fold_min_dists(&self, centroid: &Vector, min_dists: &mut [f32]) {
+        let metric = self.index_config.distance_metric;
+        // Distance errors contribute `INFINITY`, which leaves the
+        // running minimum unchanged — the same effect the previous
+        // implementation's `unwrap_or(f32::INFINITY)` had.
+        let fold = |(min_dist, (_, _, vector)): (&mut f32, &(u64, String, Vector))| {
+            let dist = metric
+                .distance(&vector.data, &centroid.data)
+                .unwrap_or(f32::INFINITY);
+            *min_dist = min_dist.min(dist);
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.writer_config.parallel_build && self.vectors.len() as u64 > 1000 {
+            min_dists
+                .par_iter_mut()
+                .zip(self.vectors.par_iter())
+                .for_each(fold);
+            return;
+        }
+
+        min_dists.iter_mut().zip(self.vectors.iter()).for_each(fold);
     }
 
     /// Assign each vector to its nearest cluster.
@@ -477,19 +525,7 @@ impl IvfIndexWriter {
 
     /// Update centroids based on cluster assignments.
     fn update_centroids(&mut self, assignments: &[usize]) -> Result<()> {
-        let mut cluster_sums =
-            vec![vec![0.0; self.index_config.dimension]; self.index_config.n_clusters];
-        let mut cluster_counts = vec![0; self.index_config.n_clusters];
-
-        // Sum vectors in each cluster
-        for (i, (_, _, vector)) in self.vectors.iter().enumerate() {
-            let cluster = assignments[i];
-            cluster_counts[cluster] += 1;
-
-            for (j, &value) in vector.data.iter().enumerate() {
-                cluster_sums[cluster][j] += value;
-            }
-        }
+        let (cluster_sums, cluster_counts) = self.accumulate_cluster_sums(assignments);
 
         // Compute new centroids as averages
         for (i, (sum, count)) in cluster_sums.iter().zip(cluster_counts.iter()).enumerate() {
@@ -504,6 +540,84 @@ impl IvfIndexWriter {
         }
 
         Ok(())
+    }
+
+    /// Accumulate per-cluster `(sums, counts)` over the buffered
+    /// vectors (Issue #622).
+    ///
+    /// Runs a rayon `fold`/`reduce` with per-thread partial sums under
+    /// the same gate as [`Self::assign_vectors_to_clusters`]
+    /// (`parallel_build` and more than 1000 buffered vectors; always
+    /// serial on wasm32). The parallel path regroups f32 additions, so
+    /// centroid low-order bits may differ from the serial order —
+    /// acceptable because k-means++ initialization is already
+    /// RNG-nondeterministic across runs.
+    ///
+    /// # Arguments
+    ///
+    /// * `assignments` - Cluster index per buffered vector (parallel
+    ///   array to `self.vectors`).
+    ///
+    /// # Returns
+    ///
+    /// `(cluster_sums, cluster_counts)`: per-cluster component sums
+    /// (`n_clusters × dimension`) and member counts.
+    fn accumulate_cluster_sums(&self, assignments: &[usize]) -> (Vec<Vec<f32>>, Vec<usize>) {
+        let dim = self.index_config.dimension;
+        let n_clusters = self.index_config.n_clusters;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.writer_config.parallel_build && self.vectors.len() as u64 > 1000 {
+            return self
+                .vectors
+                .par_iter()
+                .zip(assignments.par_iter())
+                .fold(
+                    || {
+                        (
+                            vec![vec![0.0_f32; dim]; n_clusters],
+                            vec![0_usize; n_clusters],
+                        )
+                    },
+                    |(mut sums, mut counts), ((_, _, vector), &cluster)| {
+                        counts[cluster] += 1;
+                        for (j, &value) in vector.data.iter().enumerate() {
+                            sums[cluster][j] += value;
+                        }
+                        (sums, counts)
+                    },
+                )
+                .reduce(
+                    || {
+                        (
+                            vec![vec![0.0_f32; dim]; n_clusters],
+                            vec![0_usize; n_clusters],
+                        )
+                    },
+                    |(mut sums_a, mut counts_a), (sums_b, counts_b)| {
+                        for (sum_a, sum_b) in sums_a.iter_mut().zip(sums_b) {
+                            for (a, b) in sum_a.iter_mut().zip(sum_b) {
+                                *a += b;
+                            }
+                        }
+                        for (a, b) in counts_a.iter_mut().zip(counts_b) {
+                            *a += b;
+                        }
+                        (sums_a, counts_a)
+                    },
+                );
+        }
+
+        let mut cluster_sums = vec![vec![0.0_f32; dim]; n_clusters];
+        let mut cluster_counts = vec![0_usize; n_clusters];
+        for (i, (_, _, vector)) in self.vectors.iter().enumerate() {
+            let cluster = assignments[i];
+            cluster_counts[cluster] += 1;
+            for (j, &value) in vector.data.iter().enumerate() {
+                cluster_sums[cluster][j] += value;
+            }
+        }
+        (cluster_sums, cluster_counts)
     }
 
     /// Compute convergence metric between old and new centroids.
