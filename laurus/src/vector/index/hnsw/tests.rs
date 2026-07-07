@@ -919,3 +919,78 @@ fn eager_load_rejects_corrupted_pq_fastscan_segment() -> Result<()> {
     );
     Ok(())
 }
+
+/// Issue #841: HNSW **level assignment** must be deterministic — the
+/// level RNG is seeded with a fixed constant ([`LEVEL_RNG_SEED`] in the
+/// writer), so building the same vector set twice yields the same entry
+/// point, max level, and per-node layer counts.
+///
+/// Neighbor lists are deliberately NOT compared: graph insertion runs in
+/// parallel (`ConcurrentHnswGraph` + rayon), so neighbor selection still
+/// depends on thread interleaving. That residual nondeterminism is
+/// documented on #841; this test pins exactly the invariant the seeded
+/// RNG guarantees.
+#[test]
+fn graph_build_levels_are_deterministic_across_writers() -> Result<()> {
+    /// Loaded level shape: `(entry_point, max_level, per-node layer counts)`.
+    type LevelShape = (Option<u64>, usize, Vec<(u64, usize)>);
+
+    /// Build one segment from a fixed 64-vector set and return its
+    /// loaded [`LevelShape`].
+    fn build(name: &str) -> Result<LevelShape> {
+        let storage =
+            StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+        let config = HnswIndexConfig {
+            dimension: 4,
+            m: 4,
+            ef_construction: 16,
+            distance_metric: DistanceMetric::Cosine,
+            ..Default::default()
+        };
+        let mut writer = HnswIndexWriter::with_storage(
+            config,
+            VectorIndexWriterConfig::default(),
+            name,
+            Arc::clone(&storage),
+        )?;
+        // Deterministic non-trivial vectors; 64 nodes give the level
+        // RNG room to produce multiple layers.
+        let vectors: Vec<(u64, String, Vector)> = (0..64u64)
+            .map(|i| {
+                let t = i as f32;
+                (
+                    i,
+                    "f".to_string(),
+                    Vector::new(vec![
+                        (t * 0.37).sin(),
+                        (t * 0.73).cos(),
+                        (t * 0.11).sin(),
+                        (t * 0.53).cos(),
+                    ]),
+                )
+            })
+            .collect();
+        writer.add_vectors(vectors)?;
+        writer.finalize()?;
+        writer.write()?;
+
+        let reader = HnswIndexReader::load(storage, name, DistanceMetric::Cosine)?;
+        let graph = reader.graph.as_ref().expect("segment must carry a graph");
+        let levels = graph
+            .sorted_nodes()
+            .into_iter()
+            .map(|(id, layers)| (id, layers.len()))
+            .collect();
+        Ok((graph.entry_point, graph.max_level, levels))
+    }
+
+    let a = build("determinism_a")?;
+    let b = build("determinism_b")?;
+    assert_eq!(a.0, b.0, "entry point must be identical across builds");
+    assert_eq!(a.1, b.1, "max level must be identical across builds");
+    assert_eq!(
+        a.2, b.2,
+        "every node's layer count must be identical across builds"
+    );
+    Ok(())
+}

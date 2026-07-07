@@ -18,11 +18,22 @@ use crate::vector::index::quantized_io::{
 use crate::vector::index::rerank_sidecar::{read_sidecar, write_sidecar};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 use parking_lot::RwLock;
-use rand::RngExt;
+use rand::{RngExt, SeedableRng};
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+
+/// Fixed seed for the HNSW level-selection RNG (Issue #841).
+///
+/// Level selection needs no secret randomness — what matters is the
+/// geometric level distribution, not its unpredictability — so the
+/// build uses a deterministic generator seeded with this constant.
+/// This makes graph topology reproducible for a given insertion order:
+/// segment builds, merges, and topology-sensitive tests all become
+/// deterministic instead of flaking on unlucky layouts. Precedent:
+/// Lucene's `HnswGraphBuilder` builds with `DEFAULT_RAND_SEED = 42`.
+const LEVEL_RNG_SEED: u64 = 42;
 
 /// Abstract trait to allow reading from both HnswGraph (serial) and ConcurrentHnswGraph (parallel)
 trait GraphView {
@@ -569,9 +580,19 @@ impl HnswIndexWriter {
     }
 
     /// Calculate the layer for a new vector.
-    fn select_layer(&self) -> usize {
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - The build-scoped level RNG, seeded with
+    ///   [`LEVEL_RNG_SEED`] so graph topology is deterministic for a
+    ///   given insertion order (Issue #841).
+    ///
+    /// # Returns
+    ///
+    /// The layer index, geometrically distributed with ratio `_ml` and
+    /// capped at 16.
+    fn select_layer(&self, rng: &mut impl RngExt) -> usize {
         let mut layer = 0;
-        let mut rng = rand::rng();
 
         while rng.random_range(0.0..1.0) < self._ml && layer < 16 {
             layer += 1;
@@ -680,6 +701,10 @@ impl HnswIndexWriter {
         let mut new_node_levels = Vec::new(); // (doc_id, level)
         let mut new_doc_ids_in_order = Vec::new();
 
+        // Deterministic level RNG (Issue #841): one seeded generator per
+        // build, threaded through the serial level-assignment loops below.
+        let mut level_rng = rand::rngs::StdRng::seed_from_u64(LEVEL_RNG_SEED);
+
         // Check if we have an existing graph to append to
         let (graph, entry_point, max_level, search_entry_point) =
             if let Some(existing_graph) = self.graph.take() {
@@ -693,7 +718,7 @@ impl HnswIndexWriter {
 
                 // Assign levels to new vectors
                 for doc_id in &new_doc_ids_in_order {
-                    let level = self.select_layer();
+                    let level = self.select_layer(&mut level_rng);
                     new_node_levels.push((*doc_id, level));
                 }
 
@@ -728,7 +753,7 @@ impl HnswIndexWriter {
                 doc_ids_in_order.sort_unstable();
 
                 for doc_id in &doc_ids_in_order {
-                    let level = self.select_layer();
+                    let level = self.select_layer(&mut level_rng);
                     new_node_levels.push((*doc_id, level));
                 }
 
