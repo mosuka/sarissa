@@ -239,7 +239,9 @@ pub fn pq_train_codebook(
         }
     }
 
-    let m = params.m as usize;
+    // `m` is implicit below: the codebook holds exactly `m` chunks of
+    // `k * sub_dim` floats, so `chunks_mut(k * sub_dim)` yields one
+    // task per sub-vector.
     let k = params.k as usize;
     let sub_dim = params.sub_dim as usize;
     let n = vectors.len();
@@ -250,34 +252,53 @@ pub fn pq_train_codebook(
 
     let mut codebook = vec![0.0_f32; params.codebook_len()];
 
-    // Reusable scratch buffer to avoid per-sub-vector reallocations.
-    let mut sub_data: Vec<f32> = Vec::with_capacity(n * sub_dim);
-
-    for sub in 0..m {
-        // Project corpus onto this sub-vector stride.
-        sub_data.clear();
+    // Train one sub-vector's codebook slot: project the corpus onto
+    // the sub-vector stride, run seeded k-means, and write the
+    // centroids into `codebook[sub][..]`. When `effective_k < k` the
+    // remaining slots are left zero-filled — they will never be
+    // selected by the encoder because `pq_encode` only picks from the
+    // seeded set, but the codebook is sized to `k` so the on-disk
+    // format stays uniform. The seed is derived from `sub` so two runs
+    // over the same input produce the same codebook regardless of
+    // scheduling (Issue #622: the sub-vectors are trained in parallel
+    // on native targets and stay byte-identical because each
+    // sub-vector's arithmetic is untouched).
+    let train_sub = |(sub, slot): (usize, &mut [f32])| {
+        let mut sub_data: Vec<f32> = Vec::with_capacity(n * sub_dim);
         for v in vectors {
             sub_data.extend_from_slice(&v.data[sub * sub_dim..(sub + 1) * sub_dim]);
         }
 
-        // Deterministic seed derived from `sub` so two runs over the
-        // same input produce the same codebook.
         let seed: u64 =
             0xCAFE_F00D_DEAD_BEEF_u64 ^ ((sub as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
 
         let centroids = kmeans_train(&sub_data, sub_dim, effective_k, PQ_KMEANS_ITERATIONS, seed);
 
-        // Write centroids into codebook[sub][..]. When `effective_k < k`
-        // the remaining slots are left zero-filled — they will never
-        // be selected by the encoder because `pq_encode` only picks
-        // from the seeded set, but the codebook is sized to `k` so the
-        // on-disk format stays uniform.
-        let dst_base = sub * k * sub_dim;
         let src_len = effective_k * sub_dim;
-        codebook[dst_base..dst_base + src_len].copy_from_slice(&centroids[..src_len]);
+        slot[..src_len].copy_from_slice(&centroids[..src_len]);
+    };
+
+    // The m sub-quantizers are independent (embarrassingly parallel);
+    // `par_chunks_mut(k * sub_dim)` hands each task exactly its own
+    // codebook slot. Serial fallback when rayon is unavailable (wasm).
+    #[cfg(feature = "native")]
+    {
+        use rayon::prelude::*;
+        codebook
+            .par_chunks_mut(k * sub_dim)
+            .enumerate()
+            .for_each(train_sub);
+        Ok(codebook)
     }
 
-    Ok(codebook)
+    #[cfg(not(feature = "native"))]
+    {
+        codebook
+            .chunks_mut(k * sub_dim)
+            .enumerate()
+            .for_each(train_sub);
+        Ok(codebook)
+    }
 }
 
 /// Encode one full-dimensional vector into `m` byte codes using a
@@ -296,11 +317,8 @@ pub fn pq_encode(vector: &[f32], params: PqParams, codebook: &[f32]) -> Vec<u8> 
         let mut best_d = f32::INFINITY;
         for ki in 0..k {
             let c = &codebook[base + ki * sub_dim..base + (ki + 1) * sub_dim];
-            let mut sum = 0.0_f32;
-            for d in 0..sub_dim {
-                let diff = q_sub[d] - c[d];
-                sum += diff * diff;
-            }
+            // Shared SIMD kernel (Issue #622) — was an identical scalar loop.
+            let sum = l2_squared_slice(q_sub, c);
             if sum < best_d {
                 best_d = sum;
                 best_k = ki as u8;
@@ -432,12 +450,40 @@ fn kmeans_train(data: &[f32], sub_dim: usize, k: usize, iters: usize, seed: u64)
     centroids
 }
 
+/// SIMD `Σ (a[i] - b[i])²` over f32 slices (Issue #622).
+///
+/// Mirrors `distance.rs`'s `simd_euclidean_sq`: 8-wide [`wide::f32x8`]
+/// accumulation with a scalar tail. The 8-lane regrouping changes the
+/// f32 summation order relative to the previous scalar loop, so
+/// codebooks trained by the new build differ from old ones in
+/// low-order bits; within one build the result is fully deterministic.
+///
+/// # Arguments
+///
+/// * `a`, `b` - Equal-length f32 slices.
+///
+/// # Returns
+///
+/// The squared Euclidean distance between `a` and `b`.
 #[inline]
 fn l2_squared_slice(a: &[f32], b: &[f32]) -> f32 {
+    use wide::f32x8;
+
     debug_assert_eq!(a.len(), b.len());
-    let mut sum = 0.0_f32;
-    for i in 0..a.len() {
-        let d = a[i] - b[i];
+    let mut acc = f32x8::ZERO;
+    let chunks_a = a.chunks_exact(8);
+    let chunks_b = b.chunks_exact(8);
+    let rem_a = chunks_a.remainder();
+    let rem_b = chunks_b.remainder();
+
+    for (ca, cb) in chunks_a.zip(chunks_b) {
+        let diff = f32x8::from(ca) - f32x8::from(cb);
+        acc += diff * diff;
+    }
+
+    let mut sum: f32 = acc.reduce_add();
+    for (x, y) in rem_a.iter().zip(rem_b.iter()) {
+        let d = x - y;
         sum += d * d;
     }
     sum
@@ -1128,5 +1174,44 @@ mod tests {
     #[test]
     fn meta_serialized_size_is_eight() {
         assert_eq!(QuantizedVectorMeta::SERIALIZED_SIZE, 8);
+    }
+
+    /// Issue #622: `pq_train_codebook` must be deterministic — two runs
+    /// on the same input produce byte-identical codebooks. Today this
+    /// holds because each sub-vector's k-means uses a seed derived from
+    /// its index; the parallelization of the outer `m` loop must keep
+    /// it holding (per-sub arithmetic untouched, only scheduling
+    /// changes).
+    #[test]
+    fn pq_train_codebook_is_byte_identical_across_runs() {
+        let dim = 16usize;
+        let m = 4usize;
+        let params = PqParams::from_dim_and_m(dim, m).unwrap();
+
+        // Deterministic pseudo-random corpus, large enough that every
+        // sub-vector's k-means does real multi-cluster work.
+        let mut state: u64 = 0x5EED_1234_ABCD_9876;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+        };
+        let vectors: Vec<Vector> = (0..512)
+            .map(|_| Vector::new((0..dim).map(|_| next()).collect()))
+            .collect();
+
+        let a = pq_train_codebook(dim, params, &vectors).expect("train a");
+        let b = pq_train_codebook(dim, params, &vectors).expect("train b");
+        assert_eq!(a.len(), b.len());
+        // Bitwise comparison (not approximate): the seeded LCG makes
+        // training fully deterministic, so any difference means a
+        // scheduling-dependent arithmetic change slipped in.
+        let a_bits: Vec<u32> = a.iter().map(|f| f.to_bits()).collect();
+        let b_bits: Vec<u32> = b.iter().map(|f| f.to_bits()).collect();
+        assert_eq!(
+            a_bits, b_bits,
+            "two pq_train_codebook runs must be byte-identical"
+        );
     }
 }

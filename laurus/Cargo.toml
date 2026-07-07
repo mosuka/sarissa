@@ -173,6 +173,10 @@ name = "nrt_active_search_bench"
 harness = false
 
 [[bench]]
+name = "pq_train_bench"
+harness = false
+
+[[bench]]
 name = "vector_multi_query_bench"
 harness = false
 
