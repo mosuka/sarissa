@@ -256,6 +256,40 @@ impl BlockTermDictionary {
             .map(|(term, info)| (term.as_str(), info))
     }
 
+    /// Ordinal of the first term `>= target` (Issue #845).
+    ///
+    /// A cursor entry point over the ascending `sorted_terms` array:
+    /// binary search returning the smallest index whose term is not
+    /// less than `target` (`sorted_terms.len()` when every term is
+    /// smaller). Together with [`Self::entry_at`] this lets callers
+    /// iterate a bounded range lazily instead of collecting.
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - The full dictionary key (e.g. `"field:term"`).
+    ///
+    /// # Returns
+    ///
+    /// The ordinal of the first term `>= target`.
+    pub(crate) fn seek_index(&self, target: &str) -> usize {
+        self.sorted_terms
+            .partition_point(|term| term.as_str() < target)
+    }
+
+    /// Borrowed `(term, term_info)` at ordinal `idx` (Issue #845).
+    ///
+    /// # Arguments
+    ///
+    /// * `idx` - Ordinal into the ascending term order.
+    ///
+    /// # Returns
+    ///
+    /// `None` when `idx` is past the end of the dictionary.
+    pub(crate) fn entry_at(&self, idx: usize) -> Option<(&str, &TermInfo)> {
+        let term = self.sorted_terms.get(idx)?;
+        Some((term.as_str(), &self.term_infos[idx]))
+    }
+
     /// Collect borrowed `(term, term_info)` pairs whose term begins
     /// with `prefix`, in ascending term order.
     ///
@@ -744,6 +778,27 @@ mod tests {
         let dict = builder.build().unwrap();
         let collected: Vec<String> = dict.iter().map(|(t, _)| t.to_string()).collect();
         assert_eq!(collected, vec!["alpha", "bravo", "mike", "zulu"]);
+    }
+
+    /// Issue #845: `seek_index` returns the first ordinal `>= target`
+    /// and `entry_at` reads it, including boundaries.
+    #[test]
+    fn block_dict_seek_index_and_entry_at() {
+        let mut builder = TermDictionaryBuilder::new();
+        for term in ["a:x", "a:y", "b:m", "b:n", "c:z"] {
+            builder.add_term(term.to_string(), create_test_term_info(1));
+        }
+        let dict = builder.build().unwrap();
+
+        // Exact hit, in-between miss, prefix boundary, past-the-end.
+        assert_eq!(dict.seek_index("a:x"), 0);
+        assert_eq!(dict.seek_index("a:xx"), 1, "between a:x and a:y");
+        assert_eq!(dict.seek_index("b:"), 2, "field-prefix start of b");
+        assert_eq!(dict.seek_index("d:"), 5, "past every term");
+
+        assert_eq!(dict.entry_at(2).map(|(t, _)| t), Some("b:m"));
+        assert_eq!(dict.entry_at(4).map(|(t, _)| t), Some("c:z"));
+        assert!(dict.entry_at(5).is_none(), "past-the-end yields None");
     }
 
     #[test]

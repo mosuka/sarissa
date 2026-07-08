@@ -194,124 +194,109 @@ impl TermsEnum for Box<dyn TermsEnum> {
 // Concrete Implementations for InvertedIndex
 // ============================================================================
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::lexical::index::structures::dictionary::{BlockTermDictionary, TermInfo};
+use crate::lexical::index::structures::dictionary::BlockTermDictionary;
 
-/// Iterator over terms in a term dictionary.
+/// Lazy iterator over one field's terms in a term dictionary
+/// (Issue #845).
+///
+/// Terms are stored under `"field:term"` keys in the dictionary's
+/// ascending `sorted_terms` array, so one field occupies a contiguous
+/// range. Construction is a single binary search to the range start —
+/// **no dictionary walk and no term cloning** (the previous
+/// implementation copied every matching term into a `Vec` per
+/// `iterator()` call, after walking the whole cross-field dictionary).
+/// `next()` yields entries while keys keep the field prefix, cloning
+/// only each **yielded** term's text.
 pub struct InvertedIndexTermsEnum {
-    /// Iterator over the dictionary entries
-    terms: Vec<(String, TermInfo)>,
-    /// Current position in the iterator
+    /// The shared dictionary backing this cursor.
+    dict: Arc<BlockTermDictionary>,
+    /// `"{field}:"` — bounds the cursor to the field's contiguous range.
+    prefix: String,
+    /// Ordinal of the next entry [`TermsEnum::next`] will yield.
     position: usize,
     /// Current term stats (cached)
     current: Option<TermStats>,
 }
 
 impl InvertedIndexTermsEnum {
-    /// Create a new terms enum for a field.
+    /// Create a new lazy terms enum for a field.
     ///
-    /// This extracts all terms for the specified field from the term dictionary.
-    /// Terms are stored in the format "field:term", so we filter by prefix.
+    /// # Arguments
+    ///
+    /// * `field` - The field whose terms to enumerate.
+    /// * `dict` - The segment's term dictionary (refcount-shared).
     pub fn new(field: &str, dict: &Arc<BlockTermDictionary>) -> Self {
-        let field_prefix = format!("{}:", field);
-        let mut terms = Vec::new();
-
-        // Iterate over all terms in the dictionary
-        for (term, info) in dict.iter() {
-            // Check if this term belongs to our field
-            if let Some(term_text) = term.strip_prefix(&field_prefix) {
-                terms.push((term_text.to_string(), info.clone()));
-            }
-        }
-
-        // Terms are already sorted since BlockTermDictionary.iter() uses SortedTermDictionary
+        let prefix = format!("{}:", field);
+        let position = dict.seek_index(&prefix);
         InvertedIndexTermsEnum {
-            terms,
-            position: 0,
+            dict: Arc::clone(dict),
+            prefix,
+            position,
             current: None,
         }
+    }
+
+    /// Stats for the entry at `idx`, or `None` when `idx` is past the
+    /// dictionary end or the entry no longer belongs to this field.
+    fn stats_at(&self, idx: usize) -> Option<TermStats> {
+        let (key, info) = self.dict.entry_at(idx)?;
+        let term = key.strip_prefix(&self.prefix)?;
+        Some(TermStats {
+            term: term.to_string(),
+            doc_freq: info.doc_frequency,
+            total_term_freq: info.total_frequency,
+        })
     }
 }
 
 impl TermsEnum for InvertedIndexTermsEnum {
     fn next(&mut self) -> Result<Option<TermStats>> {
-        if self.position >= self.terms.len() {
-            self.current = None;
-            return Ok(None);
+        match self.stats_at(self.position) {
+            Some(stats) => {
+                self.current = Some(stats.clone());
+                self.position += 1;
+                Ok(Some(stats))
+            }
+            None => {
+                self.current = None;
+                Ok(None)
+            }
         }
-
-        let (term, info) = &self.terms[self.position];
-        let stats = TermStats {
-            term: term.clone(),
-            doc_freq: info.doc_frequency,
-            total_term_freq: info.total_frequency,
-        };
-
-        self.current = Some(stats.clone());
-        self.position += 1;
-
-        Ok(Some(stats))
     }
 
     fn seek(&mut self, target: &str) -> Result<bool> {
-        // Binary search for the target term or the next term greater than it
-        let result = self
-            .terms
-            .binary_search_by(|(term, _)| term.as_str().cmp(target));
-
-        match result {
-            Ok(index) => {
-                // Exact match found
-                self.position = index;
-                let (term, info) = &self.terms[index];
-                self.current = Some(TermStats {
-                    term: term.clone(),
-                    doc_freq: info.doc_frequency,
-                    total_term_freq: info.total_frequency,
-                });
-                Ok(true)
+        // Binary search within the field's keyspace; positions at the
+        // target or the next greater term (the following `next()` call
+        // yields the entry `current` now points at, as before).
+        let full_key = format!("{}{}", self.prefix, target);
+        self.position = self.dict.seek_index(&full_key);
+        match self.stats_at(self.position) {
+            Some(stats) => {
+                let exact = stats.term == target;
+                self.current = Some(stats);
+                Ok(exact)
             }
-            Err(index) => {
-                // No exact match; position at the next term
-                self.position = index;
-                if index < self.terms.len() {
-                    let (term, info) = &self.terms[index];
-                    self.current = Some(TermStats {
-                        term: term.clone(),
-                        doc_freq: info.doc_frequency,
-                        total_term_freq: info.total_frequency,
-                    });
-                    Ok(false)
-                } else {
-                    self.current = None;
-                    Ok(false)
-                }
+            None => {
+                self.current = None;
+                Ok(false)
             }
         }
     }
 
     fn seek_exact(&mut self, term: &str) -> Result<bool> {
-        // Binary search for exact match
-        let result = self.terms.binary_search_by(|(t, _)| t.as_str().cmp(term));
-
-        match result {
-            Ok(index) => {
-                self.position = index;
-                let (term, info) = &self.terms[index];
-                self.current = Some(TermStats {
-                    term: term.clone(),
-                    doc_freq: info.doc_frequency,
-                    total_term_freq: info.total_frequency,
-                });
-                Ok(true)
-            }
-            Err(_) => {
-                self.current = None;
-                Ok(false)
-            }
+        // O(1) point probe via the dictionary's hash index; only an
+        // exact hit repositions the cursor (matching the previous
+        // implementation, which left the position unchanged on a miss).
+        let full_key = format!("{}{}", self.prefix, term);
+        if self.dict.get(&full_key).is_none() {
+            self.current = None;
+            return Ok(false);
         }
+        self.position = self.dict.seek_index(&full_key);
+        self.current = self.stats_at(self.position);
+        Ok(true)
     }
 
     fn current(&self) -> Option<&TermStats> {
@@ -334,17 +319,23 @@ impl InvertedIndexTerms {
     pub fn new(field: &str, dict: Arc<BlockTermDictionary>) -> Self {
         let field_prefix = format!("{}:", field);
 
-        // Calculate statistics by iterating through matching terms
+        // Calculate statistics over the field's contiguous sorted range
+        // only (Issue #845): binary-search to the range start and stop
+        // at the first key without the prefix, instead of walking the
+        // whole cross-field dictionary.
         let mut size = 0u64;
         let mut sum_doc_freq = 0u64;
         let mut sum_total_term_freq = 0u64;
 
-        for (term, info) in dict.iter() {
-            if term.starts_with(&field_prefix) {
-                size += 1;
-                sum_doc_freq += info.doc_frequency;
-                sum_total_term_freq += info.total_frequency;
+        let mut idx = dict.seek_index(&field_prefix);
+        while let Some((key, info)) = dict.entry_at(idx) {
+            if !key.starts_with(&field_prefix) {
+                break;
             }
+            size += 1;
+            sum_doc_freq += info.doc_frequency;
+            sum_total_term_freq += info.total_frequency;
+            idx += 1;
         }
 
         InvertedIndexTerms {
@@ -387,9 +378,11 @@ impl Terms for InvertedIndexTerms {
 /// Collects terms from all segments, accumulating `doc_freq` and
 /// `total_term_freq` for the same term across segments.
 pub struct MergedInvertedIndexTerms {
-    /// Sorted merged terms: (term_text, doc_freq, total_term_freq).
-    merged: Vec<(String, u64, u64)>,
-    // Pre-computed statistics.
+    /// The field whose terms this view merges.
+    field: String,
+    /// Per-segment dictionaries (refcount-shared).
+    dicts: Vec<Arc<BlockTermDictionary>>,
+    // Pre-computed statistics (field-range-bounded merge pass).
     size: u64,
     sum_doc_freq: u64,
     sum_total_term_freq: u64,
@@ -397,33 +390,29 @@ pub struct MergedInvertedIndexTerms {
 
 impl MergedInvertedIndexTerms {
     /// Create merged terms for `field` from multiple dictionaries.
+    ///
+    /// Statistics come from one field-range-bounded k-way merge pass
+    /// (Issue #845) instead of the previous full walk of every
+    /// segment's whole cross-field dictionary into a `BTreeMap`;
+    /// [`Terms::iterator`] then hands out fresh lazy merge cursors
+    /// instead of cloning a pre-merged `Vec` per call.
     pub fn new(field: &str, dicts: &[Arc<BlockTermDictionary>]) -> Self {
-        let field_prefix = format!("{}:", field);
-        let mut map: BTreeMap<String, (u64, u64)> = BTreeMap::new();
-
-        for dict in dicts {
-            for (term, info) in dict.iter() {
-                if let Some(term_text) = term.strip_prefix(&field_prefix) {
-                    let entry = map.entry(term_text.to_string()).or_insert((0, 0));
-                    entry.0 += info.doc_frequency;
-                    entry.1 += info.total_frequency;
-                }
-            }
-        }
-
-        let mut merged = Vec::with_capacity(map.len());
+        let mut stats_cursor = MergedTermsEnum::new(field, dicts);
+        let mut size = 0u64;
         let mut sum_doc_freq = 0u64;
         let mut sum_total_term_freq = 0u64;
-
-        for (term, (df, ttf)) in map {
-            sum_doc_freq += df;
-            sum_total_term_freq += ttf;
-            merged.push((term, df, ttf));
+        // A merge pass is required for `size`: it counts DISTINCT terms
+        // across segments, which per-segment stats cannot provide.
+        while let Ok(Some(stats)) = stats_cursor.next() {
+            size += 1;
+            sum_doc_freq += stats.doc_freq;
+            sum_total_term_freq += stats.total_term_freq;
         }
 
         MergedInvertedIndexTerms {
-            size: merged.len() as u64,
-            merged,
+            field: field.to_string(),
+            dicts: dicts.to_vec(),
+            size,
             sum_doc_freq,
             sum_total_term_freq,
         }
@@ -432,11 +421,7 @@ impl MergedInvertedIndexTerms {
 
 impl Terms for MergedInvertedIndexTerms {
     fn iterator(&self) -> Result<Box<dyn TermsEnum>> {
-        Ok(Box::new(MergedTermsEnum {
-            terms: self.merged.clone(),
-            position: 0,
-            current: None,
-        }))
+        Ok(Box::new(MergedTermsEnum::new(&self.field, &self.dicts)))
     }
 
     fn size(&self) -> Option<u64> {
@@ -452,83 +437,245 @@ impl Terms for MergedInvertedIndexTerms {
     }
 }
 
-/// TermsEnum backed by a pre-merged sorted term list.
+/// Lazy k-way merge over per-segment field cursors (Issue #845).
+///
+/// Holds one [`InvertedIndexTermsEnum`] per segment plus its pulled
+/// head entry. `next()` emits the minimum head term with
+/// `doc_freq` / `total_term_freq` summed across every segment holding
+/// that term (the previous pre-merged behavior), then refills the
+/// consumed heads. Segment counts are small, so heads are compared
+/// linearly (mirroring `MergedPostingIterator`'s linear mode).
 struct MergedTermsEnum {
-    terms: Vec<(String, u64, u64)>,
-    position: usize,
+    /// Per-segment lazy cursors.
+    children: Vec<InvertedIndexTermsEnum>,
+    /// Pulled-but-unemitted head entry per child.
+    heads: Vec<Option<TermStats>>,
+    /// Current merged term stats (cached).
     current: Option<TermStats>,
+}
+
+impl MergedTermsEnum {
+    /// Build the merge cursor: one field-bounded lazy cursor per
+    /// segment, heads primed with each cursor's first entry.
+    fn new(field: &str, dicts: &[Arc<BlockTermDictionary>]) -> Self {
+        let mut children: Vec<InvertedIndexTermsEnum> = dicts
+            .iter()
+            .map(|dict| InvertedIndexTermsEnum::new(field, dict))
+            .collect();
+        let heads = children
+            .iter_mut()
+            .map(|child| child.next().unwrap_or(None))
+            .collect();
+        MergedTermsEnum {
+            children,
+            heads,
+            current: None,
+        }
+    }
+
+    /// Merge the minimum-term heads into one `TermStats` without
+    /// consuming them (peek): equal terms sum df / ttf across segments.
+    fn peek_merged(&self) -> Option<TermStats> {
+        let min_term = self
+            .heads
+            .iter()
+            .flatten()
+            .map(|stats| stats.term.as_str())
+            .min()?;
+        let mut merged = TermStats {
+            term: min_term.to_string(),
+            doc_freq: 0,
+            total_term_freq: 0,
+        };
+        for stats in self.heads.iter().flatten() {
+            if stats.term == merged.term {
+                merged.doc_freq += stats.doc_freq;
+                merged.total_term_freq += stats.total_term_freq;
+            }
+        }
+        Some(merged)
+    }
+
+    /// Refill every head whose term equals `term` from its child.
+    fn advance_heads_matching(&mut self, term: &str) -> Result<()> {
+        for (child, head) in self.children.iter_mut().zip(self.heads.iter_mut()) {
+            if head.as_ref().is_some_and(|stats| stats.term == term) {
+                *head = child.next()?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl TermsEnum for MergedTermsEnum {
     fn next(&mut self) -> Result<Option<TermStats>> {
-        if self.position >= self.terms.len() {
-            self.current = None;
-            return Ok(None);
+        match self.peek_merged() {
+            Some(stats) => {
+                self.advance_heads_matching(&stats.term)?;
+                self.current = Some(stats.clone());
+                Ok(Some(stats))
+            }
+            None => {
+                self.current = None;
+                Ok(None)
+            }
         }
-        let (term, df, ttf) = &self.terms[self.position];
-        let stats = TermStats {
-            term: term.clone(),
-            doc_freq: *df,
-            total_term_freq: *ttf,
-        };
-        self.current = Some(stats.clone());
-        self.position += 1;
-        Ok(Some(stats))
     }
 
     fn seek(&mut self, target: &str) -> Result<bool> {
-        let result = self
-            .terms
-            .binary_search_by(|(t, _, _)| t.as_str().cmp(target));
-        match result {
-            Ok(idx) => {
-                self.position = idx;
-                let (term, df, ttf) = &self.terms[idx];
-                self.current = Some(TermStats {
-                    term: term.clone(),
-                    doc_freq: *df,
-                    total_term_freq: *ttf,
-                });
-                Ok(true)
-            }
-            Err(idx) => {
-                self.position = idx;
-                if idx < self.terms.len() {
-                    let (term, df, ttf) = &self.terms[idx];
-                    self.current = Some(TermStats {
-                        term: term.clone(),
-                        doc_freq: *df,
-                        total_term_freq: *ttf,
-                    });
-                }
-                Ok(false)
-            }
+        // Seek every child, then re-prime its head with the entry the
+        // child now points at (child `seek` peeks without consuming, so
+        // the following child `next()` pulls exactly that entry).
+        for (child, head) in self.children.iter_mut().zip(self.heads.iter_mut()) {
+            child.seek(target)?;
+            *head = child.next()?;
         }
+        self.current = self.peek_merged();
+        Ok(self
+            .current
+            .as_ref()
+            .is_some_and(|stats| stats.term == target))
     }
 
     fn seek_exact(&mut self, term: &str) -> Result<bool> {
-        let result = self
-            .terms
-            .binary_search_by(|(t, _, _)| t.as_str().cmp(term));
-        match result {
-            Ok(idx) => {
-                self.position = idx;
-                let (term, df, ttf) = &self.terms[idx];
-                self.current = Some(TermStats {
-                    term: term.clone(),
-                    doc_freq: *df,
-                    total_term_freq: *ttf,
-                });
-                Ok(true)
-            }
-            Err(_) => {
-                self.current = None;
-                Ok(false)
-            }
+        let found = self.seek(term)?;
+        if !found {
+            self.current = None;
         }
+        Ok(found)
     }
 
     fn current(&self) -> Option<&TermStats> {
         self.current.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexical::index::structures::dictionary::{TermDictionaryBuilder, TermInfo};
+
+    /// Build a dictionary with keys spanning three fields so field
+    /// boundaries are exercised on both sides.
+    fn mixed_field_dict() -> Arc<BlockTermDictionary> {
+        let mut builder = TermDictionaryBuilder::new();
+        for (key, df, ttf) in [
+            ("alpha:apple", 2, 5),
+            ("alpha:apricot", 1, 1),
+            ("body:program", 3, 7),
+            ("body:programmer", 1, 2),
+            ("body:programming", 4, 9),
+            ("body:python", 2, 3),
+            ("title:zebra", 1, 1),
+        ] {
+            builder.add_term(key.to_string(), TermInfo::new(0, 0, df, ttf));
+        }
+        Arc::new(builder.build().unwrap())
+    }
+
+    /// Issue #845: the lazy enum must yield exactly the field's terms in
+    /// sorted order — no leakage from lexically adjacent fields.
+    #[test]
+    fn lazy_enum_isolates_field_boundaries() {
+        let dict = mixed_field_dict();
+        let mut terms_enum = InvertedIndexTermsEnum::new("body", &dict);
+        let mut drained = Vec::new();
+        while let Some(stats) = terms_enum.next().unwrap() {
+            drained.push((stats.term, stats.doc_freq, stats.total_term_freq));
+        }
+        assert_eq!(
+            drained,
+            vec![
+                ("program".to_string(), 3, 7),
+                ("programmer".to_string(), 1, 2),
+                ("programming".to_string(), 4, 9),
+                ("python".to_string(), 2, 3),
+            ]
+        );
+
+        // A field with no terms yields nothing.
+        let mut empty = InvertedIndexTermsEnum::new("missing", &dict);
+        assert!(empty.next().unwrap().is_none());
+    }
+
+    /// Equivalence with the dictionary's own prefix range: the lazy
+    /// drain must match `find_prefix("{field}:")` exactly.
+    #[test]
+    fn lazy_enum_matches_find_prefix() {
+        let dict = mixed_field_dict();
+        let expected: Vec<String> = dict
+            .find_prefix("body:")
+            .into_iter()
+            .map(|(key, _)| key.strip_prefix("body:").unwrap().to_string())
+            .collect();
+        let mut terms_enum = InvertedIndexTermsEnum::new("body", &dict);
+        let mut drained = Vec::new();
+        while let Some(stats) = terms_enum.next().unwrap() {
+            drained.push(stats.term);
+        }
+        assert_eq!(drained, expected);
+    }
+
+    /// Seek semantics: exact hit, positioned-at-next miss, past-the-end,
+    /// and the peek contract (the next `next()` yields the sought entry).
+    #[test]
+    fn lazy_enum_seek_semantics() {
+        let dict = mixed_field_dict();
+        let mut terms_enum = InvertedIndexTermsEnum::new("body", &dict);
+
+        assert!(terms_enum.seek("programmer").unwrap(), "exact hit");
+        assert_eq!(terms_enum.current().unwrap().term, "programmer");
+        assert_eq!(terms_enum.next().unwrap().unwrap().term, "programmer");
+
+        assert!(!terms_enum.seek("prog").unwrap(), "miss -> next greater");
+        assert_eq!(terms_enum.current().unwrap().term, "program");
+
+        assert!(!terms_enum.seek("zzz").unwrap(), "past the field range");
+        assert!(terms_enum.current().is_none());
+
+        assert!(terms_enum.seek_exact("python").unwrap());
+        assert_eq!(terms_enum.current().unwrap().term, "python");
+        assert!(!terms_enum.seek_exact("nope").unwrap());
+    }
+
+    /// Merged view: distinct terms in sorted order with df/ttf summed
+    /// across segments; stats match a full drain.
+    #[test]
+    fn merged_enum_aggregates_across_segments() {
+        let mut b1 = TermDictionaryBuilder::new();
+        b1.add_term("body:apple".to_string(), TermInfo::new(0, 0, 2, 4));
+        b1.add_term("body:cherry".to_string(), TermInfo::new(0, 0, 1, 1));
+        let mut b2 = TermDictionaryBuilder::new();
+        b2.add_term("body:apple".to_string(), TermInfo::new(0, 0, 3, 5));
+        b2.add_term("body:banana".to_string(), TermInfo::new(0, 0, 1, 2));
+        let dicts = vec![Arc::new(b1.build().unwrap()), Arc::new(b2.build().unwrap())];
+
+        let merged = MergedInvertedIndexTerms::new("body", &dicts);
+        assert_eq!(merged.size(), Some(3), "3 distinct terms");
+        assert_eq!(merged.sum_doc_freq(), Some(2 + 3 + 1 + 1));
+        assert_eq!(merged.sum_total_term_freq(), Some(4 + 5 + 2 + 1));
+
+        let mut iter = merged.iterator().unwrap();
+        let mut drained = Vec::new();
+        while let Some(stats) = iter.next().unwrap() {
+            drained.push((stats.term, stats.doc_freq, stats.total_term_freq));
+        }
+        assert_eq!(
+            drained,
+            vec![
+                ("apple".to_string(), 5, 9), // summed across both segments
+                ("banana".to_string(), 1, 2),
+                ("cherry".to_string(), 1, 1),
+            ]
+        );
+
+        // Seek: exact on a term present in only one segment, and the
+        // peek contract across the merge.
+        let mut iter = merged.iterator().unwrap();
+        assert!(iter.seek("banana").unwrap());
+        assert_eq!(iter.next().unwrap().unwrap().term, "banana");
+        assert_eq!(iter.next().unwrap().unwrap().term, "cherry");
+        assert!(!iter.seek("aaa").unwrap(), "miss -> positioned at apple");
+        assert_eq!(iter.current().unwrap().term, "apple");
     }
 }
