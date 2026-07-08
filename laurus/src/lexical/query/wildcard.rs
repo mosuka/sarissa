@@ -202,12 +202,12 @@ impl MultiTermQuery for WildcardQuery {
 
 impl Query for WildcardQuery {
     fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
-        let rewritten = self.rewrite(reader)?;
+        let rewritten = MultiTermQuery::rewrite(self, reader)?;
         rewritten.matcher(reader)
     }
 
     fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
-        let rewritten = self.rewrite(reader)?;
+        let rewritten = MultiTermQuery::rewrite(self, reader)?;
         rewritten.scorer(reader)
     }
 
@@ -237,6 +237,21 @@ impl Query for WildcardQuery {
     fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         // Wildcard queries can be expensive
         Ok(reader.doc_count())
+    }
+
+    fn rewrite(&self, reader: &dyn LexicalIndexReader) -> Result<Option<Box<dyn Query>>> {
+        // Lower once at the searcher level (Issue #613). When the reader
+        // cannot enumerate terms (e.g. the per-segment fanout view), keep
+        // the original query so the matcher/scorer fallback stays in
+        // charge; probing via the downcast costs nothing extra.
+        if reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .is_none()
+        {
+            return Ok(None);
+        }
+        Ok(Some(MultiTermQuery::rewrite(self, reader)?))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

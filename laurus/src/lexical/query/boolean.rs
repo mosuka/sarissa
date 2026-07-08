@@ -472,6 +472,39 @@ impl Query for BooleanQuery {
         Ok(total_cost)
     }
 
+    fn rewrite(&self, reader: &dyn LexicalIndexReader) -> Result<Option<Box<dyn Query>>> {
+        // Lower multi-term subqueries once at the searcher level
+        // (Issue #613). Only scoring clauses (Should / Must) are
+        // rewritten: Filter and MustNot clauses are matched through the
+        // cached doc-id path keyed by the ORIGINAL clause's
+        // `cache_key`, which a rewrite would invalidate.
+        let mut rewritten_any = false;
+        let mut clauses = Vec::with_capacity(self.clauses.len());
+        for clause in &self.clauses {
+            let lowered = match clause.occur {
+                Occur::Should | Occur::Must => clause.query.rewrite(reader)?,
+                Occur::MustNot | Occur::Filter => None,
+            };
+            match lowered {
+                Some(query) => {
+                    rewritten_any = true;
+                    clauses.push(BooleanClause::new(query, clause.occur));
+                }
+                None => clauses.push(clause.clone()),
+            }
+        }
+        if !rewritten_any {
+            return Ok(None);
+        }
+        let mut rewritten =
+            BooleanQuery::new().with_minimum_should_match(self.minimum_should_match);
+        rewritten.set_boost(self.boost);
+        for clause in clauses {
+            rewritten.add_clause(clause);
+        }
+        Ok(Some(Box::new(rewritten)))
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

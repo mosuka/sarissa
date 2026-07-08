@@ -122,7 +122,9 @@ use common::{SAMPLE_SIZE_FAST, SAMPLE_SIZE_SLOW};
 use laurus::analysis::analyzer::analyzer::Analyzer;
 use laurus::analysis::analyzer::standard::StandardAnalyzer;
 use laurus::lexical::core::field::IntegerOption;
-use laurus::lexical::{BooleanQuery, FuzzyQuery, PhraseQuery, TermQuery, TextOption};
+use laurus::lexical::{
+    BooleanQuery, FuzzyQuery, PhraseQuery, TermQuery, TextOption, WildcardQuery,
+};
 use laurus::storage::Storage;
 use laurus::storage::file::FileStorageConfig;
 use laurus::storage::{StorageConfig, StorageFactory};
@@ -1066,6 +1068,49 @@ fn bench_fuzzy_query(c: &mut Criterion) {
     group.finish();
 }
 
+/// Wildcard search latency (Issue #613): like [`bench_fuzzy_query`],
+/// exercises the multi-term enumeration path — the query is lowered to a
+/// Boolean-of-TermQuery via one term-dictionary enumeration per request
+/// (previously two: matcher and scorer re-enumerated independently).
+fn bench_wildcard_query(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("lexical/wildcard_query");
+    group.sample_size(SAMPLE_SIZE_FAST);
+
+    for &n in &[100, 1000, 5000] {
+        let engine = cached_engine(&rt, EngineShape::Uniform, n, 1);
+
+        // Sanity check: the probe must match `programming`-family terms.
+        let probe = rt.block_on(async {
+            let query = Box::new(WildcardQuery::new("body", "program*").unwrap());
+            let request = SearchRequestBuilder::new()
+                .lexical_query(LexicalSearchQuery::Obj(query))
+                .limit(10)
+                .build();
+            engine.search(request).await.unwrap()
+        });
+        assert!(
+            !probe.is_empty(),
+            "wildcard_query probe must return at least one hit at n={n}"
+        );
+
+        group.bench_with_input(BenchmarkId::new("prefix_star", n), &n, |b, _| {
+            b.to_async(&rt).iter(|| {
+                let engine = &engine;
+                async move {
+                    let query = Box::new(WildcardQuery::new("body", "program*").unwrap());
+                    let request = SearchRequestBuilder::new()
+                        .lexical_query(LexicalSearchQuery::Obj(query))
+                        .limit(10)
+                        .build();
+                    black_box(engine.search(request).await.unwrap())
+                }
+            });
+        });
+    }
+    group.finish();
+}
+
 fn bench_dsl_query(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let engine = cached_engine(&rt, EngineShape::Uniform, 5000, 1);
@@ -1142,6 +1187,7 @@ criterion_group!(
     bench_seek_skewed,
     bench_phrase_query,
     bench_fuzzy_query,
+    bench_wildcard_query,
     bench_dsl_query,
 );
 criterion_main!(benches);

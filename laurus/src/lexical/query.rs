@@ -148,6 +148,34 @@ pub trait Query: Send + Sync + Debug {
     /// Get the estimated cost of executing this query.
     fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64>;
 
+    /// Rewrite this query against the reader (Issue #613).
+    ///
+    /// Called once by the searcher at the top of query execution,
+    /// against the top-level reader — before the per-segment fanout and
+    /// BMW gates. Multi-term queries (prefix / wildcard / fuzzy /
+    /// regexp) override this to lower themselves into a `BooleanQuery`
+    /// of `TermQuery` clauses via one term-dictionary enumeration, so
+    /// the subsequent `matcher` + `scorer` construction (and every
+    /// per-segment execution) reuses the lowered form instead of
+    /// re-enumerating. [`crate::lexical::query::boolean::BooleanQuery`]
+    /// recurses into its scoring clauses.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The index reader the query will execute against.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Some(query))` with the rewritten query, or `Ok(None)` when
+    /// this query has nothing to rewrite (the default — zero cost for
+    /// term / phrase / range queries) or the reader does not support
+    /// term enumeration (the caller keeps the original query, whose
+    /// `matcher` / `scorer` fallback behavior is unchanged).
+    fn rewrite(&self, reader: &dyn LexicalIndexReader) -> Result<Option<Box<dyn Query>>> {
+        let _ = reader;
+        Ok(None)
+    }
+
     /// Get this query as Any for downcasting.
     fn as_any(&self) -> &dyn Any;
 

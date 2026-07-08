@@ -167,6 +167,23 @@ impl InvertedIndexSearcher {
         parallel: bool,
         deadline: Option<Deadline>,
     ) -> Result<C> {
+        // Query rewrite (Issue #613): lower multi-term queries (prefix /
+        // wildcard / fuzzy / regexp) into Boolean-of-TermQuery ONCE,
+        // against the top-level reader, before any gating below. This
+        // (a) halves the term-dictionary enumerations (matcher and
+        // scorer used to re-enumerate independently), and (b) hands the
+        // per-segment fanout a query it can execute — the fanout's
+        // `PerSegmentReaderView` cannot enumerate the term dictionary,
+        // which previously made raw multi-term queries return 0 hits on
+        // multi-segment indexes. `None` (nothing to rewrite, or the
+        // reader is itself a per-segment view) keeps the original query;
+        // an already-lowered query rewrites to `None`, so the fanout's
+        // recursion back into this method is a cheap no-op.
+        let query = match query.rewrite(self.reader.as_ref())? {
+            Some(rewritten) => rewritten,
+            None => query,
+        };
+
         // For BooleanQuery with multiple clauses, try to execute sub-queries in parallel
         if parallel && let Some(boolean_query) = query.as_any().downcast_ref::<BooleanQuery>() {
             return self.search_boolean_query_parallel(boolean_query, collector, deadline);
