@@ -20,6 +20,18 @@ use crate::vector::index::quantized_io::{
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 use serde::{Deserialize, Serialize};
 
+/// Fixed seed for the IVF k-means RNG (Issue #847).
+///
+/// k-means++ initialization and cluster splitting need randomness only
+/// for their statistical properties, not unpredictability, so training
+/// uses a deterministic generator seeded with this constant — the same
+/// rationale as the HNSW level RNG (Issue #841 / #842, following
+/// Lucene's `DEFAULT_RAND_SEED = 42`). Same input → same centroids and
+/// assignments (bitwise on the serial path; parallel accumulation from
+/// Issue #843 may regroup f32 sums), making builds reproducible and
+/// construction benchmarks stable.
+const KMEANS_RNG_SEED: u64 = 42;
+
 #[derive(Debug)]
 /// Builder for IVF vector indexes (memory-efficient search).
 pub struct IvfIndexWriter {
@@ -377,7 +389,8 @@ impl IvfIndexWriter {
     /// Initialize centroids using k-means++ algorithm.
     fn init_centroids_kmeans_plus_plus(&mut self) -> Result<()> {
         use rand::prelude::*;
-        let mut rng = rand::rng();
+        // Deterministic training RNG (Issue #847); see KMEANS_RNG_SEED.
+        let mut rng = rand::rngs::StdRng::seed_from_u64(KMEANS_RNG_SEED);
 
         self.centroids.clear();
 
@@ -896,7 +909,8 @@ impl IvfIndexWriter {
         vectors: Vec<(u64, String, Vector)>,
     ) -> Result<SplitClusterResult> {
         use rand::prelude::*;
-        let mut rng = rand::rng();
+        // Deterministic training RNG (Issue #847); see KMEANS_RNG_SEED.
+        let mut rng = rand::rngs::StdRng::seed_from_u64(KMEANS_RNG_SEED);
 
         // Pick two initial centroids
         let idx1 = rng.random_range(0..vectors.len());
@@ -1292,5 +1306,83 @@ impl VectorIndexWriter for IvfIndexWriter {
         )?;
 
         Ok(Arc::new(reader))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deterministic pseudo-random vector corpus (no thread RNG).
+    fn lcg_vectors(count: usize, dim: usize) -> Vec<(u64, String, Vector)> {
+        let mut state: u64 = 0x1234_5678_9ABC_DEF0;
+        (0..count)
+            .map(|i| {
+                let data: Vec<f32> = (0..dim)
+                    .map(|_| {
+                        state = state
+                            .wrapping_mul(6_364_136_223_846_793_005)
+                            .wrapping_add(1_442_695_040_888_963_407);
+                        ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+                    })
+                    .collect();
+                (i as u64, "f".to_string(), Vector::new(data))
+            })
+            .collect()
+    }
+
+    /// Issue #847: with the seeded k-means RNG, two trainings over the
+    /// same input produce bitwise-identical centroids and identical
+    /// cluster assignments.
+    ///
+    /// Uses n = 500 (below the 1000-vector parallel gate) so the whole
+    /// Lloyd loop runs serially: at larger n the parallel accumulation
+    /// from Issue #843 may regroup f32 sums across threads, so parallel
+    /// builds are deterministic only up to summation order. This test
+    /// pins exactly what the seed guarantees — the same RNG picks, the
+    /// same k-means++ starts, the same convergence trajectory —
+    /// mirroring how #842's HNSW test pins level assignment only.
+    #[test]
+    fn kmeans_training_is_deterministic_with_seeded_rng() {
+        fn train_once() -> (Vec<Vec<u32>>, Vec<Vec<u64>>) {
+            let config = IvfIndexConfig {
+                dimension: 16,
+                n_clusters: 8,
+                n_probe: 2,
+                ..Default::default()
+            };
+            let mut writer =
+                IvfIndexWriter::new(config, VectorIndexWriterConfig::default(), "determinism")
+                    .unwrap();
+            writer.add_vectors(lcg_vectors(500, 16)).unwrap();
+            writer.finalize().unwrap();
+
+            let centroids: Vec<Vec<u32>> = writer
+                .centroids
+                .iter()
+                .map(|c| c.data.iter().map(|f| f.to_bits()).collect())
+                .collect();
+            let assignments: Vec<Vec<u64>> = writer
+                .inverted_lists
+                .iter()
+                .map(|list| {
+                    let mut ids: Vec<u64> = list.iter().map(|(id, _, _)| *id).collect();
+                    ids.sort_unstable();
+                    ids
+                })
+                .collect();
+            (centroids, assignments)
+        }
+
+        let (centroids_a, assignments_a) = train_once();
+        let (centroids_b, assignments_b) = train_once();
+        assert_eq!(
+            centroids_a, centroids_b,
+            "two seeded trainings must produce bitwise-identical centroids"
+        );
+        assert_eq!(
+            assignments_a, assignments_b,
+            "cluster assignments must be identical across runs"
+        );
     }
 }
