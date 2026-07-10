@@ -958,15 +958,11 @@ impl Scorer for BooleanScorer {
         let clauses = self.clauses.borrow();
         let mut min_boundary: Option<u64> = None;
         for (scorer, _) in clauses.iter() {
-            match scorer.next_block_boundary(doc_id) {
-                None => return None,
-                Some(b) => {
-                    min_boundary = Some(match min_boundary {
-                        None => b,
-                        Some(m) => m.min(b),
-                    });
-                }
-            }
+            let b = scorer.next_block_boundary(doc_id)?;
+            min_boundary = Some(match min_boundary {
+                None => b,
+                Some(m) => m.min(b),
+            });
         }
         min_boundary
     }
