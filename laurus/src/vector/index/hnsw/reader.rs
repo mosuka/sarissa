@@ -9,8 +9,8 @@ use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization::QuantizedVectorMeta;
 use crate::vector::core::vector::Vector;
-use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
-use crate::vector::index::hnsw::graph::HnswGraph;
+use crate::vector::index::format::{QuantHeader, VERSION_ORDINAL_GRAPH, VectorSegmentHeader};
+use crate::vector::index::hnsw::graph::OrdinalHnswGraph;
 use crate::vector::index::quantized_io::quantized_record_payload_size;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::index::rerank_sidecar::read_sidecar;
@@ -49,8 +49,19 @@ pub struct HnswIndexReader {
     distance_metric: DistanceMetric,
     m: usize,
     ef_construction: usize,
-    pub graph: Option<Arc<HnswGraph>>,
+    /// Ordinal-addressed search graph (Issue #686), `None` when the
+    /// segment was written without a graph block. Built from either the
+    /// v1 (doc_id-encoded) or v2 (ordinal-encoded) graph block.
+    pub graph: Option<Arc<OrdinalHnswGraph>>,
     deletion_bitmap: Option<Arc<DeletionBitmap>>,
+    /// Per-field ordinal → pool-position tables (Issue #686).
+    ///
+    /// Empty when the identity `ordinal == position` holds — the segment
+    /// is single-field with one record per doc id, which is what every
+    /// current writer produces. A table is built only for legacy
+    /// multi-field segments; `u32::MAX` marks a doc absent from the
+    /// field (feeds the existing `f32::MAX` missing-distance semantics).
+    ord_to_pos: HashMap<String, Arc<[u32]>>,
     /// Pre-built lookup table: `field_name → (doc_id → Vec<f32> base address as usize)`.
     ///
     /// Populated at load time for in-memory (`Owned`) storage; empty for
@@ -177,6 +188,271 @@ impl HnswIndexReader {
         Ok(())
     }
 
+    /// Derive the segment's ordinal table from its record id sequence.
+    ///
+    /// The ordinal of a vector is its rank in the ascending,
+    /// deduplicated record doc-id sequence (Issue #686). Records are
+    /// always written sorted by doc id, so a consecutive dedup suffices;
+    /// a decreasing id means the segment is corrupt.
+    ///
+    /// # Arguments
+    ///
+    /// * `vector_ids` - The `(doc_id, field_name)` pairs in on-disk
+    ///   record order.
+    ///
+    /// # Returns
+    ///
+    /// The strictly ascending unique doc-id table, or an error if the
+    /// record ids are not non-decreasing.
+    fn unique_sorted_doc_ids(vector_ids: &[(u64, String)]) -> Result<Arc<[u64]>> {
+        let mut unique: Vec<u64> = Vec::with_capacity(vector_ids.len());
+        for (doc_id, _) in vector_ids {
+            match unique.last() {
+                Some(&last) if *doc_id == last => {}
+                Some(&last) if *doc_id < last => {
+                    return Err(LaurusError::index(format!(
+                        "HNSW segment corrupt: record doc ids not sorted \
+                         ({doc_id} follows {last})"
+                    )));
+                }
+                _ => unique.push(*doc_id),
+            }
+        }
+        Ok(Arc::from(unique))
+    }
+
+    /// Parse a v1 (doc_id-encoded) graph block and translate it to
+    /// ordinals (Issue #686 back-compat path).
+    ///
+    /// Layout: `has_graph u8, entry_point u64 (u64::MAX = None),
+    /// max_level u32, node_count u64, per node {doc_id u64,
+    /// layer_count u32, per layer [neighbor_count u32, neighbors u64…]}`.
+    ///
+    /// Nodes or neighbours whose doc id has no record are dropped with a
+    /// warning (only reachable on corrupt files — the writer always
+    /// emits graph nodes for exactly the record id set); a dangling
+    /// entry point degrades to `None` (empty search results).
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Stream positioned at the graph block.
+    /// * `file_size` - Total file size, for allocation bounding (#806).
+    /// * `doc_ids` - The segment's ordinal table.
+    ///
+    /// # Returns
+    ///
+    /// The ordinal graph, or `None` when the block is absent.
+    fn read_graph_block_v1(
+        input: &mut dyn crate::storage::StorageInput,
+        file_size: u64,
+        doc_ids: Arc<[u64]>,
+    ) -> Result<Option<Arc<OrdinalHnswGraph>>> {
+        use crate::vector::index::alloc_bounds::checked_capacity;
+        use ahash::AHashMap;
+
+        let mut has_graph_buf = [0u8; 1];
+        if input.read_exact(&mut has_graph_buf).is_err() || has_graph_buf[0] != 1 {
+            return Ok(None);
+        }
+
+        let mut entry_point_buf = [0u8; 8];
+        input.read_exact(&mut entry_point_buf)?;
+        let entry_point_raw = u64::from_le_bytes(entry_point_buf);
+        let entry_point_doc = if entry_point_raw == u64::MAX {
+            None
+        } else {
+            Some(entry_point_raw)
+        };
+
+        let mut max_level_buf = [0u8; 4];
+        input.read_exact(&mut max_level_buf)?;
+        let max_level = u32::from_le_bytes(max_level_buf) as usize;
+
+        let mut node_count_buf = [0u8; 8];
+        input.read_exact(&mut node_count_buf)?;
+        let node_count = u64::from_le_bytes(node_count_buf) as usize;
+
+        // Bound every graph allocation by the bytes left in the file
+        // (Issue #806). The graph trails the vector payload, so this
+        // remaining count is tight: a corrupt count on a small graph can
+        // no longer drive a huge `with_capacity`. Reused for the inner
+        // layer / neighbor counts so no extra syscall is taken inside
+        // the per-node / per-layer loops.
+        let graph_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        // Each v1 node serializes at least doc_id (8) + layer_count (4).
+        checked_capacity(node_count, 12, graph_remaining, "hnsw node_count")?;
+
+        let rank: AHashMap<u64, u32> = doc_ids
+            .iter()
+            .enumerate()
+            .map(|(ord, &id)| (id, ord as u32))
+            .collect();
+        let mut nodes: Vec<Vec<Vec<u32>>> = vec![Vec::new(); doc_ids.len()];
+
+        for _ in 0..node_count {
+            let mut doc_id_buf = [0u8; 8];
+            input.read_exact(&mut doc_id_buf)?;
+            let doc_id = u64::from_le_bytes(doc_id_buf);
+            let node_ord = rank.get(&doc_id).copied();
+            if node_ord.is_none() {
+                log::warn!(
+                    "HNSW v1 graph node {doc_id} has no record in the segment; \
+                     dropping it (corrupt segment?)"
+                );
+            }
+
+            let mut layer_count_buf = [0u8; 4];
+            input.read_exact(&mut layer_count_buf)?;
+            let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
+
+            // Each layer serializes at least its neighbor_count (4).
+            checked_capacity(layer_count, 4, graph_remaining, "hnsw layer_count")?;
+            let mut layers = Vec::with_capacity(layer_count);
+            for _ in 0..layer_count {
+                let mut neighbor_count_buf = [0u8; 4];
+                input.read_exact(&mut neighbor_count_buf)?;
+                let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
+
+                // Each v1 neighbor serializes as a u64 (8 bytes).
+                checked_capacity(neighbor_count, 8, graph_remaining, "hnsw neighbor_count")?;
+                let mut neighbors = Vec::with_capacity(neighbor_count);
+                for _ in 0..neighbor_count {
+                    let mut neighbor_buf = [0u8; 8];
+                    input.read_exact(&mut neighbor_buf)?;
+                    let neighbor_id = u64::from_le_bytes(neighbor_buf);
+                    match rank.get(&neighbor_id) {
+                        Some(&ord) => neighbors.push(ord),
+                        None => log::warn!(
+                            "HNSW v1 graph neighbour {neighbor_id} has no record in \
+                             the segment; dropping the edge (corrupt segment?)"
+                        ),
+                    }
+                }
+                layers.push(neighbors);
+            }
+            if let Some(ord) = node_ord {
+                nodes[ord as usize] = layers;
+            }
+        }
+
+        let entry_point = match entry_point_doc {
+            Some(id) => {
+                let ord = rank.get(&id).copied();
+                if ord.is_none() {
+                    log::warn!(
+                        "HNSW v1 graph entry point {id} has no record in the segment; \
+                         searches on this segment will return no graph results"
+                    );
+                }
+                ord
+            }
+            None => None,
+        };
+
+        Ok(Some(Arc::new(OrdinalHnswGraph::from_parts(
+            entry_point,
+            max_level,
+            doc_ids,
+            nodes,
+        )?)))
+    }
+
+    /// Parse a v2 (ordinal-encoded) graph block (Issue #686).
+    ///
+    /// Layout: `has_graph u8, entry_point u32 (u32::MAX = None),
+    /// max_level u32, node_count u32, per node (ordinal implicit by
+    /// order, doc_id dropped) {layer_count u32, per layer
+    /// [neighbor_count u32, neighbor ordinals u32…]}`.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Stream positioned at the graph block.
+    /// * `file_size` - Total file size, for allocation bounding (#806).
+    /// * `doc_ids` - The segment's ordinal table; `node_count` must
+    ///   match its length exactly.
+    ///
+    /// # Returns
+    ///
+    /// The ordinal graph, or `None` when the block is absent; an error
+    /// on any count/ordinal inconsistency (corrupt segment).
+    fn read_graph_block_v2(
+        input: &mut dyn crate::storage::StorageInput,
+        file_size: u64,
+        doc_ids: Arc<[u64]>,
+    ) -> Result<Option<Arc<OrdinalHnswGraph>>> {
+        use crate::vector::index::alloc_bounds::checked_capacity;
+
+        let mut has_graph_buf = [0u8; 1];
+        if input.read_exact(&mut has_graph_buf).is_err() || has_graph_buf[0] != 1 {
+            return Ok(None);
+        }
+
+        let mut entry_point_buf = [0u8; 4];
+        input.read_exact(&mut entry_point_buf)?;
+        let entry_point_raw = u32::from_le_bytes(entry_point_buf);
+        let entry_point = if entry_point_raw == u32::MAX {
+            None
+        } else {
+            Some(entry_point_raw)
+        };
+
+        let mut max_level_buf = [0u8; 4];
+        input.read_exact(&mut max_level_buf)?;
+        let max_level = u32::from_le_bytes(max_level_buf) as usize;
+
+        let mut node_count_buf = [0u8; 4];
+        input.read_exact(&mut node_count_buf)?;
+        let node_count = u32::from_le_bytes(node_count_buf) as usize;
+        if node_count != doc_ids.len() {
+            return Err(LaurusError::index(format!(
+                "HNSW v2 graph corrupt: node_count {node_count} does not match \
+                 the segment's {} unique record doc ids",
+                doc_ids.len()
+            )));
+        }
+
+        // Allocation bounding (#806); v2 strides are 4 bytes per node
+        // minimum (layer_count) and 4 bytes per neighbour ordinal.
+        let graph_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        checked_capacity(node_count, 4, graph_remaining, "hnsw node_count")?;
+
+        let mut nodes: Vec<Vec<Vec<u32>>> = Vec::with_capacity(node_count);
+        for _ in 0..node_count {
+            let mut layer_count_buf = [0u8; 4];
+            input.read_exact(&mut layer_count_buf)?;
+            let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
+
+            checked_capacity(layer_count, 4, graph_remaining, "hnsw layer_count")?;
+            let mut layers = Vec::with_capacity(layer_count);
+            for _ in 0..layer_count {
+                let mut neighbor_count_buf = [0u8; 4];
+                input.read_exact(&mut neighbor_count_buf)?;
+                let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
+
+                checked_capacity(neighbor_count, 4, graph_remaining, "hnsw neighbor_count")?;
+                let mut neighbors = Vec::with_capacity(neighbor_count);
+                let mut neighbor_buf = [0u8; 4];
+                for _ in 0..neighbor_count {
+                    input.read_exact(&mut neighbor_buf)?;
+                    neighbors.push(u32::from_le_bytes(neighbor_buf));
+                }
+                layers.push(neighbors);
+            }
+            nodes.push(layers);
+        }
+
+        // `from_parts` validates the entry point and every neighbour
+        // ordinal against `node_count`.
+        Ok(Some(Arc::new(OrdinalHnswGraph::from_parts(
+            entry_point,
+            max_level,
+            doc_ids,
+            nodes,
+        )?)))
+    }
+
     /// Load an HNSW vector index from storage.
     ///
     /// # Arguments
@@ -255,90 +531,6 @@ impl HnswIndexReader {
         input.read_exact(&mut ef_construction_buf)?;
         let ef_construction = u32::from_le_bytes(ef_construction_buf) as usize;
 
-        // Helper to read graph
-        let read_graph =
-            |input: &mut dyn crate::storage::StorageInput| -> Result<Option<Arc<HnswGraph>>> {
-                let mut has_graph_buf = [0u8; 1];
-                if input.read_exact(&mut has_graph_buf).is_ok() && has_graph_buf[0] == 1 {
-                    let mut entry_point_buf = [0u8; 8];
-                    input.read_exact(&mut entry_point_buf)?;
-                    let entry_point_raw = u64::from_le_bytes(entry_point_buf);
-                    let entry_point = if entry_point_raw == u64::MAX {
-                        None
-                    } else {
-                        Some(entry_point_raw)
-                    };
-
-                    let mut max_level_buf = [0u8; 4];
-                    input.read_exact(&mut max_level_buf)?;
-                    let max_level = u32::from_le_bytes(max_level_buf) as usize;
-
-                    let mut node_count_buf = [0u8; 8];
-                    input.read_exact(&mut node_count_buf)?;
-                    let node_count = u64::from_le_bytes(node_count_buf) as usize;
-
-                    // Bound every graph allocation by the bytes left in the
-                    // file (Issue #806). The graph trails the vector payload,
-                    // so this remaining count is tight: a corrupt count on a
-                    // small graph can no longer drive a huge `with_capacity`.
-                    // Reused for the inner layer / neighbor counts so no extra
-                    // syscall is taken inside the per-node / per-layer loops.
-                    let graph_remaining =
-                        file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
-                    // Each node serializes at least doc_id (8) + layer_count (4).
-                    checked_capacity(node_count, 12, graph_remaining, "hnsw node_count")?;
-                    let mut nodes = HashMap::with_capacity(node_count);
-
-                    for _ in 0..node_count {
-                        let mut doc_id_buf = [0u8; 8];
-                        input.read_exact(&mut doc_id_buf)?;
-                        let doc_id = u64::from_le_bytes(doc_id_buf);
-
-                        let mut layer_count_buf = [0u8; 4];
-                        input.read_exact(&mut layer_count_buf)?;
-                        let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
-
-                        // Each layer serializes at least its neighbor_count (4).
-                        checked_capacity(layer_count, 4, graph_remaining, "hnsw layer_count")?;
-                        let mut layers = Vec::with_capacity(layer_count);
-                        for _ in 0..layer_count {
-                            let mut neighbor_count_buf = [0u8; 4];
-                            input.read_exact(&mut neighbor_count_buf)?;
-                            let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
-
-                            // Each neighbor serializes as a u64 (8 bytes).
-                            checked_capacity(
-                                neighbor_count,
-                                8,
-                                graph_remaining,
-                                "hnsw neighbor_count",
-                            )?;
-                            let mut neighbors = Vec::with_capacity(neighbor_count);
-                            for _ in 0..neighbor_count {
-                                let mut neighbor_buf = [0u8; 8];
-                                input.read_exact(&mut neighbor_buf)?;
-                                neighbors.push(u64::from_le_bytes(neighbor_buf));
-                            }
-                            layers.push(neighbors);
-                        }
-                        nodes.insert(doc_id, layers);
-                    }
-
-                    Ok(Some(Arc::new(HnswGraph::new(
-                        entry_point,
-                        max_level,
-                        nodes,
-                        m,
-                        m,
-                        m * 2,
-                        ef_construction,
-                        1.0 / (m as f64).ln(),
-                    ))))
-                } else {
-                    Ok(None)
-                }
-            };
-
         // Read the Issue #481 vector segment header (LVS1). Pre-Stage-1
         // segments are rejected with IncompatibleFormat. Both Scalar8Bit
         // (Stage 1) and ProductQuantization (Stage 3) variants are
@@ -346,6 +538,22 @@ impl HnswIndexReader {
         // supported" because the OnDemand path's offsets table only
         // carries Scalar8Bit params today.
         let header = VectorSegmentHeader::read_from(&mut input)?;
+
+        // Graph-block parser, version-dispatched (Issue #686). The graph
+        // physically trails the records, so by the time each quant branch
+        // calls this its `vector_ids` are fully collected — the ordinal
+        // table (ascending unique record doc ids) is derived from them.
+        let graph_version = header.version;
+        let read_graph = |input: &mut dyn crate::storage::StorageInput,
+                          vector_ids: &[(u64, String)]|
+         -> Result<Option<Arc<OrdinalHnswGraph>>> {
+            let doc_ids = Self::unique_sorted_doc_ids(vector_ids)?;
+            if graph_version >= VERSION_ORDINAL_GRAPH {
+                Self::read_graph_block_v2(input, file_size, doc_ids)
+            } else {
+                Self::read_graph_block_v1(input, file_size, doc_ids)
+            }
+        };
 
         // Bytes left for the per-vector records section, captured once at its
         // start (Issue #806). Reused by the per-record `field_name_len` /
@@ -405,7 +613,7 @@ impl HnswIndexReader {
                     vector_ids.push((doc_id, field_name.clone()));
                     records.push((doc_id, field_name, int8, meta));
                 }
-                let graph = read_graph(&mut input)?;
+                let graph = read_graph(&mut input, &vector_ids)?;
                 let pool = QuantizedVectorPool::build(*params, dimension, records);
                 (
                     VectorStorage::OwnedQuantized(Arc::new(pool)),
@@ -461,7 +669,7 @@ impl HnswIndexReader {
                         .seek(std::io::SeekFrom::Current(quant_payload_size))
                         .map_err(LaurusError::Io)?;
                 }
-                let graph = read_graph(&mut input)?;
+                let graph = read_graph(&mut input, &vector_ids)?;
 
                 (
                     VectorStorage::OnDemand {
@@ -521,7 +729,7 @@ impl HnswIndexReader {
                     vector_ids.push((doc_id, field_name.clone()));
                     records.push((doc_id, field_name, codes));
                 }
-                let graph = read_graph(&mut input)?;
+                let graph = read_graph(&mut input, &vector_ids)?;
                 let pool = crate::vector::index::pq_storage::PqVectorPool::build(
                     *pq_params,
                     codebook.clone(),
@@ -569,7 +777,7 @@ impl HnswIndexReader {
                     vector_ids.push((doc_id, field_name.clone()));
                     records.push((doc_id, field_name, codes));
                 }
-                let graph = read_graph(&mut input)?;
+                let graph = read_graph(&mut input, &vector_ids)?;
                 let pool = crate::vector::index::pq_fastscan_storage::PqFastScanPool::build(
                     *pq_params,
                     codebook.clone(),
@@ -625,22 +833,13 @@ impl HnswIndexReader {
                 }
                 idx
             }
-            VectorStorage::OwnedQuantized(pool) => {
-                let mut idx: HashMap<String, HashMap<u64, usize>> = HashMap::new();
-                let stride = pool.pad_dim;
-                let base = pool.int8_data.as_ptr();
-                for (field_name, doc_map) in pool.field_index.iter() {
-                    let entry = idx.entry(field_name.clone()).or_default();
-                    for (&doc_id, &pos) in doc_map.iter() {
-                        // SAFETY: pool is held alive by self.vectors
-                        // (Arc) for the lifetime of self; pos is in
-                        // bounds because it was populated from
-                        // int8_data.len() / pad_dim at build time.
-                        let addr = unsafe { base.add(pos as usize * stride) } as usize;
-                        entry.insert(doc_id, addr);
-                    }
-                }
-                idx
+            VectorStorage::OwnedQuantized(_) => {
+                // The ordinal search path (Issue #686) computes int8
+                // prefetch addresses directly from the pool as
+                // `base + pos * pad_dim` — a doc_id-keyed address map
+                // would only add a hash probe back to the hot loop, so
+                // none is built.
+                HashMap::new()
             }
             VectorStorage::OwnedPq(_) => {
                 // PQ records are M bytes each (8-32 bytes) — small
@@ -663,6 +862,39 @@ impl HnswIndexReader {
         // reflects the same set the search path used to filter at every
         // call; finalised into `Arc<[u64]>` for cheap clone semantics.
         let vector_ids_by_field = build_vector_ids_by_field(&vector_ids);
+
+        // Per-field ordinal → pool-position tables (Issue #686). The
+        // identity `ordinal == position` holds exactly when the segment
+        // has a single field and one record per doc id (what every
+        // current writer produces): both orderings are then the same
+        // doc_id-ascending record sequence. Only legacy multi-field
+        // segments pay for explicit tables.
+        let ord_to_pos: HashMap<String, Arc<[u32]>> = {
+            let unique = Self::unique_sorted_doc_ids(&vector_ids)?;
+            let identity = vector_ids_by_field.len() <= 1 && vector_ids.len() == unique.len();
+            if identity {
+                HashMap::new()
+            } else {
+                let pos_index_for = |field: &str| match &vectors {
+                    VectorStorage::OwnedQuantized(pool) => pool.field_position_index(field),
+                    VectorStorage::OwnedPq(pool) => pool.field_position_index(field),
+                    #[cfg(feature = "pq-fastscan")]
+                    VectorStorage::OwnedPqFastScan(pool) => pool.field_position_index(field),
+                    _ => None,
+                };
+                let mut tables = HashMap::new();
+                for field in vector_ids_by_field.keys() {
+                    if let Some(pos_map) = pos_index_for(field) {
+                        let table: Vec<u32> = unique
+                            .iter()
+                            .map(|id| pos_map.get(id).copied().unwrap_or(u32::MAX))
+                            .collect();
+                        tables.insert(field.clone(), Arc::<[u32]>::from(table));
+                    }
+                }
+                tables
+            }
+        };
 
         // Stage 2 rerank sidecar (Issue #481). Loaded eagerly into a
         // RerankStoragePool when (a) a `<file_name>.f32` sidecar exists
@@ -717,10 +949,31 @@ impl HnswIndexReader {
             ef_construction,
             graph,
             deletion_bitmap: None,
+            ord_to_pos,
             prefetch_index,
             vector_ids_by_field,
             rerank_storage,
         })
+    }
+
+    /// Per-field ordinal → pool-position table (Issue #686).
+    ///
+    /// Returns `None` when the identity `ordinal == position` holds for
+    /// `field_name` (single-field segment with one record per doc id —
+    /// what every current writer produces), in which case the searcher
+    /// uses the ordinal directly as the pool position. A `Some` table is
+    /// only present for legacy multi-field segments; `u32::MAX` entries
+    /// mark docs absent from the field.
+    ///
+    /// # Arguments
+    ///
+    /// * `field_name` - The vector field being searched.
+    ///
+    /// # Returns
+    ///
+    /// The translation table, or `None` for the identity mapping.
+    pub(crate) fn field_ord_to_pos(&self, field_name: &str) -> Option<Arc<[u32]>> {
+        self.ord_to_pos.get(field_name).cloned()
     }
 
     pub fn set_deletion_bitmap(&mut self, bitmap: Arc<DeletionBitmap>) {
@@ -1233,6 +1486,344 @@ mod alloc_bound_tests {
                 assert!(msg.contains("corrupted"), "got: {msg}");
             }
             other => panic!("expected Index error, got {other:?}"),
+        }
+    }
+}
+
+/// Format-migration tests for the Issue #686 v1 → v2 (ordinal) graph
+/// block. There was no legacy-format read test before this module; the
+/// v1 fixtures are hand-written bytes, following the `.delmap` legacy
+/// test precedent (`maintenance/deletion.rs`) and the byte builders of
+/// `alloc_bound_tests` above. All fixtures are footer-less, which also
+/// keeps the legacy no-CRC read path covered.
+#[cfg(test)]
+mod ordinal_migration_tests {
+    use super::*;
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use crate::vector::core::quantization::ScalarQuantParams;
+    use crate::vector::index::HnswIndexConfig;
+    use crate::vector::index::format::CURRENT_VERSION;
+    use crate::vector::index::hnsw::searcher::HnswSearcher;
+    use crate::vector::index::hnsw::writer::HnswIndexWriter;
+    use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
+    use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
+    use std::io::Write;
+
+    const DIM: usize = 4;
+
+    fn storage_with(name: &str, bytes: Vec<u8>) -> Arc<dyn Storage> {
+        let storage = MemoryStorage::new(MemoryStorageConfig::default());
+        let mut out = storage.create_output(name).unwrap();
+        out.write_all(&bytes).unwrap();
+        out.flush_and_sync().unwrap();
+        Arc::new(storage)
+    }
+
+    /// The HNSW preamble: num_vectors (u64) + dimension/m/ef (u32 each).
+    fn preamble(num_vectors: u64) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&num_vectors.to_le_bytes());
+        buf.extend_from_slice(&(DIM as u32).to_le_bytes());
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&200u32.to_le_bytes());
+        buf
+    }
+
+    /// Neutral (offset 0, scale 1) LVS1 header at the given version.
+    fn header_bytes(version: u16) -> Vec<u8> {
+        let mut buf = Vec::new();
+        VectorSegmentHeader::scalar_8bit(ScalarQuantParams {
+            offset: 0.0,
+            scale: 1.0,
+        })
+        .with_version(version)
+        .write_to(&mut buf)
+        .unwrap();
+        buf
+    }
+
+    /// One SQ record with self-consistent meta under the neutral params
+    /// (dequantized value == quantized byte), so distances stay finite.
+    fn sq_record(doc_id: u64, field: &str, values: [u8; DIM]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&doc_id.to_le_bytes());
+        buf.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        buf.extend_from_slice(field.as_bytes());
+        buf.extend_from_slice(&values);
+        let sum_q: u32 = values.iter().map(|&v| v as u32).sum();
+        let norm_q: f32 = values
+            .iter()
+            .map(|&v| (v as f32) * (v as f32))
+            .sum::<f32>()
+            .sqrt();
+        buf.extend_from_slice(&sum_q.to_le_bytes());
+        buf.extend_from_slice(&norm_q.to_le_bytes());
+        buf
+    }
+
+    /// A v1 graph block over doc ids `[10, 20, 30]`: entry 10, one
+    /// layer each, ring adjacency expressed as doc ids (u64).
+    fn v1_graph_block() -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.push(1u8); // has_graph
+        buf.extend_from_slice(&10u64.to_le_bytes()); // entry_point doc id
+        buf.extend_from_slice(&0u32.to_le_bytes()); // max_level
+        buf.extend_from_slice(&3u64.to_le_bytes()); // node_count
+        for (doc_id, neighbors) in [
+            (10u64, [20u64, 30u64]),
+            (20u64, [10u64, 30u64]),
+            (30u64, [10u64, 20u64]),
+        ] {
+            buf.extend_from_slice(&doc_id.to_le_bytes());
+            buf.extend_from_slice(&1u32.to_le_bytes()); // layer_count
+            buf.extend_from_slice(&(neighbors.len() as u32).to_le_bytes());
+            for n in neighbors {
+                buf.extend_from_slice(&n.to_le_bytes());
+            }
+        }
+        buf
+    }
+
+    fn three_doc_records() -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&sq_record(10, "f", [100, 1, 1, 1]));
+        buf.extend_from_slice(&sq_record(20, "f", [1, 100, 1, 1]));
+        buf.extend_from_slice(&sq_record(30, "f", [1, 1, 100, 1]));
+        buf
+    }
+
+    fn v1_fixture_bytes() -> Vec<u8> {
+        let mut bytes = preamble(3);
+        bytes.extend_from_slice(&header_bytes(CURRENT_VERSION));
+        bytes.extend_from_slice(&three_doc_records());
+        bytes.extend_from_slice(&v1_graph_block());
+        bytes
+    }
+
+    #[test]
+    fn reads_v1_graph_fixture_as_ordinals_and_searches() {
+        let storage = storage_with("v1_fixture.hnsw", v1_fixture_bytes());
+        let reader = HnswIndexReader::load(storage, "v1_fixture", DistanceMetric::Cosine).unwrap();
+
+        let graph = reader.graph.as_ref().expect("v1 graph must load");
+        assert_eq!(graph.node_count(), 3);
+        // Ordinals are doc-id ranks: 10 → 0, 20 → 1, 30 → 2.
+        assert_eq!(graph.entry_point(), Some(0));
+        assert_eq!(graph.doc_id(1), 20);
+        assert_eq!(graph.neighbors(0, 0), Some(&[1u32, 2][..]));
+        assert_eq!(graph.neighbors(2, 0), Some(&[0u32, 1][..]));
+        // Single-field, unique ids → identity ord→pos mapping.
+        assert!(reader.field_ord_to_pos("f").is_none());
+
+        let searcher = HnswSearcher::new(Arc::new(reader)).unwrap();
+        let results = searcher
+            .search(
+                &VectorIndexQuery::new(Vector::new(vec![100.0, 1.0, 1.0, 1.0]))
+                    .top_k(3)
+                    .field_name("f".to_string()),
+            )
+            .unwrap();
+        let mut ids: Vec<u64> = results.results.iter().map(|r| r.doc_id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![10, 20, 30], "all three docs must be reachable");
+        assert_eq!(
+            results.results[0].doc_id, 10,
+            "nearest neighbour of doc 10's own vector must rank first"
+        );
+    }
+
+    #[test]
+    fn writer_loads_v1_and_rewrites_v2_that_reader_loads() {
+        let storage = storage_with("upgrade.hnsw", v1_fixture_bytes());
+        let config = HnswIndexConfig {
+            dimension: DIM,
+            m: 16,
+            ef_construction: 200,
+            distance_metric: DistanceMetric::Cosine,
+            ..Default::default()
+        };
+
+        // Writer reads the v1 segment (compaction/append entry point)…
+        let mut writer = HnswIndexWriter::load(
+            config,
+            VectorIndexWriterConfig::default(),
+            Arc::clone(&storage),
+            "upgrade",
+        )
+        .unwrap();
+        // …and rewrites it, emitting the v2 ordinal format. `load` leaves
+        // the writer appendable, so finalize first (no-op append here).
+        writer.finalize().unwrap();
+        writer.write().unwrap();
+
+        // The rewritten header must carry the v2 version stamp (bytes
+        // 4-5 of the LVS1 header, which follows the 20-byte preamble).
+        let mut input = storage.open_input("upgrade.hnsw").unwrap();
+        let mut head = vec![0u8; 26];
+        input.read_exact(&mut head).unwrap();
+        assert_eq!(
+            u16::from_le_bytes([head[24], head[25]]),
+            VERSION_ORDINAL_GRAPH,
+            "rewritten segment must stamp the v2 header version"
+        );
+
+        let reader = HnswIndexReader::load(storage, "upgrade", DistanceMetric::Cosine).unwrap();
+        let graph = reader.graph.as_ref().expect("v2 graph must load");
+        assert_eq!(graph.node_count(), 3);
+        assert_eq!(graph.entry_point().map(|o| graph.doc_id(o)), Some(10));
+        assert_eq!(graph.neighbors(0, 0), Some(&[1u32, 2][..]));
+
+        let searcher = HnswSearcher::new(Arc::new(reader)).unwrap();
+        let results = searcher
+            .search(
+                &VectorIndexQuery::new(Vector::new(vec![1.0, 100.0, 1.0, 1.0]))
+                    .top_k(3)
+                    .field_name("f".to_string()),
+            )
+            .unwrap();
+        assert_eq!(results.results[0].doc_id, 20);
+    }
+
+    #[test]
+    fn rejects_v2_out_of_range_neighbor_ordinal() {
+        let mut bytes = preamble(3);
+        bytes.extend_from_slice(&header_bytes(VERSION_ORDINAL_GRAPH));
+        bytes.extend_from_slice(&three_doc_records());
+        bytes.push(1u8); // has_graph
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // entry ordinal
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // max_level
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // node_count
+        for _ in 0..3 {
+            bytes.extend_from_slice(&1u32.to_le_bytes()); // layer_count
+            bytes.extend_from_slice(&1u32.to_le_bytes()); // neighbor_count
+            bytes.extend_from_slice(&7u32.to_le_bytes()); // ordinal out of range
+        }
+
+        let storage = storage_with("bad_ord.hnsw", bytes);
+        let err = HnswIndexReader::load(storage, "bad_ord", DistanceMetric::Cosine)
+            .expect_err("out-of-range neighbour ordinal must be rejected");
+        assert!(err.to_string().contains("neighbour ordinal"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_v2_node_count_mismatch_with_records() {
+        let mut bytes = preamble(3);
+        bytes.extend_from_slice(&header_bytes(VERSION_ORDINAL_GRAPH));
+        bytes.extend_from_slice(&three_doc_records());
+        bytes.push(1u8); // has_graph
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // entry ordinal
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // max_level
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // node_count ≠ 3 unique ids
+
+        let storage = storage_with("bad_count.hnsw", bytes);
+        let err = HnswIndexReader::load(storage, "bad_count", DistanceMetric::Cosine)
+            .expect_err("node_count mismatch must be rejected");
+        assert!(err.to_string().contains("node_count"), "got: {err}");
+    }
+
+    #[test]
+    fn v2_empty_graph_block_loads_and_search_returns_empty() {
+        let mut bytes = preamble(0);
+        bytes.extend_from_slice(&header_bytes(VERSION_ORDINAL_GRAPH));
+        bytes.push(1u8); // has_graph
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes()); // entry = None
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // max_level
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // node_count
+
+        let storage = storage_with("empty_graph.hnsw", bytes);
+        let reader = HnswIndexReader::load(storage, "empty_graph", DistanceMetric::Cosine).unwrap();
+        let graph = reader.graph.as_ref().expect("empty graph must load");
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(graph.entry_point(), None);
+
+        let searcher = HnswSearcher::new(Arc::new(reader)).unwrap();
+        let results = searcher
+            .search(
+                &VectorIndexQuery::new(Vector::new(vec![1.0; DIM]))
+                    .top_k(3)
+                    .field_name("f".to_string()),
+            )
+            .unwrap();
+        assert!(results.results.is_empty());
+    }
+
+    #[test]
+    fn multi_field_segment_builds_ord_to_pos_and_searches_per_field() {
+        // Legacy multi-field shape: two fields sharing doc ids, so
+        // ordinal ≠ per-field pool position and the non-identity
+        // `ord_to_pos` path must engage.
+        let storage: Arc<dyn Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let config = HnswIndexConfig {
+            dimension: DIM,
+            m: 4,
+            ef_construction: 16,
+            distance_metric: DistanceMetric::Cosine,
+            ..Default::default()
+        };
+        let mut writer = HnswIndexWriter::with_storage(
+            config,
+            VectorIndexWriterConfig::default(),
+            "multi_field",
+            Arc::clone(&storage),
+        )
+        .unwrap();
+        // Distinct doc ids per field — the shape real multi-field
+        // segments have (the writer upserts by doc_id, so one doc id
+        // cannot carry two fields' records).
+        let mut vectors = Vec::new();
+        for i in 0..8u64 {
+            let t = i as f32;
+            vectors.push((
+                i,
+                "a".to_string(),
+                Vector::new(vec![t + 1.0, 1.0, 1.0, 1.0]),
+            ));
+            vectors.push((
+                8 + i,
+                "b".to_string(),
+                Vector::new(vec![1.0, t + 1.0, 1.0, 1.0]),
+            ));
+        }
+        writer.add_vectors(vectors).unwrap();
+        writer.finalize().unwrap();
+        writer.write().unwrap();
+
+        let reader = HnswIndexReader::load(storage, "multi_field", DistanceMetric::Cosine).unwrap();
+        assert!(
+            reader.field_ord_to_pos("a").is_some(),
+            "multi-field segment must build an ord_to_pos table"
+        );
+        let graph = reader.graph.as_ref().expect("graph must load");
+        assert_eq!(graph.node_count(), 16, "one node per unique doc id");
+
+        let searcher = HnswSearcher::new(Arc::new(reader)).unwrap();
+        for field in ["a", "b"] {
+            let results = searcher
+                .search(
+                    &VectorIndexQuery::new(Vector::new(vec![1.0; DIM]))
+                        .top_k(4)
+                        .field_name(field.to_string()),
+                )
+                .unwrap();
+            assert!(
+                !results.results.is_empty(),
+                "field {field} must return hits through the ord_to_pos path"
+            );
+            for r in &results.results {
+                assert!(
+                    r.distance != f32::MAX,
+                    "admitted results must carry finite distances"
+                );
+                // Field routing must hold: docs of the other field are
+                // u32::MAX in the table -> f32::MAX -> dropped (#676).
+                let in_field = if field == "a" {
+                    r.doc_id < 8
+                } else {
+                    r.doc_id >= 8
+                };
+                assert!(in_field, "doc {} leaked into field {field}", r.doc_id);
+            }
         }
     }
 }

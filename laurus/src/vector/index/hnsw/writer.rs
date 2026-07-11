@@ -9,7 +9,7 @@ use crate::vector::core::vector::Vector;
 use crate::vector::index::HnswIndexConfig;
 use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
 use crate::vector::index::field::LegacyVectorFieldWriter;
-use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
+use crate::vector::index::format::{QuantHeader, VERSION_ORDINAL_GRAPH, VectorSegmentHeader};
 use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::quantized_io::{
     quantize_segment, quantized_record_payload_size, read_dequantized_vector,
@@ -199,6 +199,11 @@ impl Ord for Candidate {
     }
 }
 
+/// Result of parsing a serialized graph block back into the writer's
+/// doc_id-keyed shape: `(entry_point, max_level, doc_id -> layered
+/// neighbour doc ids)`.
+type ParsedGraphBlock = (Option<u64>, usize, HashMap<u64, Vec<Vec<u64>>>);
+
 impl HnswIndexWriter {
     /// Create a new HNSW index builder.
     pub fn new(
@@ -276,6 +281,190 @@ impl HnswIndexWriter {
     /// Convert this writer into a doc-centric field writer adapter.
     pub fn into_field_writer(self, field_name: impl Into<String>) -> LegacyVectorFieldWriter<Self> {
         LegacyVectorFieldWriter::new(field_name, self)
+    }
+
+    /// Parse a v1 (doc_id-encoded) graph block into the writer's
+    /// doc_id-keyed representation. The caller has already consumed the
+    /// leading `has_graph = 1` byte.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Stream positioned after the `has_graph` byte.
+    /// * `file_size` - Total file size, for allocation bounding (#806).
+    ///
+    /// # Returns
+    ///
+    /// `(entry_point, max_level, doc_id → layered neighbour doc ids)`.
+    fn load_graph_block_v1(
+        input: &mut dyn crate::storage::StorageInput,
+        file_size: u64,
+    ) -> Result<ParsedGraphBlock> {
+        // Read entry point
+        let mut entry_point_buf = [0u8; 8];
+        input.read_exact(&mut entry_point_buf)?;
+        let entry_point_raw = u64::from_le_bytes(entry_point_buf);
+        let entry_point = if entry_point_raw == u64::MAX {
+            None
+        } else {
+            Some(entry_point_raw)
+        };
+
+        // Read max level
+        let mut max_level_buf = [0u8; 4];
+        input.read_exact(&mut max_level_buf)?;
+        let max_level = u32::from_le_bytes(max_level_buf) as usize;
+
+        // Read nodes (u64 to match the v1 write format)
+        let mut node_count_buf = [0u8; 8];
+        input.read_exact(&mut node_count_buf)?;
+        let node_count = u64::from_le_bytes(node_count_buf) as usize;
+
+        // Bound every graph allocation by the bytes left in the file
+        // (Issue #806). Reused for the inner layer / neighbor counts so
+        // no extra syscall is taken inside the per-node / per-layer
+        // loops.
+        let graph_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        // Each node serializes at least doc_id (8) + layer_count (4).
+        checked_capacity(node_count, 12, graph_remaining, "hnsw node_count")?;
+        let mut nodes = HashMap::with_capacity(node_count);
+
+        for _ in 0..node_count {
+            let mut doc_id_buf = [0u8; 8];
+            input.read_exact(&mut doc_id_buf)?;
+            let doc_id = u64::from_le_bytes(doc_id_buf);
+
+            let mut layer_count_buf = [0u8; 4];
+            input.read_exact(&mut layer_count_buf)?;
+            let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
+
+            // Each layer serializes at least its neighbor_count (4).
+            checked_capacity(layer_count, 4, graph_remaining, "hnsw layer_count")?;
+            let mut layers = Vec::with_capacity(layer_count);
+
+            for _ in 0..layer_count {
+                let mut neighbor_count_buf = [0u8; 4];
+                input.read_exact(&mut neighbor_count_buf)?;
+                let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
+
+                // Each v1 neighbor serializes as a u64 (8 bytes).
+                checked_capacity(neighbor_count, 8, graph_remaining, "hnsw neighbor_count")?;
+                let mut neighbors = Vec::with_capacity(neighbor_count);
+                for _ in 0..neighbor_count {
+                    let mut neighbor_buf = [0u8; 8];
+                    input.read_exact(&mut neighbor_buf)?;
+                    neighbors.push(u64::from_le_bytes(neighbor_buf));
+                }
+                layers.push(neighbors);
+            }
+            nodes.insert(doc_id, layers);
+        }
+
+        Ok((entry_point, max_level, nodes))
+    }
+
+    /// Parse a v2 (ordinal-encoded, Issue #686) graph block and translate
+    /// it back to the writer's doc_id-keyed representation. The caller
+    /// has already consumed the leading `has_graph = 1` byte.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Stream positioned after the `has_graph` byte.
+    /// * `file_size` - Total file size, for allocation bounding (#806).
+    /// * `vectors` - The record `(doc_id, field, vector)` triples in
+    ///   on-disk (doc_id-ascending) order; the ordinal table is their
+    ///   deduplicated id sequence.
+    ///
+    /// # Returns
+    ///
+    /// `(entry_point, max_level, doc_id → layered neighbour doc ids)`,
+    /// or an error on any count/ordinal inconsistency (corrupt segment).
+    fn load_graph_block_v2(
+        input: &mut dyn crate::storage::StorageInput,
+        file_size: u64,
+        vectors: &[(u64, String, Vector)],
+    ) -> Result<ParsedGraphBlock> {
+        let mut unique_ids: Vec<u64> = Vec::with_capacity(vectors.len());
+        for (doc_id, _, _) in vectors {
+            match unique_ids.last() {
+                Some(&last) if *doc_id == last => {}
+                Some(&last) if *doc_id < last => {
+                    return Err(LaurusError::index(format!(
+                        "HNSW segment corrupt: record doc ids not sorted \
+                         ({doc_id} follows {last})"
+                    )));
+                }
+                _ => unique_ids.push(*doc_id),
+            }
+        }
+        let doc_of = |ord: u32| -> Result<u64> {
+            unique_ids.get(ord as usize).copied().ok_or_else(|| {
+                LaurusError::index(format!(
+                    "HNSW v2 graph corrupt: ordinal {ord} out of range \
+                     (node count {})",
+                    unique_ids.len()
+                ))
+            })
+        };
+
+        let mut entry_point_buf = [0u8; 4];
+        input.read_exact(&mut entry_point_buf)?;
+        let entry_point_raw = u32::from_le_bytes(entry_point_buf);
+        let entry_point = if entry_point_raw == u32::MAX {
+            None
+        } else {
+            Some(doc_of(entry_point_raw)?)
+        };
+
+        let mut max_level_buf = [0u8; 4];
+        input.read_exact(&mut max_level_buf)?;
+        let max_level = u32::from_le_bytes(max_level_buf) as usize;
+
+        let mut node_count_buf = [0u8; 4];
+        input.read_exact(&mut node_count_buf)?;
+        let node_count = u32::from_le_bytes(node_count_buf) as usize;
+        if node_count != unique_ids.len() {
+            return Err(LaurusError::index(format!(
+                "HNSW v2 graph corrupt: node_count {node_count} does not match \
+                 the segment's {} unique record doc ids",
+                unique_ids.len()
+            )));
+        }
+
+        // Allocation bounding (#806); v2 strides are 4 bytes per node
+        // minimum (layer_count) and 4 bytes per neighbour ordinal.
+        let graph_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        checked_capacity(node_count, 4, graph_remaining, "hnsw node_count")?;
+
+        let mut nodes = HashMap::with_capacity(node_count);
+        // node_count == unique_ids.len() (validated above), so iterating
+        // the ordinal table walks exactly the serialized node sequence.
+        for &doc_id in unique_ids.iter() {
+            let mut layer_count_buf = [0u8; 4];
+            input.read_exact(&mut layer_count_buf)?;
+            let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
+
+            checked_capacity(layer_count, 4, graph_remaining, "hnsw layer_count")?;
+            let mut layers = Vec::with_capacity(layer_count);
+            for _ in 0..layer_count {
+                let mut neighbor_count_buf = [0u8; 4];
+                input.read_exact(&mut neighbor_count_buf)?;
+                let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
+
+                checked_capacity(neighbor_count, 4, graph_remaining, "hnsw neighbor_count")?;
+                let mut neighbors = Vec::with_capacity(neighbor_count);
+                let mut neighbor_buf = [0u8; 4];
+                for _ in 0..neighbor_count {
+                    input.read_exact(&mut neighbor_buf)?;
+                    neighbors.push(doc_of(u32::from_le_bytes(neighbor_buf))?);
+                }
+                layers.push(neighbors);
+            }
+            nodes.insert(doc_id, layers);
+        }
+
+        Ok((entry_point, max_level, nodes))
     }
 
     /// Load an existing HNSW index from storage.
@@ -458,75 +647,18 @@ impl HnswIndexWriter {
         let max_level = Self::calculate_max_level(index_config.m, index_config.ef_construction);
         let _ml = 1.0 / (index_config.m as f64).ln();
 
-        // Read graph data if present
+        // Read graph data if present. The writer keeps a doc_id-keyed
+        // in-memory graph, so a v2 (ordinal-encoded, Issue #686) block is
+        // translated back to doc ids via the record order; a v1 block is
+        // read verbatim.
         let mut has_graph_buf = [0u8; 1];
         let graph = if input.read_exact(&mut has_graph_buf).is_ok() {
             if has_graph_buf[0] == 1 {
-                // Read entry point
-                let mut entry_point_buf = [0u8; 8];
-                input.read_exact(&mut entry_point_buf)?;
-                let entry_point_raw = u64::from_le_bytes(entry_point_buf);
-                let entry_point = if entry_point_raw == u64::MAX {
-                    None
+                let (entry_point, max_level, nodes) = if header.version >= VERSION_ORDINAL_GRAPH {
+                    Self::load_graph_block_v2(&mut input, file_size, &vectors)?
                 } else {
-                    Some(entry_point_raw)
+                    Self::load_graph_block_v1(&mut input, file_size)?
                 };
-
-                // Read max level
-                let mut max_level_buf = [0u8; 4];
-                input.read_exact(&mut max_level_buf)?;
-                let max_level = u32::from_le_bytes(max_level_buf) as usize;
-
-                // Read nodes (u64 to match write format)
-                let mut node_count_buf = [0u8; 8];
-                input.read_exact(&mut node_count_buf)?;
-                let node_count = u64::from_le_bytes(node_count_buf) as usize;
-
-                // Bound every graph allocation by the bytes left in the file
-                // (Issue #806). Reused for the inner layer / neighbor counts so
-                // no extra syscall is taken inside the per-node / per-layer
-                // loops.
-                let graph_remaining =
-                    file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
-                // Each node serializes at least doc_id (8) + layer_count (4).
-                checked_capacity(node_count, 12, graph_remaining, "hnsw node_count")?;
-                let mut nodes = HashMap::with_capacity(node_count);
-
-                for _ in 0..node_count {
-                    let mut doc_id_buf = [0u8; 8];
-                    input.read_exact(&mut doc_id_buf)?;
-                    let doc_id = u64::from_le_bytes(doc_id_buf);
-
-                    let mut layer_count_buf = [0u8; 4];
-                    input.read_exact(&mut layer_count_buf)?;
-                    let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
-
-                    // Each layer serializes at least its neighbor_count (4).
-                    checked_capacity(layer_count, 4, graph_remaining, "hnsw layer_count")?;
-                    let mut layers = Vec::with_capacity(layer_count);
-
-                    for _ in 0..layer_count {
-                        let mut neighbor_count_buf = [0u8; 4];
-                        input.read_exact(&mut neighbor_count_buf)?;
-                        let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
-
-                        // Each neighbor serializes as a u64 (8 bytes).
-                        checked_capacity(
-                            neighbor_count,
-                            8,
-                            graph_remaining,
-                            "hnsw neighbor_count",
-                        )?;
-                        let mut neighbors = Vec::with_capacity(neighbor_count);
-                        for _ in 0..neighbor_count {
-                            let mut neighbor_buf = [0u8; 8];
-                            input.read_exact(&mut neighbor_buf)?;
-                            neighbors.push(u64::from_le_bytes(neighbor_buf));
-                        }
-                        layers.push(neighbors);
-                    }
-                    nodes.insert(doc_id, layers);
-                }
 
                 Some(HnswGraph::new(
                     entry_point,
@@ -1275,7 +1407,9 @@ impl VectorIndexWriter for HnswIndexWriter {
                 } else {
                     quantize_segment(&f32_vectors, self.index_config.dimension)?
                 };
-                VectorSegmentHeader::scalar_8bit(params).write_to(&mut output)?;
+                VectorSegmentHeader::scalar_8bit(params)
+                    .with_version(VERSION_ORDINAL_GRAPH)
+                    .write_to(&mut output)?;
                 for ((doc_id, field_name, _), (int8, meta)) in
                     sorted_vectors.iter().zip(records.iter())
                 {
@@ -1302,6 +1436,7 @@ impl VectorIndexWriter for HnswIndexWriter {
                     )?;
                     let codebook = vec![0.0_f32; params.codebook_len()];
                     VectorSegmentHeader::product_quantization(params, codebook)
+                        .with_version(VERSION_ORDINAL_GRAPH)
                         .write_to(&mut output)?;
                 } else {
                     let (params, codebook, codes) =
@@ -1311,6 +1446,7 @@ impl VectorIndexWriter for HnswIndexWriter {
                             subvector_count,
                         )?;
                     VectorSegmentHeader::product_quantization(params, codebook)
+                        .with_version(VERSION_ORDINAL_GRAPH)
                         .write_to(&mut output)?;
                     for ((doc_id, field_name, _), codes_i) in
                         sorted_vectors.iter().zip(codes.iter())
@@ -1340,6 +1476,7 @@ impl VectorIndexWriter for HnswIndexWriter {
                     )?;
                     let codebook = vec![0.0_f32; params.codebook_len()];
                     VectorSegmentHeader::product_quantization_fastscan(params, codebook)
+                        .with_version(VERSION_ORDINAL_GRAPH)
                         .write_to(&mut output)?;
                 } else {
                     let (params, codebook, codes) =
@@ -1349,6 +1486,7 @@ impl VectorIndexWriter for HnswIndexWriter {
                             subvector_count,
                         )?;
                     VectorSegmentHeader::product_quantization_fastscan(params, codebook)
+                        .with_version(VERSION_ORDINAL_GRAPH)
                         .write_to(&mut output)?;
                     for ((doc_id, field_name, _), codes_i) in
                         sorted_vectors.iter().zip(codes.iter())
@@ -1366,28 +1504,77 @@ impl VectorIndexWriter for HnswIndexWriter {
             }
         }
 
-        // Write Graph Data
+        // Write Graph Data — v2 ordinal encoding (Issue #686). Neighbours
+        // and the entry point are stored as segment-local u32 ordinals
+        // (the rank of a doc id in the ascending unique record id
+        // sequence); the per-node doc id is dropped because node order is
+        // the same rank. The reader reconstructs doc ids from the record
+        // section, which is written doc_id-sorted above.
         if let Some(graph) = &self.graph {
-            // Write graph metadata
-            let has_graph = 1u8;
-            output.write_all(&[has_graph])?;
+            output.write_all(&[1u8])?;
 
-            // Let's stick to simple manual binary as per other parts.
+            // Ordinal table from the already-sorted record sequence.
+            let mut unique_ids: Vec<u64> = Vec::with_capacity(sorted_vectors.len());
+            for (doc_id, _, _) in &sorted_vectors {
+                if unique_ids.last() != Some(doc_id) {
+                    unique_ids.push(*doc_id);
+                }
+            }
+            if unique_ids.len() >= u32::MAX as usize {
+                return Err(LaurusError::InvalidOperation(format!(
+                    "HNSW segment has {} unique doc ids — the v2 ordinal graph \
+                     format supports at most u32::MAX - 1 nodes per segment",
+                    unique_ids.len()
+                )));
+            }
+            // Defensive: the graph's node set must be exactly the unique
+            // record id set, otherwise the ordinal encoding would be
+            // corrupt on disk. This never fires for writer-built graphs
+            // (the graph is derived from `self.vectors`).
+            if graph.node_count() != unique_ids.len() {
+                return Err(LaurusError::InvalidOperation(format!(
+                    "HNSW graph has {} nodes but the segment has {} unique \
+                     record doc ids; refusing to write a corrupt v2 graph block",
+                    graph.node_count(),
+                    unique_ids.len()
+                )));
+            }
+            let ord_of: ahash::AHashMap<u64, u32> = unique_ids
+                .iter()
+                .enumerate()
+                .map(|(ord, &id)| (id, ord as u32))
+                .collect();
+            let ord_of_doc = |doc_id: u64| -> Result<u32> {
+                ord_of.get(&doc_id).copied().ok_or_else(|| {
+                    LaurusError::InvalidOperation(format!(
+                        "HNSW graph references doc id {doc_id} that has no \
+                         record in the segment; refusing to write a corrupt \
+                         v2 graph block"
+                    ))
+                })
+            };
 
-            // Entry point
-            let entry_point = graph.entry_point.unwrap_or(u64::MAX);
-            output.write_all(&entry_point.to_le_bytes())?;
+            // Entry point as an ordinal; u32::MAX = None.
+            let entry_ord = match graph.entry_point {
+                Some(id) => ord_of_doc(id)?,
+                None => u32::MAX,
+            };
+            output.write_all(&entry_ord.to_le_bytes())?;
             output.write_all(&(graph.max_level as u32).to_le_bytes())?;
+            output.write_all(&(unique_ids.len() as u32).to_le_bytes())?;
 
-            // Nodes (u64 to avoid truncation for large graphs)
-            let node_count = graph.node_count() as u64;
-            output.write_all(&node_count.to_le_bytes())?;
-
-            // Sort nodes by doc_id for deterministic serialization
+            // Sort nodes by doc_id: node order == ordinal order.
             let sorted_nodes = graph.sorted_nodes();
 
-            for (doc_id, layers) in sorted_nodes {
-                output.write_all(&doc_id.to_le_bytes())?;
+            for (ord, (doc_id, layers)) in sorted_nodes.into_iter().enumerate() {
+                if unique_ids[ord] != doc_id {
+                    return Err(LaurusError::InvalidOperation(format!(
+                        "HNSW graph node order diverges from the record order \
+                         at ordinal {ord} (graph {doc_id}, records {}); \
+                         refusing to write a corrupt v2 graph block",
+                        unique_ids[ord]
+                    )));
+                }
 
                 let layer_count = layers.len() as u32;
                 output.write_all(&layer_count.to_le_bytes())?;
@@ -1395,15 +1582,14 @@ impl VectorIndexWriter for HnswIndexWriter {
                 for neighbors in layers {
                     let neighbor_count = neighbors.len() as u32;
                     output.write_all(&neighbor_count.to_le_bytes())?;
-                    for neighbor in neighbors {
-                        output.write_all(&neighbor.to_le_bytes())?;
+                    for &neighbor in neighbors {
+                        output.write_all(&ord_of_doc(neighbor)?.to_le_bytes())?;
                     }
                 }
             }
         } else {
             // No graph built
-            let has_graph = 0u8;
-            output.write_all(&[has_graph])?;
+            output.write_all(&[0u8])?;
         }
 
         // Append the CRC-32 footer (magic + checksum over all preceding bytes)

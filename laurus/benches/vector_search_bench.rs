@@ -947,6 +947,73 @@ fn bench_hnsw_graph_search(c: &mut Criterion) {
     group.finish();
 }
 
+/// HNSW graph search over a sparse, high-value doc-id range (Issue #686).
+///
+/// Simulates a long-lived store: the engine-wide id allocator has advanced
+/// far past this segment's node count (ids start at 50M with stride 37),
+/// which is normal after churn — and on mixed corpora, where documents
+/// without vectors still consume ids. Before #686 the per-query visited
+/// bitmap was sized by `max_doc_id + 1` bits (~6.3 MB alloc + memset per
+/// query here); with segment ordinals it is `node_count` bits (~1.25 KB),
+/// independent of the id range. Eager int8 loading, matching the store
+/// production path and the #686 perf-gate configuration.
+fn bench_hnsw_graph_search_sparse_ids(c: &mut Criterion) {
+    let mut group = c.benchmark_group("HNSW Graph Search sparse_ids");
+    let dim = 128;
+    let count = 10_000usize;
+
+    let config = HnswIndexConfig {
+        dimension: dim,
+        m: 16,
+        ef_construction: 200,
+        distance_metric: DistanceMetric::Cosine,
+        ..Default::default()
+    };
+    let slot = format!("hnsw_sparse_n{count}_dim{dim}_m16_efc200_base50m_stride37");
+    let reader = cached_vector_reader_with_loading(
+        &slot,
+        VectorIndexTypeConfig::HNSW(config),
+        false,
+        || {
+            let mut state = DEFAULT_SEED;
+            (0..count)
+                .map(|i| {
+                    (
+                        50_000_000u64 + (i as u64) * 37,
+                        "field".to_string(),
+                        generate_vector(&mut state, dim),
+                    )
+                })
+                .collect()
+        },
+    );
+    let searcher = HnswSearcher::new(reader).unwrap();
+    let query = generate_query(dim);
+
+    let probe = searcher
+        .search(
+            &VectorIndexQuery::new(query.clone())
+                .top_k(10)
+                .field_name("field".to_string()),
+        )
+        .unwrap();
+    assert!(
+        !probe.results.is_empty(),
+        "sparse-id hnsw graph top-10 probe must return at least one hit"
+    );
+
+    group.throughput(Throughput::Elements(count as u64));
+    group.bench_with_input(BenchmarkId::new("top10", count), &count, |b, _| {
+        b.iter(|| {
+            let request = VectorIndexQuery::new(query.clone())
+                .top_k(10)
+                .field_name("field".to_string());
+            searcher.search(&request).unwrap()
+        });
+    });
+    group.finish();
+}
+
 /// HNSW search latency across an `ef_search` sweep at a fixed corpus.
 ///
 /// `ef_search` controls the size of the dynamic candidate list during
@@ -1818,6 +1885,7 @@ criterion_group!(
     bench_ivf_search_large_k,
     bench_hnsw_fallback_search,
     bench_hnsw_graph_search,
+    bench_hnsw_graph_search_sparse_ids,
     bench_hnsw_graph_search_rerank,
     bench_hnsw_graph_search_rerank_real_data,
     bench_hnsw_graph_search_pq_rerank_real_data,

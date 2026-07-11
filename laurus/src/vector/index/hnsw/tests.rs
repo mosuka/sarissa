@@ -976,12 +976,19 @@ fn graph_build_levels_are_deterministic_across_writers() -> Result<()> {
 
         let reader = HnswIndexReader::load(storage, name, DistanceMetric::Cosine)?;
         let graph = reader.graph.as_ref().expect("segment must carry a graph");
+        // `iter_nodes` yields nodes in ordinal (= ascending doc id) order,
+        // so the collected shape is deterministic by construction. The
+        // entry point is compared as a doc id (stable across builds),
+        // not as an ordinal.
         let levels = graph
-            .sorted_nodes()
-            .into_iter()
+            .iter_nodes()
             .map(|(id, layers)| (id, layers.len()))
             .collect();
-        Ok((graph.entry_point, graph.max_level, levels))
+        Ok((
+            graph.entry_point().map(|ord| graph.doc_id(ord)),
+            graph.max_level(),
+            levels,
+        ))
     }
 
     let a = build("determinism_a")?;
