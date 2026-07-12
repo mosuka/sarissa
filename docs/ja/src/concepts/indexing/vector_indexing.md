@@ -242,7 +242,11 @@ let opt = HnswOption {
   は int8 SIMD multiply-accumulate 1 回 + scalar 補正 3 回に縮約され、
   検索時の per-element dequantize は不要。
 - segment ファイルは `LVS1` magic + 16 byte header で始まり、reader
-  はロード時にフォーマットを判定。
+  はロード時にフォーマットを判定。header はバージョン（機能のはしご:
+  v2 = HNSW グラフブロックの ordinal エンコード、v3 = セグメントごとの
+  フィールド名辞書）を持ち、v3 以降は辞書そのものも header に載る —
+  各レコードはフィールド名をインラインで繰り返す代わりに 16 ビット ID
+  で参照する。
 
 ### Two-stage rerank（Issue #481 Stage 2）
 

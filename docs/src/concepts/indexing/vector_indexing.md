@@ -240,7 +240,11 @@ let opt = HnswOption {
   collapses to one int8 SIMD multiply-accumulate plus three scalar
   corrections — no per-element dequantization at search time.
 - Segment files start with the `LVS1` magic + a 16-byte header so the
-  reader can detect the format at load time.
+  reader can detect the format at load time. The header carries a
+  version (a feature ladder: v2 = ordinal-encoded HNSW graph block,
+  v3 = per-segment field-name dictionary) and, from v3 on, the
+  dictionary itself — records then reference field names by a 16-bit
+  id instead of repeating the full name inline.
 
 ### Two-stage rerank (Issue #481 Stage 2)
 
@@ -327,7 +331,7 @@ skipped.
 
 Every vector segment header carries element counts (`num_vectors`,
 `n_clusters`, the HNSW graph's `node_count` / `layer_count` /
-`neighbor_count`) and per-record byte lengths (`field_name_len`, PQ
+`neighbor_count`) and per-record byte lengths (the v1/v2 inline `field_name_len`, PQ
 `codes`) that the reader uses to size `Vec` / `HashMap` capacities and
 read buffers. The HNSW CRC footer is verified before the structural
 parse, but legacy footer-less segments — and the writer reload paths,

@@ -9,7 +9,7 @@ use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization::QuantizedVectorMeta;
 use crate::vector::core::vector::Vector;
-use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
+use crate::vector::index::format::{QuantHeader, VectorSegmentHeader, record_prefix_size};
 use crate::vector::index::quantized_io::quantized_record_payload_size;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::index::storage::VectorStorage;
@@ -84,7 +84,7 @@ impl IvfIndexReader {
         path: &str,
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
-        use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
+        use crate::vector::index::alloc_bounds::checked_capacity;
         use std::io::{Read, Seek};
 
         // Open the index file
@@ -139,9 +139,11 @@ impl IvfIndexReader {
         // Read the Issue #481 Stage 1 vector segment header (LVS1)
         // before the inverted lists. Pre-Stage-1 segments are
         // rejected with IncompatibleFormat.
+        // Matched by reference so `header` (version + field dictionary,
+        // Issue #633) stays alive for the record parse below.
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let params = match header.quant {
-            QuantHeader::Scalar8Bit(p) => p,
+        let params = match &header.quant {
+            QuantHeader::Scalar8Bit(p) => *p,
             QuantHeader::ProductQuantization { .. } => {
                 return Err(crate::error::LaurusError::NotImplemented(
                     "Product quantization (Issue #481 Stage 3) is HNSW-only; \
@@ -166,7 +168,8 @@ impl IvfIndexReader {
         // meta), so `record_stride` also bounds the per-record int8 read.
         let lists_remaining =
             file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
-        let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+        let record_stride =
+            record_prefix_size(header.version) + quantized_record_payload_size(dimension) as u64;
 
         // Read inverted lists, preserving per-cluster grouping. Each cluster
         // serializes at least its list_size (4 bytes).
@@ -197,19 +200,11 @@ impl IvfIndexReader {
                         input.read_exact(&mut doc_id_buf)?;
                         let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                        let mut field_name_len_buf = [0u8; 4];
-                        input.read_exact(&mut field_name_len_buf)?;
-                        let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-                        checked_len(field_name_len, lists_remaining, "ivf field_name_len")?;
-
-                        let mut field_name_buf = vec![0u8; field_name_len];
-                        input.read_exact(&mut field_name_buf)?;
-                        let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                            LaurusError::InvalidOperation(format!(
-                                "Invalid UTF-8 in field name: {}",
-                                e
-                            ))
-                        })?;
+                        let field_name = header.read_record_field(
+                            &mut input,
+                            lists_remaining,
+                            "ivf field_name_len",
+                        )?;
 
                         // Read int8 + meta directly (no dequantize).
                         let mut int8 = vec![0u8; dimension];
@@ -252,28 +247,22 @@ impl IvfIndexReader {
                     let mut cluster_vecs = Vec::with_capacity(list_size);
 
                     for _ in 0..list_size {
-                        let start_offset = input.stream_position().map_err(LaurusError::Io)?;
-
                         let mut doc_id_buf = [0u8; 8];
                         input.read_exact(&mut doc_id_buf)?;
                         let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                        let mut field_name_len_buf = [0u8; 4];
-                        input.read_exact(&mut field_name_len_buf)?;
-                        let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-                        checked_len(field_name_len, lists_remaining, "ivf field_name_len")?;
+                        let field_name = header.read_record_field(
+                            &mut input,
+                            lists_remaining,
+                            "ivf field_name_len",
+                        )?;
 
-                        let mut field_name_buf = vec![0u8; field_name_len];
-                        input.read_exact(&mut field_name_buf)?;
-                        let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                            LaurusError::InvalidOperation(format!(
-                                "Invalid UTF-8 in field name: {}",
-                                e
-                            ))
-                        })?;
-
+                        // Offsets point at the payload start (right after the
+                        // record prefix), so `VectorStorage::get` seeks
+                        // straight to the int8 data (Issue #633).
+                        let payload_offset = input.stream_position().map_err(LaurusError::Io)?;
                         let key = (doc_id, field_name);
-                        offsets.insert(key.clone(), start_offset);
+                        offsets.insert(key.clone(), payload_offset);
                         cluster_vecs.push(key.clone());
                         vector_ids.push(key);
 

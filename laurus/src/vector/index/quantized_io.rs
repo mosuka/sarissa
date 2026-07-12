@@ -16,8 +16,8 @@
 //! [ VectorSegmentHeader  24 bytes ]   <- written / read separately
 //! repeat num_vectors times:
 //!   [ doc_id           u64  LE   8 bytes ]
-//!   [ field_name_len   u32  LE   4 bytes ]
-//!   [ field_name            field_name_len bytes (UTF-8) ]
+//!   [ field ref: v3+ = field_id u16 (per-segment dictionary,     ]
+//!   [   Issue #633); v1/v2 = name_len u32 + UTF-8 name           ]
 //!   [ int8 data            dim bytes ]
 //!   [ sum_q             u32  LE   4 bytes ]
 //!   [ norm_q            f32  LE   4 bytes ]

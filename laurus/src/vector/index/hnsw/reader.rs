@@ -9,7 +9,9 @@ use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization::QuantizedVectorMeta;
 use crate::vector::core::vector::Vector;
-use crate::vector::index::format::{QuantHeader, VERSION_ORDINAL_GRAPH, VectorSegmentHeader};
+use crate::vector::index::format::{
+    QuantHeader, VERSION_ORDINAL_GRAPH, VectorSegmentHeader, record_prefix_size,
+};
 use crate::vector::index::hnsw::graph::OrdinalHnswGraph;
 use crate::vector::index::quantized_io::quantized_record_payload_size;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
@@ -573,7 +575,8 @@ impl HnswIndexReader {
                 // the fixed quantized payload (dim int8 + 8 meta). Bounding
                 // `num_vectors` by that stride also bounds the per-record
                 // `dimension`-sized int8 read (Issue #806).
-                let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+                let record_stride = record_prefix_size(header.version)
+                    + quantized_record_payload_size(dimension) as u64;
                 checked_capacity(
                     num_vectors,
                     record_stride,
@@ -589,15 +592,11 @@ impl HnswIndexReader {
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    let mut field_name_len_buf = [0u8; 4];
-                    input.read_exact(&mut field_name_len_buf)?;
-                    let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-                    checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
-                    let mut field_name_buf = vec![0u8; field_name_len];
-                    input.read_exact(&mut field_name_buf)?;
-                    let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                        LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
-                    })?;
+                    let field_name = header.read_record_field(
+                        &mut input,
+                        records_remaining,
+                        "hnsw field_name_len",
+                    )?;
 
                     let mut int8 = vec![0u8; dimension];
                     input.read_exact(&mut int8)?;
@@ -622,7 +621,8 @@ impl HnswIndexReader {
                 )
             }
             (QuantHeader::Scalar8Bit(params), crate::storage::LoadingMode::Lazy) => {
-                let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+                let record_stride = record_prefix_size(header.version)
+                    + quantized_record_payload_size(dimension) as u64;
                 checked_capacity(
                     num_vectors,
                     record_stride,
@@ -632,12 +632,12 @@ impl HnswIndexReader {
                 let mut offsets = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
 
-                // Seek to start of per-vector entries: HNSW preamble
-                // (count u64 + dim u32 + m u32 + ef u32 = 20 bytes)
-                // followed by VectorSegmentHeader (Stage-1, 24 bytes
-                // for Scalar8Bit) = 44 bytes.
-                let start_pos =
-                    20u64 + VectorSegmentHeader::scalar_8bit(*params).serialized_size() as u64;
+                // Seek to the start of the per-vector entries: HNSW preamble
+                // (count u64 + dim u32 + m u32 + ef u32 = 20 bytes) followed
+                // by the parsed header's real size (which includes the v3
+                // field dictionary, Issue #633 — reconstructing a fresh
+                // header here would omit it).
+                let start_pos = 20u64 + header.serialized_size() as u64;
                 input
                     .seek(std::io::SeekFrom::Start(start_pos))
                     .map_err(LaurusError::Io)?;
@@ -645,24 +645,21 @@ impl HnswIndexReader {
                 let quant_payload_size = quantized_record_payload_size(dimension) as i64;
 
                 for _ in 0..num_vectors {
-                    let start_offset = input.stream_position().map_err(LaurusError::Io)?;
-
                     let mut doc_id_buf = [0u8; 8];
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    let mut field_name_len_buf = [0u8; 4];
-                    input.read_exact(&mut field_name_len_buf)?;
-                    let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-                    checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
+                    let field_name = header.read_record_field(
+                        &mut input,
+                        records_remaining,
+                        "hnsw field_name_len",
+                    )?;
 
-                    let mut field_name_buf = vec![0u8; field_name_len];
-                    input.read_exact(&mut field_name_buf)?;
-                    let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                        LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
-                    })?;
-
-                    offsets.insert((doc_id, field_name.clone()), start_offset);
+                    // Offsets point at the payload start (right after the
+                    // record prefix), so `VectorStorage::get` seeks straight
+                    // to the int8 data (Issue #633).
+                    let payload_offset = input.stream_position().map_err(LaurusError::Io)?;
+                    offsets.insert((doc_id, field_name.clone()), payload_offset);
                     vector_ids.push((doc_id, field_name.clone()));
 
                     input
@@ -696,11 +693,12 @@ impl HnswIndexReader {
                 // carries Scalar8Bit params), so we eagerly load the
                 // codes regardless of `loading_mode`.
                 let codes_size = pq_params.m as usize;
-                // Each PQ record is at least doc_id (8) + field_name_len (4) +
-                // `codes_size` bytes of codes (Issue #806).
+                // Each PQ record is at least the version-dependent prefix
+                // (doc_id + field reference, Issue #633) + `codes_size`
+                // bytes of codes (Issue #806).
                 checked_capacity(
                     num_vectors,
-                    12 + codes_size as u64,
+                    record_prefix_size(header.version) + codes_size as u64,
                     records_remaining,
                     "hnsw num_vectors",
                 )?;
@@ -713,15 +711,11 @@ impl HnswIndexReader {
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    let mut field_name_len_buf = [0u8; 4];
-                    input.read_exact(&mut field_name_len_buf)?;
-                    let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-                    checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
-                    let mut field_name_buf = vec![0u8; field_name_len];
-                    input.read_exact(&mut field_name_buf)?;
-                    let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                        LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
-                    })?;
+                    let field_name = header.read_record_field(
+                        &mut input,
+                        records_remaining,
+                        "hnsw field_name_len",
+                    )?;
 
                     let mut codes = vec![0u8; codes_size];
                     input.read_exact(&mut codes)?;
@@ -749,9 +743,15 @@ impl HnswIndexReader {
                 // codes via `pq_fastscan_io::read_pq_fastscan_record`
                 // and build a `PqFastScanPool` for the SIMD-friendly
                 // block-transposed in-memory layout.
-                // Each record is at least doc_id (8) + field_name_len (4) +
-                // one byte of packed codes (Issue #806).
-                checked_capacity(num_vectors, 13, records_remaining, "hnsw num_vectors")?;
+                // Each record is at least the version-dependent prefix
+                // (doc_id + field reference, Issue #633) + one byte of
+                // packed codes (Issue #806).
+                checked_capacity(
+                    num_vectors,
+                    record_prefix_size(header.version) + 1,
+                    records_remaining,
+                    "hnsw num_vectors",
+                )?;
                 let mut vector_ids = Vec::with_capacity(num_vectors);
                 let mut records: Vec<(u64, String, Vec<u8>)> = Vec::with_capacity(num_vectors);
 
@@ -760,15 +760,11 @@ impl HnswIndexReader {
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    let mut field_name_len_buf = [0u8; 4];
-                    input.read_exact(&mut field_name_len_buf)?;
-                    let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-                    checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
-                    let mut field_name_buf = vec![0u8; field_name_len];
-                    input.read_exact(&mut field_name_buf)?;
-                    let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                        LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
-                    })?;
+                    let field_name = header.read_record_field(
+                        &mut input,
+                        records_remaining,
+                        "hnsw field_name_len",
+                    )?;
 
                     let codes = crate::vector::index::pq_fastscan_io::read_pq_fastscan_record(
                         &mut input, *pq_params,
@@ -1502,7 +1498,7 @@ mod ordinal_migration_tests {
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::core::quantization::ScalarQuantParams;
     use crate::vector::index::HnswIndexConfig;
-    use crate::vector::index::format::CURRENT_VERSION;
+    use crate::vector::index::format::{CURRENT_VERSION, VERSION_FIELD_DICT};
     use crate::vector::index::hnsw::searcher::HnswSearcher;
     use crate::vector::index::hnsw::writer::HnswIndexWriter;
     use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
@@ -1592,12 +1588,198 @@ mod ordinal_migration_tests {
         buf
     }
 
+    /// v3 LVS1 header bytes: neutral SQ params + the given dictionary.
+    fn v3_header_bytes(dict: &[&str]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        VectorSegmentHeader::scalar_8bit(ScalarQuantParams {
+            offset: 0.0,
+            scale: 1.0,
+        })
+        .with_version(VERSION_FIELD_DICT)
+        .with_field_dict(dict.iter().map(|s| s.to_string()).collect())
+        .write_to(&mut buf)
+        .unwrap();
+        buf
+    }
+
+    /// One v3 SQ record: `[doc_id u64][field_id u16][int8][meta]`.
+    fn sq_record_v3(doc_id: u64, field_id: u16, values: [u8; DIM]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&doc_id.to_le_bytes());
+        buf.extend_from_slice(&field_id.to_le_bytes());
+        buf.extend_from_slice(&values);
+        let sum_q: u32 = values.iter().map(|&v| v as u32).sum();
+        let norm_q: f32 = values
+            .iter()
+            .map(|&v| (v as f32) * (v as f32))
+            .sum::<f32>()
+            .sqrt();
+        buf.extend_from_slice(&sum_q.to_le_bytes());
+        buf.extend_from_slice(&norm_q.to_le_bytes());
+        buf
+    }
+
+    /// A v2-encoding (ordinal) graph block over 3 nodes: entry ordinal 0,
+    /// one layer each, ring adjacency. Valid for any version >= 2 fixture.
+    fn ordinal_graph_block() -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.push(1u8); // has_graph
+        buf.extend_from_slice(&0u32.to_le_bytes()); // entry ordinal
+        buf.extend_from_slice(&0u32.to_le_bytes()); // max_level
+        buf.extend_from_slice(&3u32.to_le_bytes()); // node_count
+        for neighbors in [[1u32, 2u32], [0, 2], [0, 1]] {
+            buf.extend_from_slice(&1u32.to_le_bytes()); // layer_count
+            buf.extend_from_slice(&(neighbors.len() as u32).to_le_bytes());
+            for n in neighbors {
+                buf.extend_from_slice(&n.to_le_bytes());
+            }
+        }
+        buf
+    }
+
+    fn v3_fixture_bytes() -> Vec<u8> {
+        let mut bytes = preamble(3);
+        bytes.extend_from_slice(&v3_header_bytes(&["f"]));
+        bytes.extend_from_slice(&sq_record_v3(10, 0, [100, 1, 1, 1]));
+        bytes.extend_from_slice(&sq_record_v3(20, 0, [1, 100, 1, 1]));
+        bytes.extend_from_slice(&sq_record_v3(30, 0, [1, 1, 100, 1]));
+        bytes.extend_from_slice(&ordinal_graph_block());
+        bytes
+    }
+
     fn v1_fixture_bytes() -> Vec<u8> {
         let mut bytes = preamble(3);
         bytes.extend_from_slice(&header_bytes(CURRENT_VERSION));
         bytes.extend_from_slice(&three_doc_records());
         bytes.extend_from_slice(&v1_graph_block());
         bytes
+    }
+
+    #[test]
+    fn reads_v3_fixture_and_searches() {
+        let storage = storage_with("v3_fixture.hnsw", v3_fixture_bytes());
+        let reader = HnswIndexReader::load(storage, "v3_fixture", DistanceMetric::Cosine).unwrap();
+
+        let graph = reader.graph.as_ref().expect("v3 graph must load");
+        assert_eq!(graph.node_count(), 3);
+        assert_eq!(graph.entry_point(), Some(0));
+        // Single-field, unique ids → identity ord→pos mapping.
+        assert!(reader.field_ord_to_pos("f").is_none());
+
+        let searcher = HnswSearcher::new(Arc::new(reader)).unwrap();
+        let results = searcher
+            .search(
+                &VectorIndexQuery::new(Vector::new(vec![1.0, 1.0, 100.0, 1.0]))
+                    .top_k(3)
+                    .field_name("f".to_string()),
+            )
+            .unwrap();
+        let mut ids: Vec<u64> = results.results.iter().map(|r| r.doc_id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![10, 20, 30]);
+        assert_eq!(results.results[0].doc_id, 30);
+    }
+
+    #[test]
+    fn rejects_v3_record_field_id_out_of_range() {
+        let mut bytes = preamble(3);
+        bytes.extend_from_slice(&v3_header_bytes(&["f"]));
+        bytes.extend_from_slice(&sq_record_v3(10, 0, [100, 1, 1, 1]));
+        bytes.extend_from_slice(&sq_record_v3(20, 7, [1, 100, 1, 1])); // id 7 >= dict len 1
+        bytes.extend_from_slice(&sq_record_v3(30, 0, [1, 1, 100, 1]));
+        bytes.extend_from_slice(&ordinal_graph_block());
+
+        let storage = storage_with("bad_fid.hnsw", bytes);
+        let err = HnswIndexReader::load(storage, "bad_fid", DistanceMetric::Cosine)
+            .expect_err("out-of-range field_id must be rejected");
+        assert!(
+            err.to_string().contains("out of dictionary range"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_v3_empty_dict_with_records() {
+        let mut bytes = preamble(1);
+        bytes.extend_from_slice(&v3_header_bytes(&[]));
+        bytes.extend_from_slice(&sq_record_v3(10, 0, [100, 1, 1, 1]));
+        bytes.push(0u8); // has_graph = false
+
+        let storage = storage_with("empty_dict.hnsw", bytes);
+        let err = HnswIndexReader::load(storage, "empty_dict", DistanceMetric::Cosine)
+            .expect_err("records referencing an empty dictionary must be rejected");
+        assert!(
+            err.to_string().contains("out of dictionary range"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn v3_writer_output_has_exact_size_and_v1_delta() {
+        // Deterministic headline gate for #633: byte-exact size formula
+        // plus the delta a v1 layout would have produced.
+        let storage: Arc<dyn Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let config = HnswIndexConfig {
+            dimension: DIM,
+            m: 4,
+            ef_construction: 16,
+            distance_metric: DistanceMetric::Cosine,
+            ..Default::default()
+        };
+        let field = "embedding";
+        let n = 5u64;
+        let mut writer = HnswIndexWriter::with_storage(
+            config,
+            VectorIndexWriterConfig::default(),
+            "sized",
+            Arc::clone(&storage),
+        )
+        .unwrap();
+        let vectors: Vec<(u64, String, Vector)> = (0..n)
+            .map(|i| {
+                (
+                    i,
+                    field.to_string(),
+                    Vector::new(vec![i as f32 + 1.0, 1.0, 1.0, 1.0]),
+                )
+            })
+            .collect();
+        writer.add_vectors(vectors).unwrap();
+        writer.finalize().unwrap();
+        writer.write().unwrap();
+
+        let input = storage.open_input("sized.hnsw").unwrap();
+        let actual = input.size().unwrap();
+
+        // Reload to measure the graph block exactly (its size depends on
+        // the built topology): total = preamble(20) + header(24 + dict)
+        // + records + graph + footer(8).
+        let reader =
+            HnswIndexReader::load(Arc::clone(&storage), "sized", DistanceMetric::Cosine).unwrap();
+        let graph = reader.graph.as_ref().unwrap();
+        let mut graph_block = 1u64 + 4 + 4 + 4; // has_graph + entry + max_level + node_count
+        for (_, layers) in graph.iter_nodes() {
+            graph_block += 4; // layer_count
+            for neighbors in layers {
+                graph_block += 4 + 4 * neighbors.len() as u64;
+            }
+        }
+        let dict_bytes = 2 + (2 + field.len()) as u64;
+        let record_bytes = n * (10 + DIM as u64 + 8);
+        let expected = 20 + (24 + dict_bytes) + record_bytes + graph_block + 8;
+        assert_eq!(actual, expected, "v3 .hnsw file size must be byte-exact");
+
+        // v1 would have spent (4 + field.len()) per record on the name and
+        // carried no dictionary: delta = n*(len-2+4) - (2 + (2+len)).
+        let v1_records = n * (12 + field.len() as u64 + DIM as u64 + 8);
+        let saved = (v1_records + 24) - (record_bytes + 24 + dict_bytes);
+        assert_eq!(
+            saved,
+            n * (field.len() as u64 + 2) - dict_bytes,
+            "the v1-vs-v3 record-section delta formula must hold"
+        );
+        assert!(saved > 0, "v3 must be smaller for n=5, k=9");
     }
 
     #[test]
@@ -1633,7 +1815,7 @@ mod ordinal_migration_tests {
     }
 
     #[test]
-    fn writer_loads_v1_and_rewrites_v2_that_reader_loads() {
+    fn writer_loads_v1_and_rewrites_v3_that_reader_loads() {
         let storage = storage_with("upgrade.hnsw", v1_fixture_bytes());
         let config = HnswIndexConfig {
             dimension: DIM,
@@ -1663,8 +1845,8 @@ mod ordinal_migration_tests {
         input.read_exact(&mut head).unwrap();
         assert_eq!(
             u16::from_le_bytes([head[24], head[25]]),
-            VERSION_ORDINAL_GRAPH,
-            "rewritten segment must stamp the v2 header version"
+            VERSION_FIELD_DICT,
+            "rewritten segment must stamp the v3 header version (Issue #633)"
         );
 
         let reader = HnswIndexReader::load(storage, "upgrade", DistanceMetric::Cosine).unwrap();

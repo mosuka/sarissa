@@ -10,9 +10,11 @@ use crate::storage::Storage;
 use crate::vector::core::quantization::ScalarQuantParams;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::FlatIndexConfig;
-use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
+use crate::vector::index::alloc_bounds::checked_capacity;
 use crate::vector::index::field::LegacyVectorFieldWriter;
-use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
+use crate::vector::index::format::{
+    QuantHeader, VERSION_FIELD_DICT, VectorSegmentHeader, build_field_dict, record_prefix_size,
+};
 use crate::vector::index::quantized_io::{
     quantize_segment, quantized_record_payload_size, read_dequantized_vector,
     write_quantized_record,
@@ -122,9 +124,11 @@ impl FlatIndexWriter {
 
         // Read the Issue #481 Stage 1 vector segment header (LVS1).
         // Pre-Stage-1 segments are rejected with IncompatibleFormat.
+        // Matched by reference so `header` (version + field dictionary,
+        // Issue #633) stays alive for the record parse below.
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let params = match header.quant {
-            QuantHeader::Scalar8Bit(p) => p,
+        let params = match &header.quant {
+            QuantHeader::Scalar8Bit(p) => *p,
             QuantHeader::ProductQuantization { .. } => {
                 return Err(crate::error::LaurusError::NotImplemented(
                     "Product quantization (Issue #481 Stage 3) is HNSW-only; \
@@ -150,7 +154,8 @@ impl FlatIndexWriter {
         // quantized payload (dim int8 + 8 meta).
         let records_remaining =
             file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
-        let record_stride = 12 + quantized_record_payload_size(dimension) as u64;
+        let record_stride =
+            record_prefix_size(header.version) + quantized_record_payload_size(dimension) as u64;
         checked_capacity(
             num_vectors,
             record_stride,
@@ -163,17 +168,9 @@ impl FlatIndexWriter {
             input.read_exact(&mut doc_id_buf)?;
             let doc_id = u64::from_le_bytes(doc_id_buf);
 
-            // Read field name
-            let mut field_name_len_buf = [0u8; 4];
-            input.read_exact(&mut field_name_len_buf)?;
-            let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-            checked_len(field_name_len, records_remaining, "flat field_name_len")?;
-
-            let mut field_name_buf = vec![0u8; field_name_len];
-            input.read_exact(&mut field_name_buf)?;
-            let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
-            })?;
+            // Field reference: dictionary id (v3+) or inline name.
+            let field_name =
+                header.read_record_field(&mut input, records_remaining, "flat field_name_len")?;
 
             // Read quantized payload + dequantize.
             let values = read_dequantized_vector(&mut input, dimension, &params)?;
@@ -457,16 +454,19 @@ impl VectorIndexWriter for FlatIndexWriter {
         } else {
             quantize_segment(&f32_vectors, self.index_config.dimension)?
         };
-        VectorSegmentHeader::scalar_8bit(params).write_to(&mut output)?;
+        // Per-segment field-name dictionary (Issue #633): ids assigned in
+        // first-appearance order over the exact emission order below.
+        let (field_dict, field_ids) =
+            build_field_dict(self.vectors.iter().map(|(_, f, _)| f.as_str()))?;
+        VectorSegmentHeader::scalar_8bit(params)
+            .with_version(VERSION_FIELD_DICT)
+            .with_field_dict(field_dict)
+            .write_to(&mut output)?;
 
-        // Write vectors with field names and quantized records.
+        // Write vectors with dictionary field ids and quantized records.
         for ((doc_id, field_name, _), (int8, meta)) in self.vectors.iter().zip(records.iter()) {
             output.write_all(&doc_id.to_le_bytes())?;
-
-            // Write field name length and field name
-            let field_name_bytes = field_name.as_bytes();
-            output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
-            output.write_all(field_name_bytes)?;
+            output.write_all(&field_ids[field_name.as_str()].to_le_bytes())?;
 
             // Write quantized payload (dim int8 + sum_q + norm_q).
             write_quantized_record(&mut output, int8, *meta)?;
