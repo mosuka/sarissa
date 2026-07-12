@@ -13,13 +13,22 @@
 //! offset  size  field
 //! ------  ----  -------------------------------------------
 //!      0     4  magic         ASCII "LVS1"
-//!      4     2  version       u16 LE  (current = 1)
+//!      4     2  version       u16 LE  (1..=3; see the feature ladder
+//!                                       on CURRENT_VERSION)
 //!      6     2  quant_kind    u16 LE  (1 = Scalar8Bit, 2 = PQ;
 //!                                       0 reserved for "no quant")
 //!      8     8  reserved      zero-padded
 //!     16     -  quantization metadata (variant-specific, see below)
+//!      :     -  field dictionary (version >= 3 only, Issue #633):
+//!                 field_dict_count u16 LE, then per entry
+//!                 name_len u16 LE + UTF-8 name.
+//!                 The u16 domain bounds every allocation here.
 //!      :     -  vector data
 //! ```
+//!
+//! Per-record prefix inside the vector data: `[doc_id u64][name_len
+//! u32][name UTF-8]` below version 3, `[doc_id u64][field_id u16]`
+//! (index into the dictionary) from version 3 on.
 //!
 //! For `quant_kind = 1` (Scalar8Bit, Stage 1):
 //!
@@ -66,12 +75,17 @@ use crate::vector::core::quantization::{PqParams, ScalarQuantParams};
 /// 4-byte ASCII magic at offset 0 of every quantized vector segment.
 pub const VECTOR_SEGMENT_MAGIC: [u8; 4] = *b"LVS1";
 
-/// Default header format version stamped by writers.
+/// Lowest header format version this build can read (and the version
+/// legacy Flat/IVF segments were written with).
 ///
-/// Flat and IVF segments still write version 1 (their layout is
-/// unchanged), so older builds keep reading them. Only the HNSW writer
-/// opts into [`VERSION_ORDINAL_GRAPH`] via
-/// [`VectorSegmentHeader::with_version`].
+/// Header versions form a monotone feature ladder:
+///
+/// * `1` — base format (inline per-record field names).
+/// * `>= 2` — the HNSW graph block stores segment-local u32 ordinals
+///   ([`VERSION_ORDINAL_GRAPH`], Issue #686; HNSW-only).
+/// * `>= 3` — records reference field names through the per-segment
+///   dictionary in this header ([`VERSION_FIELD_DICT`], Issue #633;
+///   all index types).
 pub const CURRENT_VERSION: u16 = 1;
 
 /// Header version for HNSW segments whose graph block stores
@@ -82,9 +96,20 @@ pub const CURRENT_VERSION: u16 = 1;
 /// are always written sorted by doc id.
 pub const VERSION_ORDINAL_GRAPH: u16 = 2;
 
+/// Header version for segments whose per-vector records reference field
+/// names through the per-segment dictionary carried by this header
+/// (Issue #633, Lucene `fnm` precedent).
+///
+/// At this version the record prefix is `[doc_id u64][field_id u16]`
+/// (see [`record_prefix_size`]) instead of the inline
+/// `[doc_id u64][name_len u32][name UTF-8]`, and the dictionary block
+/// follows the quantization metadata (see the module docs). Implies the
+/// [`VERSION_ORDINAL_GRAPH`] graph encoding for HNSW segments.
+pub const VERSION_FIELD_DICT: u16 = 3;
+
 /// Highest header version this build can read. The reader accepts the
 /// inclusive range `CURRENT_VERSION..=MAX_SUPPORTED_VERSION`.
-pub const MAX_SUPPORTED_VERSION: u16 = VERSION_ORDINAL_GRAPH;
+pub const MAX_SUPPORTED_VERSION: u16 = VERSION_FIELD_DICT;
 
 /// `quant_kind` numeric values stored in the header.
 ///
@@ -134,16 +159,23 @@ pub const PQ_CENTROIDS_PER_SUBVECTOR: u16 = 256;
 /// Per-segment header read from / written to a vector segment file.
 ///
 /// Combines the fixed 16-byte header (magic / version / quant_kind /
-/// reserved) with the quantization-kind-specific metadata block. The
-/// reader and writer treat both as a single unit so callers don't have
-/// to track parsing state.
+/// reserved) with the quantization-kind-specific metadata block and,
+/// from [`VERSION_FIELD_DICT`] on, the per-segment field-name
+/// dictionary. The reader and writer treat all of it as a single unit
+/// so callers don't have to track parsing state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorSegmentHeader {
-    /// Header format version. Always [`CURRENT_VERSION`] when written
-    /// by this build.
+    /// Header format version (see the ladder on [`CURRENT_VERSION`]).
     pub version: u16,
     /// Quantization kind discriminator plus its metadata payload.
     pub quant: QuantHeader,
+    /// Per-segment field-name dictionary (Issue #633).
+    ///
+    /// Serialized only when `version >= VERSION_FIELD_DICT`; always
+    /// empty on v1/v2 headers. Records reference entries by index
+    /// (`field_id u16`), assigned in first-appearance order over the
+    /// segment's emitted record sequence.
+    pub field_dict: Vec<String>,
 }
 
 /// Quantization-kind-specific portion of [`VectorSegmentHeader`].
@@ -218,6 +250,7 @@ impl VectorSegmentHeader {
         Self {
             version: CURRENT_VERSION,
             quant: QuantHeader::Scalar8Bit(params),
+            field_dict: Vec::new(),
         }
     }
 
@@ -230,6 +263,7 @@ impl VectorSegmentHeader {
         Self {
             version: CURRENT_VERSION,
             quant: QuantHeader::ProductQuantization { params, codebook },
+            field_dict: Vec::new(),
         }
     }
 
@@ -246,6 +280,7 @@ impl VectorSegmentHeader {
         Self {
             version: CURRENT_VERSION,
             quant: QuantHeader::ProductQuantizationFastScan { params, codebook },
+            field_dict: Vec::new(),
         }
     }
 
@@ -267,15 +302,58 @@ impl VectorSegmentHeader {
         self
     }
 
-    /// Total serialized size: fixed header + quant-kind metadata.
-    pub fn serialized_size(&self) -> usize {
-        FIXED_HEADER_SIZE + self.quant.metadata_size()
+    /// Return `self` with the field-name dictionary replaced
+    /// (Issue #633).
+    ///
+    /// Only meaningful together with
+    /// [`with_version`](Self::with_version)`(VERSION_FIELD_DICT)` (or
+    /// higher) — the dictionary is serialized exclusively at those
+    /// versions.
+    ///
+    /// # Arguments
+    ///
+    /// * `field_dict` - Field names in first-appearance order over the
+    ///   segment's emitted record sequence.
+    ///
+    /// # Returns
+    ///
+    /// The header value with `field_dict` set.
+    pub fn with_field_dict(mut self, field_dict: Vec<String>) -> Self {
+        self.field_dict = field_dict;
+        self
     }
 
-    /// Write the header (fixed portion + quant metadata) to `writer`.
+    /// Serialized size of the field-dictionary block, 0 below
+    /// [`VERSION_FIELD_DICT`].
+    fn dict_size(&self) -> usize {
+        if self.version >= VERSION_FIELD_DICT {
+            2 + self
+                .field_dict
+                .iter()
+                .map(|name| 2 + name.len())
+                .sum::<usize>()
+        } else {
+            0
+        }
+    }
+
+    /// Total serialized size: fixed header + quant-kind metadata +
+    /// (from [`VERSION_FIELD_DICT`]) the field-name dictionary.
+    pub fn serialized_size(&self) -> usize {
+        FIXED_HEADER_SIZE + self.quant.metadata_size() + self.dict_size()
+    }
+
+    /// Write the header (fixed portion + quant metadata + versioned
+    /// field dictionary) to `writer`.
     ///
     /// All multi-byte fields are little-endian. The reserved 8 bytes
     /// at offset 8 are zero-filled.
+    ///
+    /// # Errors
+    ///
+    /// * [`LaurusError::InvalidOperation`] if the dictionary exceeds
+    ///   `u16::MAX` entries or an entry exceeds `u16::MAX` bytes.
+    /// * [`LaurusError::Io`] for any underlying write failure.
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_all(&VECTOR_SEGMENT_MAGIC)?;
         writer.write_all(&self.version.to_le_bytes())?;
@@ -307,6 +385,34 @@ impl VectorSegmentHeader {
                     writer.write_all(&f.to_le_bytes())?;
                 }
             }
+        }
+        if self.version >= VERSION_FIELD_DICT {
+            if self.field_dict.len() > u16::MAX as usize {
+                return Err(LaurusError::InvalidOperation(format!(
+                    "vector segment field dictionary has {} entries; the v3 \
+                     format supports at most {}",
+                    self.field_dict.len(),
+                    u16::MAX
+                )));
+            }
+            writer.write_all(&(self.field_dict.len() as u16).to_le_bytes())?;
+            for name in &self.field_dict {
+                if name.len() > u16::MAX as usize {
+                    return Err(LaurusError::InvalidOperation(format!(
+                        "vector field name is {} bytes; the v3 format supports \
+                         at most {} bytes per name",
+                        name.len(),
+                        u16::MAX
+                    )));
+                }
+                writer.write_all(&(name.len() as u16).to_le_bytes())?;
+                writer.write_all(name.as_bytes())?;
+            }
+        } else {
+            debug_assert!(
+                self.field_dict.is_empty(),
+                "field_dict is only serialized at version >= VERSION_FIELD_DICT"
+            );
         }
         Ok(())
     }
@@ -430,8 +536,157 @@ impl VectorSegmentHeader {
             }
         };
 
-        Ok(Self { version, quant })
+        // Field-name dictionary (Issue #633), present from v3 on. The
+        // u16 length domain itself bounds every allocation here
+        // (≤ 65535 entries of ≤ 64 KiB names), preserving the #806
+        // no-huge-allocation property without file-size plumbing;
+        // `read_exact` fails at EOF before unbounded accumulation.
+        let field_dict = if version >= VERSION_FIELD_DICT {
+            let mut count_bytes = [0u8; 2];
+            reader.read_exact(&mut count_bytes)?;
+            let count = u16::from_le_bytes(count_bytes) as usize;
+            let mut dict = Vec::with_capacity(count);
+            for _ in 0..count {
+                let mut len_bytes = [0u8; 2];
+                reader.read_exact(&mut len_bytes)?;
+                let len = u16::from_le_bytes(len_bytes) as usize;
+                let mut name_bytes = vec![0u8; len];
+                reader.read_exact(&mut name_bytes)?;
+                let name = String::from_utf8(name_bytes).map_err(|e| {
+                    LaurusError::IncompatibleFormat(format!(
+                        "invalid UTF-8 in vector segment field dictionary: {e}"
+                    ))
+                })?;
+                dict.push(name);
+            }
+            dict
+        } else {
+            Vec::new()
+        };
+
+        Ok(Self {
+            version,
+            quant,
+            field_dict,
+        })
     }
+
+    /// Read one record's field name according to this header's version
+    /// (Issue #633).
+    ///
+    /// * `version >= VERSION_FIELD_DICT`: reads a `field_id u16` and
+    ///   resolves it against [`field_dict`](Self::field_dict).
+    /// * older versions: reads the inline `name_len u32 + UTF-8 name`.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - Stream positioned right after the record's doc id.
+    /// * `records_remaining` - Bytes left for the record section, used
+    ///   to bound the inline-name allocation (Issue #806; ignored on
+    ///   the v3 path, whose u16 id needs no bounding).
+    /// * `what` - Label for corruption error messages (e.g.
+    ///   `"hnsw field_name_len"`).
+    ///
+    /// # Returns
+    ///
+    /// The record's field name, or an error when the id is out of
+    /// dictionary range / the inline name is oversized or not UTF-8.
+    // Consumed by the reader/writer migration (sub-issue #858); unused
+    // while this format layer ships alone.
+    #[allow(dead_code)]
+    pub(crate) fn read_record_field<R: Read>(
+        &self,
+        reader: &mut R,
+        records_remaining: u64,
+        what: &str,
+    ) -> Result<String> {
+        if self.version >= VERSION_FIELD_DICT {
+            let mut id_bytes = [0u8; 2];
+            reader.read_exact(&mut id_bytes)?;
+            let field_id = u16::from_le_bytes(id_bytes);
+            self.field_dict
+                .get(field_id as usize)
+                .cloned()
+                .ok_or_else(|| {
+                    LaurusError::index(format!(
+                        "vector segment corrupt: record field_id {field_id} out \
+                         of dictionary range ({} entries)",
+                        self.field_dict.len()
+                    ))
+                })
+        } else {
+            use crate::vector::index::alloc_bounds::checked_len;
+
+            let mut len_bytes = [0u8; 4];
+            reader.read_exact(&mut len_bytes)?;
+            let len = u32::from_le_bytes(len_bytes) as usize;
+            checked_len(len, records_remaining, what)?;
+            let mut name_bytes = vec![0u8; len];
+            reader.read_exact(&mut name_bytes)?;
+            String::from_utf8(name_bytes).map_err(|e| {
+                LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
+            })
+        }
+    }
+}
+
+/// Size in bytes of the per-record prefix (`doc_id` + field reference)
+/// for the given header version (Issue #633).
+///
+/// * `version >= VERSION_FIELD_DICT`: `doc_id u64 + field_id u16` = 10.
+/// * older versions: `doc_id u64 + name_len u32` = 12 (plus the
+///   variable inline name bytes, which callers account separately).
+///
+/// # Arguments
+///
+/// * `version` - The segment header version.
+///
+/// # Returns
+///
+/// The fixed prefix size in bytes.
+// Consumed by the reader/writer migration (sub-issue #858).
+#[allow(dead_code)]
+pub(crate) fn record_prefix_size(version: u16) -> u64 {
+    if version >= VERSION_FIELD_DICT {
+        10
+    } else {
+        12
+    }
+}
+
+/// Build a per-segment field-name dictionary in first-appearance order
+/// (Issue #633).
+///
+/// # Arguments
+///
+/// * `names` - The record field names in the exact order the writer
+///   will emit the records.
+///
+/// # Returns
+///
+/// `(dictionary, name → field_id map)` for the writer's emit loop, or
+/// an error if more than `u16::MAX` distinct names are present.
+// Consumed by the writer migration (sub-issue #858).
+#[allow(dead_code)]
+pub(crate) fn build_field_dict<'a>(
+    names: impl Iterator<Item = &'a str>,
+) -> Result<(Vec<String>, std::collections::HashMap<String, u16>)> {
+    let mut dict: Vec<String> = Vec::new();
+    let mut ids: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
+    for name in names {
+        if !ids.contains_key(name) {
+            if dict.len() >= u16::MAX as usize {
+                return Err(LaurusError::InvalidOperation(format!(
+                    "vector segment has more than {} distinct field names; \
+                     the v3 format supports at most that many",
+                    u16::MAX
+                )));
+            }
+            ids.insert(name.to_string(), dict.len() as u16);
+            dict.push(name.to_string());
+        }
+    }
+    Ok((dict, ids))
 }
 
 #[cfg(test)]
@@ -490,6 +745,118 @@ mod tests {
             err.to_string().contains("unsupported vector segment"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn roundtrip_v3_header_with_field_dict() {
+        for dict in [
+            Vec::new(),
+            vec!["embedding".to_string()],
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                "long_field_name".to_string(),
+            ],
+        ] {
+            let header = VectorSegmentHeader::scalar_8bit(sample_params())
+                .with_version(VERSION_FIELD_DICT)
+                .with_field_dict(dict.clone());
+            let mut buf: Vec<u8> = Vec::new();
+            header.write_to(&mut buf).unwrap();
+            assert_eq!(
+                buf.len(),
+                header.serialized_size(),
+                "serialized_size must match written bytes for dict {dict:?}"
+            );
+
+            let mut cursor = Cursor::new(&buf);
+            let parsed = VectorSegmentHeader::read_from(&mut cursor).unwrap();
+            assert_eq!(parsed.field_dict, dict);
+            assert_eq!(parsed, header);
+        }
+    }
+
+    #[test]
+    fn v1_header_serialization_is_unchanged_by_the_dict_field() {
+        let header = VectorSegmentHeader::scalar_8bit(sample_params());
+        let mut buf: Vec<u8> = Vec::new();
+        header.write_to(&mut buf).unwrap();
+        assert_eq!(buf.len(), 24, "v1 SQ header must stay 24 bytes");
+        assert_eq!(header.serialized_size(), 24);
+        let parsed = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap();
+        assert!(parsed.field_dict.is_empty());
+    }
+
+    #[test]
+    fn truncated_field_dict_returns_io_error() {
+        let header = VectorSegmentHeader::scalar_8bit(sample_params())
+            .with_version(VERSION_FIELD_DICT)
+            .with_field_dict(vec!["embedding".to_string()]);
+        let mut buf: Vec<u8> = Vec::new();
+        header.write_to(&mut buf).unwrap();
+        buf.truncate(buf.len() - 3); // cut into the dict entry
+
+        let err = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap_err();
+        assert!(matches!(err, LaurusError::Io(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn write_rejects_field_name_longer_than_u16_max() {
+        let header = VectorSegmentHeader::scalar_8bit(sample_params())
+            .with_version(VERSION_FIELD_DICT)
+            .with_field_dict(vec!["x".repeat(u16::MAX as usize + 1)]);
+        let mut buf: Vec<u8> = Vec::new();
+        let err = header.write_to(&mut buf).unwrap_err();
+        assert!(err.to_string().contains("at most"), "got: {err}");
+    }
+
+    #[test]
+    fn read_record_field_resolves_v3_ids_and_rejects_out_of_range() {
+        let header = VectorSegmentHeader::scalar_8bit(sample_params())
+            .with_version(VERSION_FIELD_DICT)
+            .with_field_dict(vec!["a".to_string(), "b".to_string()]);
+
+        let mut ok = Cursor::new(1u16.to_le_bytes().to_vec());
+        assert_eq!(header.read_record_field(&mut ok, 0, "test").unwrap(), "b");
+
+        let mut bad = Cursor::new(7u16.to_le_bytes().to_vec());
+        let err = header.read_record_field(&mut bad, 0, "test").unwrap_err();
+        assert!(
+            err.to_string().contains("out of dictionary range"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn read_record_field_parses_inline_names_below_v3() {
+        let header = VectorSegmentHeader::scalar_8bit(sample_params());
+        let mut bytes = (5u32).to_le_bytes().to_vec();
+        bytes.extend_from_slice(b"field");
+        let mut cursor = Cursor::new(bytes);
+        assert_eq!(
+            header.read_record_field(&mut cursor, 64, "test").unwrap(),
+            "field"
+        );
+    }
+
+    #[test]
+    fn record_prefix_size_matches_the_version_ladder() {
+        assert_eq!(record_prefix_size(CURRENT_VERSION), 12);
+        assert_eq!(record_prefix_size(VERSION_ORDINAL_GRAPH), 12);
+        assert_eq!(record_prefix_size(VERSION_FIELD_DICT), 10);
+    }
+
+    #[test]
+    fn build_field_dict_assigns_first_appearance_order() {
+        let names = ["b", "a", "b", "c", "a"];
+        let (dict, ids) = build_field_dict(names.into_iter()).unwrap();
+        assert_eq!(
+            dict,
+            vec!["b".to_string(), "a".to_string(), "c".to_string()]
+        );
+        assert_eq!(ids["b"], 0);
+        assert_eq!(ids["a"], 1);
+        assert_eq!(ids["c"], 2);
     }
 
     #[test]
