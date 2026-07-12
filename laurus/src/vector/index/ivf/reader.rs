@@ -9,7 +9,9 @@ use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization::QuantizedVectorMeta;
 use crate::vector::core::vector::Vector;
-use crate::vector::index::format::{QuantHeader, VectorSegmentHeader, record_prefix_size};
+use crate::vector::index::format::{
+    FieldInterner, QuantHeader, VectorSegmentHeader, record_prefix_size, resolve_field_id,
+};
 use crate::vector::index::quantized_io::quantized_record_payload_size;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::index::storage::VectorStorage;
@@ -25,15 +27,20 @@ use std::io::SeekFrom;
 #[derive(Debug)]
 pub struct IvfIndexReader {
     vectors: VectorStorage,
-    vector_ids: Vec<(u64, String)>,
+    /// `(doc_id, field_id)` per record; ids index [`Self::field_dict`]
+    /// (Issue #633 PR-B — interned, no per-record heap `String`).
+    vector_ids: Vec<(u64, u16)>,
+    /// Per-segment field-name dictionary (synthesized at load for
+    /// v1/v2 segments, taken from the header for v3).
+    field_dict: Arc<[Arc<str>]>,
     dimension: usize,
     distance_metric: DistanceMetric,
     n_clusters: usize,
     n_probe: usize,
     centroids: Vec<Vector>,
     /// Per-cluster inverted list: `cluster_to_vectors[i]` contains the
-    /// `(doc_id, field_name)` pairs assigned to cluster `i`.
-    cluster_to_vectors: Vec<Vec<(u64, String)>>,
+    /// `(doc_id, field_id)` pairs assigned to cluster `i`.
+    cluster_to_vectors: Vec<Vec<(u64, u16)>>,
     deletion_bitmap: Option<Arc<DeletionBitmap>>,
     /// Pre-built per-field doc-id list (`field_name → Arc<[u64]>`). Built
     /// once at load so `doc_ids_for_field` returns a refcount-shared
@@ -42,17 +49,18 @@ pub struct IvfIndexReader {
 }
 
 /// Group `vector_ids` by field name into refcount-shared slices.
-fn build_vector_ids_by_field(vector_ids: &[(u64, String)]) -> HashMap<String, Arc<[u64]>> {
-    let mut by_field: HashMap<String, Vec<u64>> = HashMap::new();
-    for (doc_id, field_name) in vector_ids {
-        by_field
-            .entry(field_name.clone())
-            .or_default()
-            .push(*doc_id);
+fn build_vector_ids_by_field(
+    vector_ids: &[(u64, u16)],
+    field_dict: &[Arc<str>],
+) -> HashMap<String, Arc<[u64]>> {
+    let mut by_field: Vec<Vec<u64>> = vec![Vec::new(); field_dict.len()];
+    for &(doc_id, fid) in vector_ids {
+        by_field[fid as usize].push(doc_id);
     }
-    by_field
-        .into_iter()
-        .map(|(field, ids)| (field, Arc::<[u64]>::from(ids)))
+    field_dict
+        .iter()
+        .zip(by_field)
+        .map(|(field, ids)| (field.to_string(), Arc::<[u64]>::from(ids)))
         .collect()
 }
 
@@ -174,9 +182,13 @@ impl IvfIndexReader {
         // Read inverted lists, preserving per-cluster grouping. Each cluster
         // serializes at least its list_size (4 bytes).
         checked_capacity(n_clusters, 4, lists_remaining, "ivf cluster lists")?;
-        let mut cluster_to_vectors: Vec<Vec<(u64, String)>> = Vec::with_capacity(n_clusters);
+        let mut cluster_to_vectors: Vec<Vec<(u64, u16)>> = Vec::with_capacity(n_clusters);
 
-        let (vectors, vector_ids) = match storage.loading_mode() {
+        // Interned field ids (Issue #633 PR-B): one shared dictionary per
+        // segment instead of 3 retained `String`s per record.
+        let mut interner = FieldInterner::from_header(&header);
+
+        let (vectors, vector_ids, field_dict) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
                 checked_capacity(
                     num_vectors,
@@ -200,7 +212,8 @@ impl IvfIndexReader {
                         input.read_exact(&mut doc_id_buf)?;
                         let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                        let field_name = header.read_record_field(
+                        let fid = interner.read_record_field_id(
+                            &header,
                             &mut input,
                             lists_remaining,
                             "ivf field_name_len",
@@ -218,15 +231,20 @@ impl IvfIndexReader {
                             norm_q: f32::from_le_bytes(norm_q_buf),
                         };
 
-                        let key = (doc_id, field_name.clone());
-                        cluster_vecs.push(key.clone());
-                        vector_ids.push(key.clone());
-                        records.push((doc_id, field_name, int8, meta));
+                        cluster_vecs.push((doc_id, fid));
+                        vector_ids.push((doc_id, fid));
+                        // Transient clone for the pool's String-shaped build
+                        // input; the pool retains only per-field keys.
+                        records.push((doc_id, interner.name(fid).to_string(), int8, meta));
                     }
                     cluster_to_vectors.push(cluster_vecs);
                 }
                 let pool = QuantizedVectorPool::build(params, dimension, records);
-                (VectorStorage::OwnedQuantized(Arc::new(pool)), vector_ids)
+                (
+                    VectorStorage::OwnedQuantized(Arc::new(pool)),
+                    vector_ids,
+                    interner.into_dict(),
+                )
             }
             crate::storage::LoadingMode::Lazy => {
                 checked_capacity(
@@ -251,7 +269,8 @@ impl IvfIndexReader {
                         input.read_exact(&mut doc_id_buf)?;
                         let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                        let field_name = header.read_record_field(
+                        let fid = interner.read_record_field_id(
+                            &header,
                             &mut input,
                             lists_remaining,
                             "ivf field_name_len",
@@ -261,10 +280,9 @@ impl IvfIndexReader {
                         // record prefix), so `VectorStorage::get` seeks
                         // straight to the int8 data (Issue #633).
                         let payload_offset = input.stream_position().map_err(LaurusError::Io)?;
-                        let key = (doc_id, field_name);
-                        offsets.insert(key.clone(), payload_offset);
-                        cluster_vecs.push(key.clone());
-                        vector_ids.push(key);
+                        offsets.insert((doc_id, fid), payload_offset);
+                        cluster_vecs.push((doc_id, fid));
+                        vector_ids.push((doc_id, fid));
 
                         // Skip int8 payload + per-vector meta.
                         input
@@ -273,20 +291,23 @@ impl IvfIndexReader {
                     }
                     cluster_to_vectors.push(cluster_vecs);
                 }
+                let field_dict = interner.into_dict();
                 (
                     VectorStorage::OnDemand {
                         storage: storage.clone(),
                         file_name: file_name.clone(),
                         offsets: Arc::new(offsets),
+                        field_dict: field_dict.clone(),
                         quant_params: Some(params),
                         cached_input: Arc::new(std::sync::RwLock::new(None)),
                     },
                     vector_ids,
+                    field_dict,
                 )
             }
         };
 
-        let vector_ids_by_field = build_vector_ids_by_field(&vector_ids);
+        let vector_ids_by_field = build_vector_ids_by_field(&vector_ids, &field_dict);
         Ok(Self {
             vectors,
             vector_ids,
@@ -296,6 +317,7 @@ impl IvfIndexReader {
             n_probe,
             centroids,
             cluster_to_vectors,
+            field_dict,
             deletion_bitmap: None,
             vector_ids_by_field,
         })
@@ -340,7 +362,13 @@ impl IvfIndexReader {
     ///
     /// A slice of `(doc_id, field_name)` pairs, or an empty slice if
     /// `cluster_idx` is out of range.
-    pub fn cluster_vectors(&self, cluster_idx: usize) -> &[(u64, String)] {
+    /// Borrow the per-segment field-name dictionary (Issue #633 PR-B),
+    /// shared with the searcher so probe results can stay `(u64, u16)`.
+    pub(crate) fn field_dict(&self) -> Arc<[Arc<str>]> {
+        self.field_dict.clone()
+    }
+
+    pub fn cluster_vectors(&self, cluster_idx: usize) -> &[(u64, u16)] {
         self.cluster_to_vectors
             .get(cluster_idx)
             .map(|v| v.as_slice())
@@ -357,18 +385,18 @@ impl VectorIndexReader for IvfIndexReader {
         if self.is_deleted(doc_id) {
             return Ok(None);
         }
-        self.vectors
-            .get(&(doc_id, field_name.to_string()), self.dimension)
+        self.vectors.get(doc_id, field_name, self.dimension)
     }
 
     fn get_vectors_for_doc(&self, doc_id: u64) -> Result<Vec<(String, Vector)>> {
         let mut result = Vec::new();
-        for (id, field) in &self.vector_ids {
-            if *id == doc_id
-                && !self.is_deleted(*id)
-                && let Some(vec) = self.vectors.get(&(*id, field.clone()), self.dimension)?
+        for &(id, fid) in &self.vector_ids {
+            let field = &self.field_dict[fid as usize];
+            if id == doc_id
+                && !self.is_deleted(id)
+                && let Some(vec) = self.vectors.get(id, field, self.dimension)?
             {
-                result.push((field.clone(), vec));
+                result.push((field.to_string(), vec));
             }
         }
         Ok(result)
@@ -380,14 +408,19 @@ impl VectorIndexReader for IvfIndexReader {
             if self.is_deleted(*id) {
                 result.push(None);
             } else {
-                result.push(self.vectors.get(&(*id, field.clone()), self.dimension)?);
+                result.push(self.vectors.get(*id, field, self.dimension)?);
             }
         }
         Ok(result)
     }
 
     fn vector_ids(&self) -> Result<Vec<(u64, String)>> {
-        Ok(self.vector_ids.clone())
+        // Rehydrated at the trait boundary (Issue #633 PR-B).
+        Ok(self
+            .vector_ids
+            .iter()
+            .map(|&(id, fid)| (id, self.field_dict[fid as usize].to_string()))
+            .collect())
     }
 
     fn doc_ids_for_field(&self, field_name: &str) -> Arc<[u64]> {
@@ -423,7 +456,7 @@ impl VectorIndexReader for IvfIndexReader {
     }
 
     fn contains_vector(&self, doc_id: u64, field_name: &str) -> bool {
-        self.vectors.contains_key(&(doc_id, field_name.to_string()))
+        self.vectors.contains(doc_id, field_name)
     }
 
     fn get_vector_range(
@@ -432,41 +465,45 @@ impl VectorIndexReader for IvfIndexReader {
         end_doc_id: u64,
     ) -> Result<Vec<(u64, String, Vector)>> {
         let mut result = Vec::new();
-        for (id, field) in &self.vector_ids {
-            if *id >= start_doc_id
-                && *id < end_doc_id
-                && !self.is_deleted(*id)
-                && let Some(vec) = self.vectors.get(&(*id, field.clone()), self.dimension)?
+        for &(id, fid) in &self.vector_ids {
+            let field = &self.field_dict[fid as usize];
+            if id >= start_doc_id
+                && id < end_doc_id
+                && !self.is_deleted(id)
+                && let Some(vec) = self.vectors.get(id, field, self.dimension)?
             {
-                result.push((*id, field.clone(), vec));
+                result.push((id, field.to_string(), vec));
             }
         }
         Ok(result)
     }
 
     fn get_vectors_by_field(&self, field_name: &str) -> Result<Vec<(u64, Vector)>> {
+        // One dictionary resolve, then integer compares per record.
+        let Some(target) = resolve_field_id(&self.field_dict, field_name) else {
+            return Ok(Vec::new());
+        };
         let mut result = Vec::new();
-        for (id, field) in &self.vector_ids {
-            if field == field_name
-                && !self.is_deleted(*id)
-                && let Some(vec) = self.vectors.get(&(*id, field.clone()), self.dimension)?
+        for &(id, fid) in &self.vector_ids {
+            if fid == target
+                && !self.is_deleted(id)
+                && let Some(vec) = self.vectors.get(id, field_name, self.dimension)?
             {
-                result.push((*id, vec));
+                result.push((id, vec));
             }
         }
         Ok(result)
     }
 
     fn field_names(&self) -> Result<Vec<String>> {
-        use std::collections::HashSet;
-        let fields: HashSet<String> = self.vector_ids.iter().map(|val| val.1.clone()).collect();
-        Ok(fields.into_iter().collect())
+        Ok(self.field_dict.iter().map(|f| f.to_string()).collect())
     }
 
     fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
         Ok(Box::new(IvfVectorIterator {
             storage: self.vectors.clone(),
             keys: self.vector_ids.clone(),
+            field_dict: self.field_dict.clone(),
             current: 0,
             dimension: self.dimension,
             deletion_bitmap: self.deletion_bitmap.clone(),
@@ -518,8 +555,9 @@ impl VectorIndexReader for IvfIndexReader {
                 }
             }
             VectorStorage::OwnedQuantized(pool) => {
-                for (id, field) in &self.vector_ids {
-                    if !pool.contains(*id, field) {
+                for &(id, fid) in &self.vector_ids {
+                    let field = &self.field_dict[fid as usize];
+                    if !pool.contains(id, field) {
                         errors.push(format!(
                             "Vector {}:{} found in keys but missing in quantized pool",
                             id, field
@@ -533,8 +571,9 @@ impl VectorIndexReader for IvfIndexReader {
                 );
             }
             VectorStorage::OwnedPq(pool) => {
-                for (id, field) in &self.vector_ids {
-                    if !pool.contains(*id, field) {
+                for &(id, fid) in &self.vector_ids {
+                    let field = &self.field_dict[fid as usize];
+                    if !pool.contains(id, field) {
                         errors.push(format!(
                             "Vector {}:{} found in keys but missing in PQ pool",
                             id, field
@@ -552,8 +591,9 @@ impl VectorIndexReader for IvfIndexReader {
                 unreachable!("IVF reader rejects PQ FastScan at the segment header (HNSW-only)")
             }
             VectorStorage::OnDemand { offsets, .. } => {
-                for (id, field) in &self.vector_ids {
-                    if !offsets.contains_key(&(*id, field.clone())) {
+                for &(id, fid) in &self.vector_ids {
+                    let field = &self.field_dict[fid as usize];
+                    if !offsets.contains_key(&(id, fid)) {
                         errors.push(format!(
                             "Vector {}:{} in ids but missing in storage",
                             id, field
@@ -608,7 +648,8 @@ impl VectorIndexReader for IvfIndexReader {
 /// Iterator for IVF vector index.
 struct IvfVectorIterator {
     storage: VectorStorage,
-    keys: Vec<(u64, String)>,
+    keys: Vec<(u64, u16)>,
+    field_dict: Arc<[Arc<str>]>,
     current: usize,
     dimension: usize,
     deletion_bitmap: Option<Arc<DeletionBitmap>>,
@@ -619,22 +660,20 @@ impl VectorIterator for IvfVectorIterator {
         // Use a loop instead of recursion to avoid stack overflow when
         // many consecutive entries are deleted.
         while self.current < self.keys.len() {
-            let (doc_id, field) = &self.keys[self.current];
+            let (doc_id, fid) = self.keys[self.current];
+            let field = &self.field_dict[fid as usize];
 
             // Skip deleted entries
             if let Some(bitmap) = &self.deletion_bitmap
-                && bitmap.is_deleted(*doc_id)
+                && bitmap.is_deleted(doc_id)
             {
                 self.current += 1;
                 continue;
             }
 
-            if let Some(vec) = self
-                .storage
-                .get(&(*doc_id, field.clone()), self.dimension)?
-            {
+            if let Some(vec) = self.storage.get(doc_id, field, self.dimension)? {
                 self.current += 1;
-                return Ok(Some((*doc_id, field.clone(), vec)));
+                return Ok(Some((doc_id, field.to_string(), vec)));
             } else {
                 return Err(LaurusError::internal(format!(
                     "Vector {}:{} found in keys but missing in storage",
@@ -648,8 +687,9 @@ impl VectorIterator for IvfVectorIterator {
 
     fn skip_to(&mut self, doc_id: u64, field_name: &str) -> Result<bool> {
         while self.current < self.keys.len() {
-            let (id, field) = &self.keys[self.current];
-            if *id > doc_id || (*id == doc_id && field.as_str() >= field_name) {
+            let (id, fid) = self.keys[self.current];
+            let field = &self.field_dict[fid as usize];
+            if id > doc_id || (id == doc_id && field.as_ref() as &str >= field_name) {
                 return Ok(true);
             }
             self.current += 1;
@@ -659,7 +699,8 @@ impl VectorIterator for IvfVectorIterator {
 
     fn position(&self) -> (u64, String) {
         if self.current < self.keys.len() {
-            self.keys[self.current].clone()
+            let (id, fid) = self.keys[self.current];
+            (id, self.field_dict[fid as usize].to_string())
         } else {
             (u64::MAX, String::new())
         }

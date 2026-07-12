@@ -65,8 +65,14 @@ pub enum VectorStorage {
         storage: Arc<dyn Storage>,
         /// Name of the vector index file within the storage.
         file_name: String,
-        /// Pre-built mapping from `(doc_id, field_name)` to byte offset.
-        offsets: Arc<HashMap<(u64, String), u64>>,
+        /// Pre-built mapping from `(doc_id, field_id)` to the byte
+        /// offset of the record's payload (Issue #633 PR-B: interned
+        /// u16 field ids instead of one heap `String` per record).
+        offsets: Arc<HashMap<(u64, u16), u64>>,
+        /// Per-segment field-name dictionary; `field_id` indexes into
+        /// it. Resolution from a name is a linear scan (segments hold
+        /// 1–3 fields in practice), which allocates nothing.
+        field_dict: Arc<[Arc<str>]>,
         /// Per-segment quantization params, if the on-disk vector
         /// format is the Stage-1 quantized layout. `None` means the
         /// legacy f32 layout.
@@ -132,7 +138,14 @@ impl VectorStorage {
             VectorStorage::OwnedPq(pool) => pool.keys(),
             #[cfg(feature = "pq-fastscan")]
             VectorStorage::OwnedPqFastScan(pool) => pool.keys(),
-            VectorStorage::OnDemand { offsets, .. } => offsets.keys().cloned().collect(),
+            VectorStorage::OnDemand {
+                offsets,
+                field_dict,
+                ..
+            } => offsets
+                .keys()
+                .map(|&(doc_id, fid)| (doc_id, field_dict[fid as usize].to_string()))
+                .collect(),
         }
     }
 
@@ -153,19 +166,29 @@ impl VectorStorage {
         self.len() == 0
     }
 
-    /// Returns `true` if a vector with the given key exists.
+    /// Returns `true` if a vector exists for `(doc_id, field_name)`.
+    ///
+    /// Allocation-free on every variant (Issue #633 PR-B): the
+    /// `OnDemand` arm resolves the field name against the segment
+    /// dictionary instead of materializing an owned key.
     ///
     /// # Arguments
     ///
-    /// * `key` - A `(doc_id, field_name)` tuple identifying the vector.
-    pub fn contains_key(&self, key: &(u64, String)) -> bool {
+    /// * `doc_id` - The document id.
+    /// * `field_name` - The vector field name.
+    pub fn contains(&self, doc_id: u64, field_name: &str) -> bool {
         match self {
-            VectorStorage::Owned(map) => map.contains_key(key),
-            VectorStorage::OwnedQuantized(pool) => pool.contains(key.0, &key.1),
-            VectorStorage::OwnedPq(pool) => pool.contains(key.0, &key.1),
+            VectorStorage::Owned(map) => map.contains_key(&(doc_id, field_name.to_string())),
+            VectorStorage::OwnedQuantized(pool) => pool.contains(doc_id, field_name),
+            VectorStorage::OwnedPq(pool) => pool.contains(doc_id, field_name),
             #[cfg(feature = "pq-fastscan")]
-            VectorStorage::OwnedPqFastScan(pool) => pool.contains(key.0, &key.1),
-            VectorStorage::OnDemand { offsets, .. } => offsets.contains_key(key),
+            VectorStorage::OwnedPqFastScan(pool) => pool.contains(doc_id, field_name),
+            VectorStorage::OnDemand {
+                offsets,
+                field_dict,
+                ..
+            } => crate::vector::index::format::resolve_field_id(field_dict, field_name)
+                .is_some_and(|fid| offsets.contains_key(&(doc_id, fid))),
         }
     }
 
@@ -176,9 +199,15 @@ impl VectorStorage {
     /// the reader seeks to the recorded offset, and the vector data is read
     /// directly.
     ///
+    /// Allocation-free key handling (Issue #633 PR-B): callers pass
+    /// `(doc_id, &str)` and the `OnDemand` arm resolves the name against
+    /// the segment dictionary — the former per-call
+    /// `field_name.to_string()` key materialization is gone.
+    ///
     /// # Arguments
     ///
-    /// * `key` - A `(doc_id, field_name)` tuple identifying the vector.
+    /// * `doc_id` - The document id.
+    /// * `field_name` - The vector field name.
     /// * `dimension` - The expected number of dimensions (used to size the read buffer).
     ///
     /// # Returns
@@ -188,21 +217,33 @@ impl VectorStorage {
     /// # Errors
     ///
     /// Returns [`LaurusError`] on I/O failure.
-    pub fn get(&self, key: &(u64, String), dimension: usize) -> Result<Option<Vector>> {
+    pub fn get(&self, doc_id: u64, field_name: &str, dimension: usize) -> Result<Option<Vector>> {
         match self {
-            VectorStorage::Owned(map) => Ok(map.get(key).cloned()),
-            VectorStorage::OwnedQuantized(pool) => Ok(pool.dequantize_to_vector(key.0, &key.1)),
-            VectorStorage::OwnedPq(pool) => Ok(pool.dequantize_to_vector(key.0, &key.1)),
+            // Match-only legacy variant (never constructed by current
+            // readers); the owned-key probe is acceptable here.
+            VectorStorage::Owned(map) => Ok(map.get(&(doc_id, field_name.to_string())).cloned()),
+            VectorStorage::OwnedQuantized(pool) => {
+                Ok(pool.dequantize_to_vector(doc_id, field_name))
+            }
+            VectorStorage::OwnedPq(pool) => Ok(pool.dequantize_to_vector(doc_id, field_name)),
             #[cfg(feature = "pq-fastscan")]
-            VectorStorage::OwnedPqFastScan(pool) => Ok(pool.dequantize_to_vector(key.0, &key.1)),
+            VectorStorage::OwnedPqFastScan(pool) => {
+                Ok(pool.dequantize_to_vector(doc_id, field_name))
+            }
             VectorStorage::OnDemand {
                 storage,
                 file_name,
                 offsets,
+                field_dict,
                 quant_params,
                 cached_input,
             } => {
-                let Some(&offset) = offsets.get(key) else {
+                let Some(fid) =
+                    crate::vector::index::format::resolve_field_id(field_dict, field_name)
+                else {
+                    return Ok(None);
+                };
+                let Some(&offset) = offsets.get(&(doc_id, fid)) else {
                     return Ok(None);
                 };
                 // Reuse the cached input handle if it has been opened by a

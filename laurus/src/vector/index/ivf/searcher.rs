@@ -100,14 +100,16 @@ impl IvfSearcher {
     ///
     /// # Returns
     ///
-    /// A `Vec` of `(doc_id, field_name)` pairs from the probed clusters,
-    /// optionally filtered by `field_name`.
+    /// A `Vec` of `(doc_id, field_id)` pairs from the probed clusters
+    /// (ids index the reader's field dictionary, Issue #633 PR-B),
+    /// optionally filtered by `field_name` — resolved once to an id, so
+    /// the per-candidate filter is an integer compare.
     fn probe_clusters(
         &self,
         query: &Vector,
         n_probe: usize,
         field_name: Option<&str>,
-    ) -> Result<Vec<(u64, String)>> {
+    ) -> Result<Vec<(u64, u16)>> {
         use super::reader::IvfIndexReader;
 
         if let Some(ivf_reader) = self.index_reader.as_any().downcast_ref::<IvfIndexReader>() {
@@ -148,12 +150,28 @@ impl IvfSearcher {
                 centroid_distances.select_nth_unstable_by(n - 1, |a, b| a.1.total_cmp(&b.1));
             }
 
+            // Resolve the requested field once; per-candidate filtering
+            // below is then a u16 compare (Issue #633 PR-B).
+            let target = match field_name {
+                Some(field) => {
+                    match crate::vector::index::format::resolve_field_id(
+                        &ivf_reader.field_dict(),
+                        field,
+                    ) {
+                        Some(fid) => Some(fid),
+                        // Unknown field ⇒ no candidates.
+                        None => return Ok(Vec::new()),
+                    }
+                }
+                None => None,
+            };
+
             // Collect vector IDs from the `n` nearest clusters.
             let mut result = Vec::new();
             for &(cluster_idx, _) in centroid_distances.iter().take(n) {
                 let cluster_vecs = ivf_reader.cluster_vectors(cluster_idx);
-                if let Some(field) = field_name {
-                    result.extend(cluster_vecs.iter().filter(|(_, f)| f == field).cloned());
+                if let Some(target) = target {
+                    result.extend(cluster_vecs.iter().filter(|&&(_, f)| f == target).copied());
                 } else {
                     result.extend_from_slice(cluster_vecs);
                 }
@@ -198,6 +216,16 @@ impl VectorIndexSearcher for IvfSearcher {
         let vector_ids =
             self.probe_clusters(&request.query, self.n_probe, request.field_name.as_deref())?;
 
+        // The probe above already rejected non-IVF readers, so the
+        // downcast below is guaranteed to succeed; the dictionary maps
+        // the probe results' u16 ids back to names at emission.
+        let field_dict = self
+            .index_reader
+            .as_any()
+            .downcast_ref::<crate::vector::index::ivf::reader::IvfIndexReader>()
+            .map(|r| r.field_dict())
+            .unwrap_or_default();
+
         // Calculate distances for vectors in the probed clusters.
         // Cache the query-side norm once per search (#414); for Cosine /
         // Angular this skips the per-candidate `||query||²` accumulation.
@@ -227,52 +255,37 @@ impl VectorIndexSearcher for IvfSearcher {
         // Distance scan over the probed clusters, parallelised across
         // candidates above PARALLEL_SCAN_THRESHOLD (#662). The quantized hot
         // path and the f32 fallback both run inside the per-candidate closure.
-        let mut candidates: Vec<(u64, String, f32, f32, Vector)> =
-            crate::vector::search::searcher::parallel_scan(
-                &vector_ids[..],
-                |(doc_id, field_name)| {
-                    // Skip non-matching candidates before the distance kernel.
-                    if let Some(allowed) = filter
-                        && !allowed.contains(*doc_id)
-                    {
-                        return Ok(None);
-                    }
-                    if let (Some(pool), Some(prepared)) = (&quant_pool, &prepared_quantized)
-                        && let Some((int8, meta)) = pool.get_record(*doc_id, field_name)
-                    {
-                        let distance = crate::vector::core::distance_quantized::distance_quantized(
-                            metric, prepared, int8, meta,
-                        );
-                        let similarity = metric.distance_to_similarity(distance);
-                        let vector = if request.params.include_vectors {
-                            pool.dequantize_to_vector(*doc_id, field_name)
-                                .unwrap_or_else(|| Vector::new(Vec::new()))
-                        } else {
-                            Vector::new(Vec::new())
-                        };
-                        return Ok(Some((
-                            *doc_id,
-                            field_name.clone(),
-                            similarity,
-                            distance,
-                            vector,
-                        )));
-                    }
-                    if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name) {
-                        let distance =
-                            metric.distance_with_prepared(&prepared_query, &vector.data)?;
-                        let similarity = metric.distance_to_similarity(distance);
-                        return Ok(Some((
-                            *doc_id,
-                            field_name.clone(),
-                            similarity,
-                            distance,
-                            vector,
-                        )));
-                    }
-                    Ok(None)
-                },
-            )?;
+        let mut candidates: Vec<(u64, u16, f32, f32, Vector)> =
+            crate::vector::search::searcher::parallel_scan(&vector_ids[..], |(doc_id, fid)| {
+                let field_name: &str = &field_dict[*fid as usize];
+                // Skip non-matching candidates before the distance kernel.
+                if let Some(allowed) = filter
+                    && !allowed.contains(*doc_id)
+                {
+                    return Ok(None);
+                }
+                if let (Some(pool), Some(prepared)) = (&quant_pool, &prepared_quantized)
+                    && let Some((int8, meta)) = pool.get_record(*doc_id, field_name)
+                {
+                    let distance = crate::vector::core::distance_quantized::distance_quantized(
+                        metric, prepared, int8, meta,
+                    );
+                    let similarity = metric.distance_to_similarity(distance);
+                    let vector = if request.params.include_vectors {
+                        pool.dequantize_to_vector(*doc_id, field_name)
+                            .unwrap_or_else(|| Vector::new(Vec::new()))
+                    } else {
+                        Vector::new(Vec::new())
+                    };
+                    return Ok(Some((*doc_id, *fid, similarity, distance, vector)));
+                }
+                if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name) {
+                    let distance = metric.distance_with_prepared(&prepared_query, &vector.data)?;
+                    let similarity = metric.distance_to_similarity(distance);
+                    return Ok(Some((*doc_id, *fid, similarity, distance, vector)));
+                }
+                Ok(None)
+            })?;
 
         // Sort by similarity (descending)
         candidates.sort_unstable_by(|a, b| b.2.total_cmp(&a.2));
@@ -280,8 +293,9 @@ impl VectorIndexSearcher for IvfSearcher {
         // Take top_k results
         let candidates_len = candidates.len();
         let top_k = request.params.top_k.min(candidates_len);
-        for (doc_id, field_name, similarity, distance, vector) in candidates.into_iter().take(top_k)
-        {
+        for (doc_id, fid, similarity, distance, vector) in candidates.into_iter().take(top_k) {
+            // Rehydrate the field name only for emitted hits.
+            let field_name = field_dict[fid as usize].to_string();
             // Apply minimum similarity threshold
             if similarity < request.params.min_similarity {
                 break;
