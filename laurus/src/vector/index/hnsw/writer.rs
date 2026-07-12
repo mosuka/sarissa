@@ -7,9 +7,12 @@ use crate::storage::Storage;
 use crate::vector::core::rerank::RerankStorageKind;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::HnswIndexConfig;
-use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
+use crate::vector::index::alloc_bounds::checked_capacity;
 use crate::vector::index::field::LegacyVectorFieldWriter;
-use crate::vector::index::format::{QuantHeader, VERSION_ORDINAL_GRAPH, VectorSegmentHeader};
+use crate::vector::index::format::{
+    QuantHeader, VERSION_FIELD_DICT, VERSION_ORDINAL_GRAPH, VectorSegmentHeader, build_field_dict,
+    record_prefix_size,
+};
 use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::quantized_io::{
     quantize_segment, quantized_record_payload_size, read_dequantized_vector,
@@ -536,7 +539,7 @@ impl HnswIndexWriter {
             #[cfg(feature = "pq-fastscan")]
             QuantHeader::ProductQuantizationFastScan { .. } => 1,
         };
-        let record_stride = 12 + min_payload;
+        let record_stride = record_prefix_size(header.version) + min_payload;
         checked_capacity(
             num_vectors,
             record_stride,
@@ -549,17 +552,9 @@ impl HnswIndexWriter {
             input.read_exact(&mut doc_id_buf)?;
             let doc_id = u64::from_le_bytes(doc_id_buf);
 
-            // Read field name
-            let mut field_name_len_buf = [0u8; 4];
-            input.read_exact(&mut field_name_len_buf)?;
-            let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-            checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
-
-            let mut field_name_buf = vec![0u8; field_name_len];
-            input.read_exact(&mut field_name_buf)?;
-            let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
-            })?;
+            // Field reference: dictionary id (v3+) or inline name.
+            let field_name =
+                header.read_record_field(&mut input, records_remaining, "hnsw field_name_len")?;
 
             // Decode the per-vector payload according to the segment's
             // quantization kind.
@@ -1385,6 +1380,11 @@ impl VectorIndexWriter for HnswIndexWriter {
         let mut sorted_vectors: Vec<_> = self.vectors.iter().collect();
         sorted_vectors.sort_by_key(|(doc_id, _, _)| *doc_id);
 
+        // Per-segment field-name dictionary (Issue #633): ids assigned in
+        // first-appearance order over the exact emission order below.
+        let (field_dict, field_ids) =
+            build_field_dict(sorted_vectors.iter().map(|(_, f, _)| f.as_str()))?;
+
         let f32_vectors: Vec<Vector> = sorted_vectors
             .iter()
             .map(|(_, _, v)| (*v).clone())
@@ -1408,15 +1408,14 @@ impl VectorIndexWriter for HnswIndexWriter {
                     quantize_segment(&f32_vectors, self.index_config.dimension)?
                 };
                 VectorSegmentHeader::scalar_8bit(params)
-                    .with_version(VERSION_ORDINAL_GRAPH)
+                    .with_version(VERSION_FIELD_DICT)
+                    .with_field_dict(field_dict.clone())
                     .write_to(&mut output)?;
                 for ((doc_id, field_name, _), (int8, meta)) in
                     sorted_vectors.iter().zip(records.iter())
                 {
                     output.write_all(&doc_id.to_le_bytes())?;
-                    let field_name_bytes = field_name.as_bytes();
-                    output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
-                    output.write_all(field_name_bytes)?;
+                    output.write_all(&field_ids[field_name.as_str()].to_le_bytes())?;
                     write_quantized_record(&mut output, int8, *meta)?;
                 }
             }
@@ -1436,7 +1435,8 @@ impl VectorIndexWriter for HnswIndexWriter {
                     )?;
                     let codebook = vec![0.0_f32; params.codebook_len()];
                     VectorSegmentHeader::product_quantization(params, codebook)
-                        .with_version(VERSION_ORDINAL_GRAPH)
+                        .with_version(VERSION_FIELD_DICT)
+                        .with_field_dict(field_dict.clone())
                         .write_to(&mut output)?;
                 } else {
                     let (params, codebook, codes) =
@@ -1446,15 +1446,14 @@ impl VectorIndexWriter for HnswIndexWriter {
                             subvector_count,
                         )?;
                     VectorSegmentHeader::product_quantization(params, codebook)
-                        .with_version(VERSION_ORDINAL_GRAPH)
+                        .with_version(VERSION_FIELD_DICT)
+                        .with_field_dict(field_dict.clone())
                         .write_to(&mut output)?;
                     for ((doc_id, field_name, _), codes_i) in
                         sorted_vectors.iter().zip(codes.iter())
                     {
                         output.write_all(&doc_id.to_le_bytes())?;
-                        let field_name_bytes = field_name.as_bytes();
-                        output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
-                        output.write_all(field_name_bytes)?;
+                        output.write_all(&field_ids[field_name.as_str()].to_le_bytes())?;
                         crate::vector::index::pq_io::write_pq_record(&mut output, codes_i)?;
                     }
                 }
@@ -1476,7 +1475,8 @@ impl VectorIndexWriter for HnswIndexWriter {
                     )?;
                     let codebook = vec![0.0_f32; params.codebook_len()];
                     VectorSegmentHeader::product_quantization_fastscan(params, codebook)
-                        .with_version(VERSION_ORDINAL_GRAPH)
+                        .with_version(VERSION_FIELD_DICT)
+                        .with_field_dict(field_dict.clone())
                         .write_to(&mut output)?;
                 } else {
                     let (params, codebook, codes) =
@@ -1486,15 +1486,14 @@ impl VectorIndexWriter for HnswIndexWriter {
                             subvector_count,
                         )?;
                     VectorSegmentHeader::product_quantization_fastscan(params, codebook)
-                        .with_version(VERSION_ORDINAL_GRAPH)
+                        .with_version(VERSION_FIELD_DICT)
+                        .with_field_dict(field_dict.clone())
                         .write_to(&mut output)?;
                     for ((doc_id, field_name, _), codes_i) in
                         sorted_vectors.iter().zip(codes.iter())
                     {
                         output.write_all(&doc_id.to_le_bytes())?;
-                        let field_name_bytes = field_name.as_bytes();
-                        output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
-                        output.write_all(field_name_bytes)?;
+                        output.write_all(&field_ids[field_name.as_str()].to_le_bytes())?;
                         crate::vector::index::pq_fastscan_io::write_pq_fastscan_record(
                             &mut output,
                             codes_i,

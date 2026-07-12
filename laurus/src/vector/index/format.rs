@@ -591,9 +591,6 @@ impl VectorSegmentHeader {
     ///
     /// The record's field name, or an error when the id is out of
     /// dictionary range / the inline name is oversized or not UTF-8.
-    // Consumed by the reader/writer migration (sub-issue #858); unused
-    // while this format layer ships alone.
-    #[allow(dead_code)]
     pub(crate) fn read_record_field<R: Read>(
         &self,
         reader: &mut R,
@@ -644,8 +641,6 @@ impl VectorSegmentHeader {
 /// # Returns
 ///
 /// The fixed prefix size in bytes.
-// Consumed by the reader/writer migration (sub-issue #858).
-#[allow(dead_code)]
 pub(crate) fn record_prefix_size(version: u16) -> u64 {
     if version >= VERSION_FIELD_DICT {
         10
@@ -666,8 +661,6 @@ pub(crate) fn record_prefix_size(version: u16) -> u64 {
 ///
 /// `(dictionary, name → field_id map)` for the writer's emit loop, or
 /// an error if more than `u16::MAX` distinct names are present.
-// Consumed by the writer migration (sub-issue #858).
-#[allow(dead_code)]
 pub(crate) fn build_field_dict<'a>(
     names: impl Iterator<Item = &'a str>,
 ) -> Result<(Vec<String>, std::collections::HashMap<String, u16>)> {

@@ -239,19 +239,13 @@ impl VectorStorage {
                     }
                 };
 
+                // Offsets point at the record's payload start (the readers
+                // compute them past the doc_id + field-reference prefix at
+                // load, Issue #633), so no per-access prefix re-parse is
+                // needed — one seek lands directly on the vector data.
                 input
                     .seek(SeekFrom::Start(offset))
                     .map_err(LaurusError::Io)?;
-
-                // Skip doc_id (8 bytes) + field_name (4 bytes length + variable)
-                let mut doc_id_buf = [0u8; 8];
-                input.read_exact(&mut doc_id_buf)?;
-
-                let mut field_name_len_buf = [0u8; 4];
-                input.read_exact(&mut field_name_len_buf)?;
-                let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-                let mut field_name_buf = vec![0u8; field_name_len];
-                input.read_exact(&mut field_name_buf)?;
 
                 // Read vector data — branch on the on-disk format.
                 let values = match quant_params {
