@@ -66,8 +66,25 @@ use crate::vector::core::quantization::{PqParams, ScalarQuantParams};
 /// 4-byte ASCII magic at offset 0 of every quantized vector segment.
 pub const VECTOR_SEGMENT_MAGIC: [u8; 4] = *b"LVS1";
 
-/// Current header format version. Reader rejects anything else.
+/// Default header format version stamped by writers.
+///
+/// Flat and IVF segments still write version 1 (their layout is
+/// unchanged), so older builds keep reading them. Only the HNSW writer
+/// opts into [`VERSION_ORDINAL_GRAPH`] via
+/// [`VectorSegmentHeader::with_version`].
 pub const CURRENT_VERSION: u16 = 1;
+
+/// Header version for HNSW segments whose graph block stores
+/// segment-local u32 ordinals instead of u64 doc ids (Issue #686).
+///
+/// The ordinal of a vector is its rank in the ascending, deduplicated
+/// record doc-id sequence — derivable for both versions because records
+/// are always written sorted by doc id.
+pub const VERSION_ORDINAL_GRAPH: u16 = 2;
+
+/// Highest header version this build can read. The reader accepts the
+/// inclusive range `CURRENT_VERSION..=MAX_SUPPORTED_VERSION`.
+pub const MAX_SUPPORTED_VERSION: u16 = VERSION_ORDINAL_GRAPH;
 
 /// `quant_kind` numeric values stored in the header.
 ///
@@ -232,6 +249,24 @@ impl VectorSegmentHeader {
         }
     }
 
+    /// Return `self` with the header `version` replaced.
+    ///
+    /// Used by the HNSW writer to stamp [`VERSION_ORDINAL_GRAPH`] on
+    /// segments whose graph block stores u32 ordinals (Issue #686);
+    /// Flat/IVF writers keep the [`CURRENT_VERSION`] default.
+    ///
+    /// # Arguments
+    ///
+    /// * `version` - The header version to stamp.
+    ///
+    /// # Returns
+    ///
+    /// The header value with `version` set.
+    pub fn with_version(mut self, version: u16) -> Self {
+        self.version = version;
+        self
+    }
+
     /// Total serialized size: fixed header + quant-kind metadata.
     pub fn serialized_size(&self) -> usize {
         FIXED_HEADER_SIZE + self.quant.metadata_size()
@@ -284,8 +319,9 @@ impl VectorSegmentHeader {
     ///   match `LVS1`. Most commonly this means the segment was written
     ///   by a pre-quantization (f32-only) build of laurus and must be
     ///   rebuilt — Issue #481 Stage 1 is a deliberate format break.
-    /// * [`LaurusError::IncompatibleFormat`] if the version is not
-    ///   [`CURRENT_VERSION`] or if `quant_kind` is the reserved value 0.
+    /// * [`LaurusError::IncompatibleFormat`] if the version is outside
+    ///   the supported `CURRENT_VERSION..=MAX_SUPPORTED_VERSION` range
+    ///   or if `quant_kind` is the reserved value 0.
     /// * [`LaurusError::NotImplemented`] if `quant_kind` is the
     ///   Product-Quantization value (2) — reserved for Stage 3.
     /// * [`LaurusError::Io`] for any underlying read failure.
@@ -305,10 +341,10 @@ impl VectorSegmentHeader {
         let mut version_bytes = [0u8; 2];
         reader.read_exact(&mut version_bytes)?;
         let version = u16::from_le_bytes(version_bytes);
-        if version != CURRENT_VERSION {
+        if !(CURRENT_VERSION..=MAX_SUPPORTED_VERSION).contains(&version) {
             return Err(LaurusError::IncompatibleFormat(format!(
                 "unsupported vector segment header version {version} \
-                 (this build supports {CURRENT_VERSION})"
+                 (this build supports {CURRENT_VERSION}..={MAX_SUPPORTED_VERSION})"
             )));
         }
 
@@ -421,6 +457,39 @@ mod tests {
         let mut cursor = Cursor::new(&buf);
         let parsed = VectorSegmentHeader::read_from(&mut cursor).unwrap();
         assert_eq!(parsed, header);
+    }
+
+    #[test]
+    fn roundtrip_v2_ordinal_graph_header() {
+        let header =
+            VectorSegmentHeader::scalar_8bit(sample_params()).with_version(VERSION_ORDINAL_GRAPH);
+        let mut buf: Vec<u8> = Vec::new();
+        header.write_to(&mut buf).unwrap();
+        assert_eq!(
+            u16::from_le_bytes([buf[4], buf[5]]),
+            VERSION_ORDINAL_GRAPH,
+            "with_version must stamp the version bytes at offset 4"
+        );
+
+        let mut cursor = Cursor::new(&buf);
+        let parsed = VectorSegmentHeader::read_from(&mut cursor).unwrap();
+        assert_eq!(parsed.version, VERSION_ORDINAL_GRAPH);
+        assert_eq!(parsed, header);
+    }
+
+    #[test]
+    fn rejects_header_version_above_max_supported() {
+        let header = VectorSegmentHeader::scalar_8bit(sample_params())
+            .with_version(MAX_SUPPORTED_VERSION + 1);
+        let mut buf: Vec<u8> = Vec::new();
+        header.write_to(&mut buf).unwrap();
+
+        let mut cursor = Cursor::new(&buf);
+        let err = VectorSegmentHeader::read_from(&mut cursor).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported vector segment"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

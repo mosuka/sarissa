@@ -10,7 +10,7 @@ use crate::vector::core::distance_quantized::{
     PqQuery, QuantizedQuery, distance_pq_adc, distance_quantized,
 };
 use crate::vector::core::vector::Vector;
-use crate::vector::index::hnsw::graph::HnswGraph;
+use crate::vector::index::hnsw::graph::OrdinalHnswGraph;
 use crate::vector::index::hnsw::reader::HnswIndexReader;
 #[cfg(feature = "pq-fastscan")]
 use crate::vector::index::pq_fastscan_avx2::distance_pq_fastscan_block;
@@ -106,54 +106,121 @@ enum QuantizedSearchCtx {
 
 impl QuantizedSearchCtx {
     /// Compute distance from the prepared query to the candidate at
-    /// `doc_id`. Returns `f32::MAX` if the candidate is missing, which
-    /// is what HNSW's calc_dist expects for absent neighbours.
+    /// pool position `pos` (Issue #686 ordinal hot path — no hash
+    /// probe; the caller has already translated ordinal → position).
+    ///
+    /// # Arguments
+    ///
+    /// * `pos` - The candidate's pool position (`< vector_count`,
+    ///   guaranteed by the reader's load-time validation).
+    ///
+    /// # Returns
+    ///
+    /// The quantized distance.
     #[inline]
-    fn distance(&self, doc_id: u64) -> f32 {
+    fn distance_at(&self, pos: u32) -> f32 {
         match self {
             Self::Scalar8Bit {
                 prepared,
                 pool,
-                field_idx,
                 metric,
-            } => match field_idx.get(&doc_id) {
-                Some(&pos) => {
-                    let (int8, meta) = pool.record_at(pos);
-                    distance_quantized(*metric, prepared, int8, meta)
-                }
-                None => f32::MAX,
-            },
+                ..
+            } => {
+                let (int8, meta) = pool.record_at(pos);
+                distance_quantized(*metric, prepared, int8, meta)
+            }
             Self::Pq {
                 prepared,
                 pool,
-                field_idx,
                 metric,
-            } => match field_idx.get(&doc_id) {
-                Some(&pos) => {
-                    let codes = pool.codes_at(pos);
-                    distance_pq_adc(*metric, prepared, codes)
-                }
-                None => f32::MAX,
-            },
+                ..
+            } => {
+                let codes = pool.codes_at(pos);
+                distance_pq_adc(*metric, prepared, codes)
+            }
             #[cfg(feature = "pq-fastscan")]
             Self::PqFastScan {
                 prepared,
                 pool,
-                field_idx,
                 metric,
-            } => match field_idx.get(&doc_id) {
-                Some(&pos) => {
-                    let pos = pos as usize;
-                    let block_idx = pos / BLOCK_SIZE;
-                    let in_block = pos % BLOCK_SIZE;
-                    let stride = pool.block_stride();
-                    let block_base = block_idx * stride;
-                    let packed_block = &pool.packed[block_base..block_base + stride];
-                    let distances = distance_pq_fastscan_block(*metric, prepared, packed_block);
-                    distances[in_block]
+                ..
+            } => {
+                let pos = pos as usize;
+                let block_idx = pos / BLOCK_SIZE;
+                let in_block = pos % BLOCK_SIZE;
+                let stride = pool.block_stride();
+                let block_base = block_idx * stride;
+                let packed_block = &pool.packed[block_base..block_base + stride];
+                let distances = distance_pq_fastscan_block(*metric, prepared, packed_block);
+                distances[in_block]
+            }
+        }
+    }
+
+    /// Compute distance from the prepared query to the candidate at
+    /// segment ordinal `ord` (Issue #686).
+    ///
+    /// # Arguments
+    ///
+    /// * `ord` - The candidate's segment ordinal (`< node_count`).
+    /// * `ord_to_pos` - Ordinal → pool-position table, `None` for the
+    ///   identity mapping (single-field segments — the common case).
+    ///
+    /// # Returns
+    ///
+    /// The quantized distance, or `f32::MAX` when the table marks the
+    /// doc absent from the searched field (#676 semantics).
+    #[inline]
+    fn distance_ord(&self, ord: u32, ord_to_pos: Option<&[u32]>) -> f32 {
+        let pos = match ord_to_pos {
+            None => ord,
+            Some(table) => {
+                let pos = table[ord as usize];
+                if pos == u32::MAX {
+                    return f32::MAX;
                 }
-                None => f32::MAX,
-            },
+                pos
+            }
+        };
+        self.distance_at(pos)
+    }
+
+    /// Compute distance from the prepared query to the candidate at
+    /// `doc_id`. Returns `f32::MAX` if the candidate is missing, which
+    /// is what HNSW's calc_dist expects for absent neighbours.
+    ///
+    /// Cold-path variant (the #738 brute-force mode and the entry-point
+    /// probe): pays one `field_idx` hash probe per call. The graph
+    /// traversal itself uses [`Self::distance_ord`].
+    #[inline]
+    fn distance_doc(&self, doc_id: u64) -> f32 {
+        let field_idx = match self {
+            Self::Scalar8Bit { field_idx, .. } => field_idx,
+            Self::Pq { field_idx, .. } => field_idx,
+            #[cfg(feature = "pq-fastscan")]
+            Self::PqFastScan { field_idx, .. } => field_idx,
+        };
+        match field_idx.get(&doc_id) {
+            Some(&pos) => self.distance_at(pos),
+            None => f32::MAX,
+        }
+    }
+
+    /// Base address and record stride for direct-address software
+    /// prefetch (Issue #686), when this ctx's pool layout supports it.
+    ///
+    /// Only the int8 SQ pool benefits: PQ records are 8–32 bytes (the
+    /// LUT is the important cache occupant) and FastScan streams whole
+    /// blocks sequentially, so both return `None` — matching the
+    /// pre-#686 behaviour where their prefetch maps were never built.
+    ///
+    /// # Returns
+    ///
+    /// `Some((base_address, stride_bytes))` for the SQ pool, else `None`.
+    fn prefetch_base_stride(&self) -> Option<(usize, usize)> {
+        match self {
+            Self::Scalar8Bit { pool, .. } => Some((pool.int8_data.as_ptr() as usize, pool.pad_dim)),
+            _ => None,
         }
     }
 }
@@ -415,9 +482,12 @@ impl VectorIndexSearcher for HnswSearcher {
     }
 }
 
+/// Frontier heap entry for graph traversal (Issue #686): carries the
+/// segment-local u32 ordinal, packing the entry into 8 bytes (vs 16 for
+/// the former `{u64, f32}` shape) — half the heap traffic per push/pop.
 #[derive(Debug, Clone, PartialEq)]
 struct Candidate {
-    id: u64,
+    ord: u32,
     distance: f32,
 }
 
@@ -465,11 +535,14 @@ impl HnswSearcher {
     fn search_graph(
         &self,
         reader: &HnswIndexReader,
-        graph: &HnswGraph,
+        graph: &OrdinalHnswGraph,
         request: &VectorIndexQuery,
         field_name: &str,
     ) -> Result<VectorIndexQueryResults> {
-        let entry_point = match graph.entry_point {
+        // Ordinal traversal (Issue #686): the graph is addressed by
+        // segment-local u32 ordinals throughout; doc ids materialise only
+        // at admission/emission via the `graph.doc_id(ord)` array read.
+        let entry_ord = match graph.entry_point() {
             Some(ep) => ep,
             None => return Ok(VectorIndexQueryResults::new()),
         };
@@ -538,27 +611,57 @@ impl HnswSearcher {
             .is_none()
             .then(|| metric.prepare_query(&query.data));
 
-        // Retrieve the per-field prefetch index once per search call (O(1), no allocation).
-        // `None` for on-demand (disk-backed) storage; the prefetch loop is skipped entirely.
-        let field_prefetch = reader.field_prefetch_index(field_name);
-        // Prefetch payload size: the padded int8 record (`pad_dim`
-        // bytes) for the SQ hot path; M bytes for PQ; legacy f32 size
-        // otherwise. The meta now lives in separate SoA arrays, so the
-        // int8 stride alone is what the hot loop streams.
-        let prefetch_n_bytes = match &quant_ctx {
-            Some(QuantizedSearchCtx::Scalar8Bit { .. }) => {
-                QuantizedVectorPool::padded_dim(reader.dimension())
-            }
-            Some(QuantizedSearchCtx::Pq { pool, .. }) => PqVectorPool::record_size(pool.params.m),
-            #[cfg(feature = "pq-fastscan")]
-            Some(QuantizedSearchCtx::PqFastScan { pool, .. }) => {
-                // FastScan reads one entire block (M * 16 bytes) per
-                // candidate via the SIMD kernel; prefetch the same block
-                // stride so the next neighbour's block lands in L1 by
-                // the time the kernel walks it.
-                pool.block_stride()
-            }
+        // Ordinal → pool-position table (Issue #686): `None` means the
+        // identity holds (single-field segment — every current writer),
+        // so the ordinal doubles as the pool position and the hot loop
+        // pays no translation at all.
+        let ord_to_pos = reader.field_ord_to_pos(field_name);
+
+        // Prefetch setup. The int8 SQ hot path computes each neighbour's
+        // record address directly as `base + pos * stride` (Issue #686 —
+        // no doc_id-keyed map probe); the legacy f32 `Owned` storage
+        // keeps its doc_id-keyed address map. PQ/FastScan never prefetch
+        // (records are tiny / block-streamed respectively).
+        let sq_prefetch = quant_ctx
+            .as_ref()
+            .and_then(QuantizedSearchCtx::prefetch_base_stride);
+        let field_prefetch = if quant_ctx.is_none() {
+            reader.field_prefetch_index(field_name)
+        } else {
+            None
+        };
+        let prefetch_n_bytes = match &sq_prefetch {
+            // The padded int8 record; its meta lives in separate SoA
+            // arrays, so the int8 stride alone is what the loop streams.
+            Some((_, stride)) => *stride,
             None => reader.dimension() * std::mem::size_of::<f32>(),
+        };
+
+        // One prefetch hint per unvisited neighbour ordinal. Kept as a
+        // plain stack closure so both traversal branches share one body
+        // without perturbing their codegen (#645 discipline).
+        // Whether any prefetch source exists at all. Hoisted so the
+        // no-prefetch storages (OnDemand / PQ / FastScan) skip the
+        // pass-1 loops entirely, exactly like the pre-#686 structure
+        // (`if let Some(idx) = field_prefetch` around the loop).
+        let prefetch_enabled = sq_prefetch.is_some() || field_prefetch.is_some();
+        let prefetch_ord = |ord: u32| {
+            if let Some((base, stride)) = sq_prefetch {
+                let pos = match ord_to_pos.as_deref() {
+                    None => ord,
+                    Some(table) => table[ord as usize],
+                };
+                if pos != u32::MAX {
+                    // SAFETY (address computation only): `base` was taken
+                    // from the SQ pool's `int8_data`, which the ctx's Arc
+                    // keeps alive for this search; `pos` is a validated
+                    // pool position, so the address stays in-bounds.
+                    // Prefetch is a pure hint and never dereferences.
+                    Self::prefetch_addr(base + pos as usize * stride, prefetch_n_bytes);
+                }
+            } else if let Some(idx) = field_prefetch {
+                Self::prefetch_neighbor(idx, graph.doc_id(ord), prefetch_n_bytes);
+            }
         };
 
         // Cardinality-driven mode (Issue #738): when the filter is selective
@@ -609,49 +712,51 @@ impl HnswSearcher {
             );
         }
 
-        // 1. Start from entry point at max_level
-        let mut curr_obj = entry_point;
-        // Note: Assuming entry_point is in field_name. If not, we might fail to get vector.
-        // If doc_id corresponds to field_name, we get vector.
-        // Since HNSW here is single-graph for mixed IDs (potentially), we must hope entry point is valid for calc_dist with this field?
-        // Ref discussion: assuming HnswIndex is single-field.
-
-        let mut dist = self.calc_dist(
+        // 1. Start from entry point at max_level. The entry is assumed
+        // to belong to `field_name` (HnswIndex is single-field); a
+        // missing field yields `f32::MAX` and the descent degrades
+        // gracefully (#676 semantics).
+        let mut curr_ord = entry_ord;
+        let mut dist = self.calc_dist_ord(
             reader,
             query,
             quant_ctx.as_ref(),
             prepared_query.as_ref(),
-            curr_obj,
+            ord_to_pos.as_deref(),
+            graph,
+            curr_ord,
             field_name,
         )?;
 
         // 2. Greedy descent
-        for lc in (1..=graph.max_level).rev() {
+        for lc in (1..=graph.max_level()).rev() {
             let mut changed = true;
             while changed {
                 changed = false;
-                if let Some(neighbors) = graph.get_neighbors(curr_obj, lc) {
+                if let Some(neighbors) = graph.neighbors(curr_ord, lc) {
                     // Pass 1: issue prefetch hints for all neighbors before computing
                     // distances.  For datasets larger than L3 cache this hides the
-                    // memory latency of loading Vec<f32> data.
-                    if let Some(idx) = field_prefetch {
-                        for &neighbor_id in neighbors {
-                            Self::prefetch_neighbor(idx, neighbor_id, prefetch_n_bytes);
+                    // memory latency of loading the candidate records.
+                    if prefetch_enabled {
+                        for &neighbor_ord in neighbors {
+                            prefetch_ord(neighbor_ord);
                         }
                     }
                     // Pass 2: compute distances (data is being fetched in the background).
-                    for &neighbor_id in neighbors {
-                        let d = self.calc_dist(
+                    for &neighbor_ord in neighbors {
+                        let d = self.calc_dist_ord(
                             reader,
                             query,
                             quant_ctx.as_ref(),
                             prepared_query.as_ref(),
-                            neighbor_id,
+                            ord_to_pos.as_deref(),
+                            graph,
+                            neighbor_ord,
                             field_name,
                         )?;
                         if d < dist {
                             dist = d;
-                            curr_obj = neighbor_id;
+                            curr_ord = neighbor_ord;
                             changed = true;
                         }
                     }
@@ -674,34 +779,37 @@ impl HnswSearcher {
         let needs_bookkeeping = request.filter.is_some() || check_deletions;
 
         candidates.push(Candidate {
-            id: curr_obj,
+            ord: curr_ord,
             distance: dist,
         });
         // Seed the result heap with the entry only if it is admissible. The
         // pre-#665 code admitted the entry unconditionally, which let a deleted
         // (or, under #645, filter-rejected) entry leak into results.
+        let curr_doc = graph.doc_id(curr_ord);
         let entry_admitted = !needs_bookkeeping
             || (request
                 .filter
                 .as_deref()
-                .is_none_or(|f| f.contains(curr_obj))
-                && !(check_deletions && reader.is_deleted(curr_obj)));
+                .is_none_or(|f| f.contains(curr_doc))
+                && !(check_deletions && reader.is_deleted(curr_doc)));
         if entry_admitted {
             found.push(ResultCandidate {
-                id: curr_obj,
+                id: curr_doc,
                 distance: dist,
             });
         }
 
-        // Visited set as a dense bitmap. doc_ids in laurus are assigned
-        // sequentially from 0, so the bitmap is sized to fit every node
-        // currently in the graph (`max_doc_id + 1` bits ≈ N / 8 bytes for
-        // N nodes). `BitVec::get` / `BitVec::set` are a single array
-        // index + bit op, materially cheaper than `HashSet<u64>`'s hash
-        // + bucket lookup that the audit (#406) flagged for ef_search
-        // graph traversals which examine hundreds-to-thousands of nodes.
-        let mut visited = BitVec::from_elem(graph.max_doc_id() as usize + 1, false);
-        visited.set(curr_obj as usize, true);
+        // Visited set as a dense bitmap indexed by segment ordinal
+        // (Issue #686): exactly `node_count` bits, independent of the
+        // global doc-id space — a long-lived store whose ids have grown
+        // far past this segment's node count no longer pays a
+        // proportionally inflated allocation + zeroing per query (the
+        // #647 premise). `BitVec::get` / `BitVec::set` are a single
+        // array index + bit op, materially cheaper than `HashSet<u64>`'s
+        // hash + bucket lookup that the audit (#406) flagged for
+        // ef_search graph traversals.
+        let mut visited = BitVec::from_elem(graph.node_count(), false);
+        visited.set(curr_ord as usize, true);
 
         // Bookkeeping traversal (Issues #645 and #665). The result heap
         // (`found`) admits a node only if it passes the admission predicate —
@@ -745,29 +853,31 @@ impl HnswSearcher {
                     break;
                 }
 
-                if let Some(neighbors) = graph.get_neighbors(curr.id, 0) {
-                    if let Some(idx) = field_prefetch {
-                        for &neighbor_id in neighbors {
-                            if !visited.get(neighbor_id as usize).unwrap_or(false) {
-                                Self::prefetch_neighbor(idx, neighbor_id, prefetch_n_bytes);
+                if let Some(neighbors) = graph.neighbors(curr.ord, 0) {
+                    if prefetch_enabled {
+                        for &neighbor_ord in neighbors {
+                            if !visited.get(neighbor_ord as usize).unwrap_or(false) {
+                                prefetch_ord(neighbor_ord);
                             }
                         }
                     }
 
-                    for &neighbor_id in neighbors {
-                        let nbr_idx = neighbor_id as usize;
+                    for &neighbor_ord in neighbors {
+                        let nbr_idx = neighbor_ord as usize;
                         if visited.get(nbr_idx).unwrap_or(false) {
                             continue;
                         }
                         visited.set(nbr_idx, true);
                         n_visited += 1;
 
-                        let d = self.calc_dist(
+                        let d = self.calc_dist_ord(
                             reader,
                             query,
                             quant_ctx.as_ref(),
                             prepared_query.as_ref(),
-                            neighbor_id,
+                            ord_to_pos.as_deref(),
+                            graph,
+                            neighbor_ord,
                             field_name,
                         )?;
                         let furthest_dist = found.peek().map(|c| c.distance).unwrap_or(f32::MAX);
@@ -777,18 +887,21 @@ impl HnswSearcher {
                             // ones the filter rejects or that are deleted, to
                             // preserve connectivity.
                             candidates.push(Candidate {
-                                id: neighbor_id,
+                                ord: neighbor_ord,
                                 distance: d,
                             });
                             // Result heap keeps only admissible docs: matching
                             // the filter (if any) AND not deleted (Issue #665).
                             // `check_deletions` short-circuits the `is_deleted`
-                            // call away on the filter-only path.
-                            let admitted = filter.is_none_or(|f| f.contains(neighbor_id))
-                                && !(check_deletions && reader.is_deleted(neighbor_id));
+                            // call away on the filter-only path. The doc id
+                            // materialises here — once per candidate that
+                            // reaches admission, via one array read.
+                            let neighbor_doc = graph.doc_id(neighbor_ord);
+                            let admitted = filter.is_none_or(|f| f.contains(neighbor_doc))
+                                && !(check_deletions && reader.is_deleted(neighbor_doc));
                             if admitted {
                                 found.push(ResultCandidate {
-                                    id: neighbor_id,
+                                    id: neighbor_doc,
                                     distance: d,
                                 });
                                 if found.len() > ef_search {
@@ -811,43 +924,46 @@ impl HnswSearcher {
                     break;
                 }
 
-                if let Some(neighbors) = graph.get_neighbors(curr.id, 0) {
+                if let Some(neighbors) = graph.neighbors(curr.ord, 0) {
                     // Pass 1: issue prefetch hints for unvisited neighbors.
-                    // O(1) per neighbor (u64 HashMap lookup, no allocation).
-                    if let Some(idx) = field_prefetch {
-                        for &neighbor_id in neighbors {
-                            if !visited.get(neighbor_id as usize).unwrap_or(false) {
-                                Self::prefetch_neighbor(idx, neighbor_id, prefetch_n_bytes);
+                    // O(1) per neighbor (direct address computation, no
+                    // allocation, no hash probe on the SQ hot path).
+                    if prefetch_enabled {
+                        for &neighbor_ord in neighbors {
+                            if !visited.get(neighbor_ord as usize).unwrap_or(false) {
+                                prefetch_ord(neighbor_ord);
                             }
                         }
                     }
 
                     // Pass 2: compute distances for unvisited neighbors (data
                     // loading overlaps with the prefetch hints issued above).
-                    for &neighbor_id in neighbors {
-                        let nbr_idx = neighbor_id as usize;
+                    for &neighbor_ord in neighbors {
+                        let nbr_idx = neighbor_ord as usize;
                         if visited.get(nbr_idx).unwrap_or(false) {
                             continue;
                         }
                         visited.set(nbr_idx, true);
 
-                        let d = self.calc_dist(
+                        let d = self.calc_dist_ord(
                             reader,
                             query,
                             quant_ctx.as_ref(),
                             prepared_query.as_ref(),
-                            neighbor_id,
+                            ord_to_pos.as_deref(),
+                            graph,
+                            neighbor_ord,
                             field_name,
                         )?;
                         let furthest_dist = found.peek().map(|c| c.distance).unwrap_or(f32::MAX);
 
                         if d < furthest_dist || found.len() < ef_search {
                             candidates.push(Candidate {
-                                id: neighbor_id,
+                                ord: neighbor_ord,
                                 distance: d,
                             });
                             found.push(ResultCandidate {
-                                id: neighbor_id,
+                                id: graph.doc_id(neighbor_ord),
                                 distance: d,
                             });
 
@@ -979,6 +1095,49 @@ impl HnswSearcher {
         })
     }
 
+    /// Distance to the candidate at segment ordinal `ord` (Issue #686).
+    ///
+    /// The quantized hot path resolves the pool position from the
+    /// ordinal (identity or one table read — no hash probe); the f32
+    /// fallback translates the ordinal to a doc id with one array read
+    /// and delegates to [`Self::calc_dist`].
+    ///
+    /// # Arguments
+    ///
+    /// * `ord_to_pos` - Ordinal → pool-position table (`None` = identity).
+    /// * `graph` - The ordinal graph, for the f32 fallback translation.
+    /// * `ord` - The candidate's segment ordinal.
+    ///
+    /// # Returns
+    ///
+    /// The distance, or `f32::MAX` when the doc has no vector in
+    /// `field_name` (#676 semantics).
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn calc_dist_ord(
+        &self,
+        reader: &HnswIndexReader,
+        query: &Vector,
+        quant_ctx: Option<&QuantizedSearchCtx>,
+        prepared: Option<&PreparedQuery<'_>>,
+        ord_to_pos: Option<&[u32]>,
+        graph: &OrdinalHnswGraph,
+        ord: u32,
+        field_name: &str,
+    ) -> Result<f32> {
+        if let Some(ctx) = quant_ctx {
+            return Ok(ctx.distance_ord(ord, ord_to_pos));
+        }
+        self.calc_dist(
+            reader,
+            query,
+            quant_ctx,
+            prepared,
+            graph.doc_id(ord),
+            field_name,
+        )
+    }
+
     fn calc_dist(
         &self,
         reader: &HnswIndexReader,
@@ -993,7 +1152,7 @@ impl HnswSearcher {
         // remains f32 for backward compatibility (OnDemand mode and
         // legacy f32 Owned).
         if let Some(ctx) = quant_ctx {
-            return Ok(ctx.distance(doc_id));
+            return Ok(ctx.distance_doc(doc_id));
         }
         if let Some(target) = reader.get_vector(doc_id, field_name)? {
             // f32 reference path. Prefer the prepared query (#835): it caches
@@ -1030,29 +1189,52 @@ impl HnswSearcher {
     /// pointer is valid for the entire lifetime of the search.
     /// `_mm_prefetch` / `prfm` are pure hints that never dereference the pointer.
     #[inline]
-    #[allow(unused_variables)]
     fn prefetch_neighbor(idx: &HashMap<u64, usize>, doc_id: u64, n_bytes: usize) {
         if let Some(&addr) = idx.get(&doc_id) {
-            let base_ptr = addr as *const i8;
-            let mut offset = 0;
-            while offset < n_bytes {
-                #[cfg(target_arch = "x86_64")]
-                // SAFETY: see method doc comment.
-                unsafe {
-                    use std::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
-                    _mm_prefetch::<_MM_HINT_T0>(base_ptr.add(offset));
-                }
-                #[cfg(target_arch = "aarch64")]
-                // SAFETY: see method doc comment.
-                unsafe {
-                    std::arch::asm!(
-                        "prfm pldl1keep, [{p}]",
-                        p = in(reg) base_ptr.add(offset),
-                        options(nostack, readonly),
-                    );
-                }
-                offset += 64;
+            Self::prefetch_addr(addr, n_bytes);
+        }
+    }
+
+    /// Issue software prefetch hints for `n_bytes` starting at `addr`
+    /// (one hint per 64-byte cache line).
+    ///
+    /// Shared tail of [`Self::prefetch_neighbor`] (doc_id-keyed f32
+    /// map) and the Issue #686 direct-address SQ path, which computes
+    /// `addr` as `pool base + pos * stride` without any map probe.
+    ///
+    /// # Safety
+    ///
+    /// Callers must pass an address whose backing allocation outlives
+    /// the search (both callers derive it from pools kept alive by the
+    /// reader / search ctx). `_mm_prefetch` / `prfm` are pure hints
+    /// that never dereference the pointer.
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - Base address of the record to prefetch.
+    /// * `n_bytes` - Number of bytes the upcoming access will stream.
+    #[inline]
+    #[allow(unused_variables)]
+    fn prefetch_addr(addr: usize, n_bytes: usize) {
+        let base_ptr = addr as *const i8;
+        let mut offset = 0;
+        while offset < n_bytes {
+            #[cfg(target_arch = "x86_64")]
+            // SAFETY: see method doc comment.
+            unsafe {
+                use std::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
+                _mm_prefetch::<_MM_HINT_T0>(base_ptr.add(offset));
             }
+            #[cfg(target_arch = "aarch64")]
+            // SAFETY: see method doc comment.
+            unsafe {
+                std::arch::asm!(
+                    "prfm pldl1keep, [{p}]",
+                    p = in(reg) base_ptr.add(offset),
+                    options(nostack, readonly),
+                );
+            }
+            offset += 64;
         }
     }
 }
@@ -1172,7 +1354,10 @@ mod nan_ordering_tests {
         // `Candidate` is a min-heap by distance (nearest pops first).
         let mut heap = BinaryHeap::new();
         for d in [3.0_f32, 1.0, f32::NAN, 2.0] {
-            heap.push(Candidate { id: 0, distance: d });
+            heap.push(Candidate {
+                ord: 0,
+                distance: d,
+            });
         }
         let popped: Vec<f32> = std::iter::from_fn(|| heap.pop().map(|c| c.distance)).collect();
         assert_eq!(popped.len(), 4, "no candidate is lost");
