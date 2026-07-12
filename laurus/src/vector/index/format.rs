@@ -627,6 +627,137 @@ impl VectorSegmentHeader {
     }
 }
 
+/// Per-segment field-name interner for reader load paths (Issue #633,
+/// PR-B).
+///
+/// Readers parse records into `(doc_id, u16)` pairs plus one shared
+/// dictionary instead of one heap `String` per record:
+///
+/// * v3 segments: the dictionary comes fixed from the header; record
+///   ids are validated against it.
+/// * v1/v2 segments: the dictionary is synthesized on the fly in
+///   first-appearance order, so legacy files get the same interned
+///   in-memory representation.
+pub(crate) struct FieldInterner {
+    names: Vec<std::sync::Arc<str>>,
+    /// Whether the dictionary is fixed by a v3 header (no growth).
+    fixed: bool,
+}
+
+impl FieldInterner {
+    /// Build an interner for the given parsed header.
+    ///
+    /// # Arguments
+    ///
+    /// * `header` - The segment's parsed LVS header.
+    ///
+    /// # Returns
+    ///
+    /// A fixed interner seeded from the v3 dictionary, or an empty
+    /// growable one for v1/v2 segments.
+    pub(crate) fn from_header(header: &VectorSegmentHeader) -> Self {
+        if header.version >= VERSION_FIELD_DICT {
+            Self {
+                names: header
+                    .field_dict
+                    .iter()
+                    .map(|s| std::sync::Arc::from(s.as_str()))
+                    .collect(),
+                fixed: true,
+            }
+        } else {
+            Self {
+                names: Vec::new(),
+                fixed: false,
+            }
+        }
+    }
+
+    /// Read one record's field reference and return its interned id.
+    ///
+    /// v3: reads the `field_id u16` and validates it against the fixed
+    /// dictionary. v1/v2: reads the inline name and interns it
+    /// (first-appearance order).
+    ///
+    /// # Arguments
+    ///
+    /// * `header` - The segment's parsed header (drives the version).
+    /// * `reader` - Stream positioned right after the record's doc id.
+    /// * `records_remaining` - Bound for the inline-name allocation.
+    /// * `what` - Label for corruption error messages.
+    ///
+    /// # Returns
+    ///
+    /// The record's field id within [`Self::dict`].
+    pub(crate) fn read_record_field_id<R: Read>(
+        &mut self,
+        header: &VectorSegmentHeader,
+        reader: &mut R,
+        records_remaining: u64,
+        what: &str,
+    ) -> Result<u16> {
+        if self.fixed {
+            let mut id_bytes = [0u8; 2];
+            reader.read_exact(&mut id_bytes)?;
+            let field_id = u16::from_le_bytes(id_bytes);
+            if field_id as usize >= self.names.len() {
+                return Err(LaurusError::index(format!(
+                    "vector segment corrupt: record field_id {field_id} out of \
+                     dictionary range ({} entries)",
+                    self.names.len()
+                )));
+            }
+            Ok(field_id)
+        } else {
+            let name = header.read_record_field(reader, records_remaining, what)?;
+            if let Some(pos) = self.names.iter().position(|n| **n == *name) {
+                return Ok(pos as u16);
+            }
+            if self.names.len() >= u16::MAX as usize {
+                return Err(LaurusError::index(format!(
+                    "vector segment has more than {} distinct field names",
+                    u16::MAX
+                )));
+            }
+            self.names.push(std::sync::Arc::from(name.as_str()));
+            Ok((self.names.len() - 1) as u16)
+        }
+    }
+
+    /// Borrow the interned name for `fid` (valid ids only — callers
+    /// pass ids this interner just produced).
+    pub(crate) fn name(&self, fid: u16) -> &std::sync::Arc<str> {
+        &self.names[fid as usize]
+    }
+
+    /// Finalize into the per-segment shared dictionary.
+    pub(crate) fn into_dict(self) -> std::sync::Arc<[std::sync::Arc<str>]> {
+        std::sync::Arc::from(self.names)
+    }
+}
+
+/// Resolve a field name to its id in a per-segment dictionary by linear
+/// scan (Issue #633 PR-B).
+///
+/// Dictionaries hold 1–3 entries in practice, so a scan beats hashing
+/// and allocates nothing — this is the once-per-call replacement for
+/// the former per-call `field_name.to_string()` key materialization.
+///
+/// # Arguments
+///
+/// * `dict` - The segment's field dictionary.
+/// * `field_name` - The name to resolve.
+///
+/// # Returns
+///
+/// The field id, or `None` when the segment has no such field.
+#[inline]
+pub(crate) fn resolve_field_id(dict: &[std::sync::Arc<str>], field_name: &str) -> Option<u16> {
+    dict.iter()
+        .position(|n| **n == *field_name)
+        .map(|pos| pos as u16)
+}
+
 /// Size in bytes of the per-record prefix (`doc_id` + field reference)
 /// for the given header version (Issue #633).
 ///
@@ -830,6 +961,58 @@ mod tests {
             header.read_record_field(&mut cursor, 64, "test").unwrap(),
             "field"
         );
+    }
+
+    #[test]
+    fn interner_synthesizes_dict_for_legacy_versions() {
+        let header = VectorSegmentHeader::scalar_8bit(sample_params());
+        let mut interner = FieldInterner::from_header(&header);
+
+        let mut rec = |name: &str| {
+            let mut bytes = (name.len() as u32).to_le_bytes().to_vec();
+            bytes.extend_from_slice(name.as_bytes());
+            let mut cursor = Cursor::new(bytes);
+            interner
+                .read_record_field_id(&header, &mut cursor, 64, "test")
+                .unwrap()
+        };
+        assert_eq!(rec("b"), 0);
+        assert_eq!(rec("a"), 1);
+        assert_eq!(rec("b"), 0, "repeat name must intern to the same id");
+
+        let dict = interner.into_dict();
+        assert_eq!(dict.len(), 2);
+        assert_eq!(&*dict[0], "b");
+        assert_eq!(&*dict[1], "a");
+    }
+
+    #[test]
+    fn interner_uses_fixed_dict_for_v3_and_rejects_out_of_range() {
+        let header = VectorSegmentHeader::scalar_8bit(sample_params())
+            .with_version(VERSION_FIELD_DICT)
+            .with_field_dict(vec!["f".to_string()]);
+        let mut interner = FieldInterner::from_header(&header);
+
+        let mut ok = Cursor::new(0u16.to_le_bytes().to_vec());
+        assert_eq!(
+            interner
+                .read_record_field_id(&header, &mut ok, 0, "test")
+                .unwrap(),
+            0
+        );
+        let mut bad = Cursor::new(3u16.to_le_bytes().to_vec());
+        let err = interner
+            .read_record_field_id(&header, &mut bad, 0, "test")
+            .unwrap_err();
+        assert!(err.to_string().contains("out of"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_field_id_scans_the_dict() {
+        let dict: Vec<std::sync::Arc<str>> =
+            vec![std::sync::Arc::from("a"), std::sync::Arc::from("b")];
+        assert_eq!(resolve_field_id(&dict, "b"), Some(1));
+        assert_eq!(resolve_field_id(&dict, "missing"), None);
     }
 
     #[test]

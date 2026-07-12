@@ -10,7 +10,7 @@ use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization::QuantizedVectorMeta;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::format::{
-    QuantHeader, VERSION_ORDINAL_GRAPH, VectorSegmentHeader, record_prefix_size,
+    FieldInterner, QuantHeader, VERSION_ORDINAL_GRAPH, VectorSegmentHeader, record_prefix_size,
 };
 use crate::vector::index::hnsw::graph::OrdinalHnswGraph;
 use crate::vector::index::quantized_io::quantized_record_payload_size;
@@ -28,17 +28,18 @@ use crate::vector::index::storage::VectorStorage;
 ///
 /// The grouping happens once at reader load so search-time
 /// `doc_ids_for_field` is a single HashMap lookup + Arc clone.
-fn build_vector_ids_by_field(vector_ids: &[(u64, String)]) -> HashMap<String, Arc<[u64]>> {
-    let mut by_field: HashMap<String, Vec<u64>> = HashMap::new();
-    for (doc_id, field_name) in vector_ids {
-        by_field
-            .entry(field_name.clone())
-            .or_default()
-            .push(*doc_id);
+fn build_vector_ids_by_field(
+    vector_ids: &[(u64, u16)],
+    field_dict: &[Arc<str>],
+) -> HashMap<String, Arc<[u64]>> {
+    let mut by_field: Vec<Vec<u64>> = vec![Vec::new(); field_dict.len()];
+    for &(doc_id, fid) in vector_ids {
+        by_field[fid as usize].push(doc_id);
     }
-    by_field
-        .into_iter()
-        .map(|(field, ids)| (field, Arc::<[u64]>::from(ids)))
+    field_dict
+        .iter()
+        .zip(by_field)
+        .map(|(field, ids)| (field.to_string(), Arc::<[u64]>::from(ids)))
         .collect()
 }
 
@@ -46,7 +47,12 @@ fn build_vector_ids_by_field(vector_ids: &[(u64, String)]) -> HashMap<String, Ar
 #[derive(Debug)]
 pub struct HnswIndexReader {
     vectors: VectorStorage,
-    vector_ids: Vec<(u64, String)>,
+    /// `(doc_id, field_id)` per record; ids index [`Self::field_dict`]
+    /// (Issue #633 PR-B — interned, no per-record heap `String`).
+    vector_ids: Vec<(u64, u16)>,
+    /// Per-segment field-name dictionary (synthesized at load for
+    /// v1/v2 segments, taken from the header for v3).
+    field_dict: Arc<[Arc<str>]>,
     dimension: usize,
     distance_metric: DistanceMetric,
     m: usize,
@@ -206,7 +212,7 @@ impl HnswIndexReader {
     ///
     /// The strictly ascending unique doc-id table, or an error if the
     /// record ids are not non-decreasing.
-    fn unique_sorted_doc_ids(vector_ids: &[(u64, String)]) -> Result<Arc<[u64]>> {
+    fn unique_sorted_doc_ids(vector_ids: &[(u64, u16)]) -> Result<Arc<[u64]>> {
         let mut unique: Vec<u64> = Vec::with_capacity(vector_ids.len());
         for (doc_id, _) in vector_ids {
             match unique.last() {
@@ -546,8 +552,12 @@ impl HnswIndexReader {
         // calls this its `vector_ids` are fully collected — the ordinal
         // table (ascending unique record doc ids) is derived from them.
         let graph_version = header.version;
+
+        // Interned field ids (Issue #633 PR-B): one shared dictionary per
+        // segment instead of one heap `String` per record.
+        let mut interner = FieldInterner::from_header(&header);
         let read_graph = |input: &mut dyn crate::storage::StorageInput,
-                          vector_ids: &[(u64, String)]|
+                          vector_ids: &[(u64, u16)]|
          -> Result<Option<Arc<OrdinalHnswGraph>>> {
             let doc_ids = Self::unique_sorted_doc_ids(vector_ids)?;
             if graph_version >= VERSION_ORDINAL_GRAPH {
@@ -563,7 +573,8 @@ impl HnswIndexReader {
         let records_remaining =
             file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
 
-        let (vectors, vector_ids, graph) = match (&header.quant, storage.loading_mode()) {
+        let (vectors, vector_ids, graph, field_dict) = match (&header.quant, storage.loading_mode())
+        {
             (QuantHeader::Scalar8Bit(params), crate::storage::LoadingMode::Eager) => {
                 // Step 6 of #481 Stage 1: load vectors as int8 + meta
                 // directly into a QuantizedVectorPool so the search
@@ -592,7 +603,8 @@ impl HnswIndexReader {
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    let field_name = header.read_record_field(
+                    let fid = interner.read_record_field_id(
+                        &header,
                         &mut input,
                         records_remaining,
                         "hnsw field_name_len",
@@ -609,8 +621,10 @@ impl HnswIndexReader {
                         norm_q: f32::from_le_bytes(norm_q_buf),
                     };
 
-                    vector_ids.push((doc_id, field_name.clone()));
-                    records.push((doc_id, field_name, int8, meta));
+                    vector_ids.push((doc_id, fid));
+                    // Transient clone for the pool's String-shaped build
+                    // input; the pool retains only per-field keys.
+                    records.push((doc_id, interner.name(fid).to_string(), int8, meta));
                 }
                 let graph = read_graph(&mut input, &vector_ids)?;
                 let pool = QuantizedVectorPool::build(*params, dimension, records);
@@ -618,6 +632,7 @@ impl HnswIndexReader {
                     VectorStorage::OwnedQuantized(Arc::new(pool)),
                     vector_ids,
                     graph,
+                    interner.into_dict(),
                 )
             }
             (QuantHeader::Scalar8Bit(params), crate::storage::LoadingMode::Lazy) => {
@@ -649,7 +664,8 @@ impl HnswIndexReader {
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    let field_name = header.read_record_field(
+                    let fid = interner.read_record_field_id(
+                        &header,
                         &mut input,
                         records_remaining,
                         "hnsw field_name_len",
@@ -659,8 +675,8 @@ impl HnswIndexReader {
                     // record prefix), so `VectorStorage::get` seeks straight
                     // to the int8 data (Issue #633).
                     let payload_offset = input.stream_position().map_err(LaurusError::Io)?;
-                    offsets.insert((doc_id, field_name.clone()), payload_offset);
-                    vector_ids.push((doc_id, field_name.clone()));
+                    offsets.insert((doc_id, fid), payload_offset);
+                    vector_ids.push((doc_id, fid));
 
                     input
                         .seek(std::io::SeekFrom::Current(quant_payload_size))
@@ -668,16 +684,19 @@ impl HnswIndexReader {
                 }
                 let graph = read_graph(&mut input, &vector_ids)?;
 
+                let field_dict = interner.into_dict();
                 (
                     VectorStorage::OnDemand {
                         storage: storage.clone(),
                         file_name: file_name.clone(),
                         offsets: Arc::new(offsets),
+                        field_dict: field_dict.clone(),
                         quant_params: Some(*params),
                         cached_input: Arc::new(std::sync::RwLock::new(None)),
                     },
                     vector_ids,
                     graph,
+                    field_dict,
                 )
             }
             (
@@ -711,7 +730,8 @@ impl HnswIndexReader {
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    let field_name = header.read_record_field(
+                    let fid = interner.read_record_field_id(
+                        &header,
                         &mut input,
                         records_remaining,
                         "hnsw field_name_len",
@@ -720,8 +740,8 @@ impl HnswIndexReader {
                     let mut codes = vec![0u8; codes_size];
                     input.read_exact(&mut codes)?;
 
-                    vector_ids.push((doc_id, field_name.clone()));
-                    records.push((doc_id, field_name, codes));
+                    vector_ids.push((doc_id, fid));
+                    records.push((doc_id, interner.name(fid).to_string(), codes));
                 }
                 let graph = read_graph(&mut input, &vector_ids)?;
                 let pool = crate::vector::index::pq_storage::PqVectorPool::build(
@@ -729,7 +749,12 @@ impl HnswIndexReader {
                     codebook.clone(),
                     records,
                 );
-                (VectorStorage::OwnedPq(Arc::new(pool)), vector_ids, graph)
+                (
+                    VectorStorage::OwnedPq(Arc::new(pool)),
+                    vector_ids,
+                    graph,
+                    interner.into_dict(),
+                )
             }
             #[cfg(feature = "pq-fastscan")]
             (
@@ -760,7 +785,8 @@ impl HnswIndexReader {
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    let field_name = header.read_record_field(
+                    let fid = interner.read_record_field_id(
+                        &header,
                         &mut input,
                         records_remaining,
                         "hnsw field_name_len",
@@ -770,8 +796,8 @@ impl HnswIndexReader {
                         &mut input, *pq_params,
                     )?;
 
-                    vector_ids.push((doc_id, field_name.clone()));
-                    records.push((doc_id, field_name, codes));
+                    vector_ids.push((doc_id, fid));
+                    records.push((doc_id, interner.name(fid).to_string(), codes));
                 }
                 let graph = read_graph(&mut input, &vector_ids)?;
                 let pool = crate::vector::index::pq_fastscan_storage::PqFastScanPool::build(
@@ -783,6 +809,7 @@ impl HnswIndexReader {
                     VectorStorage::OwnedPqFastScan(Arc::new(pool)),
                     vector_ids,
                     graph,
+                    interner.into_dict(),
                 )
             }
         };
@@ -857,7 +884,7 @@ impl HnswIndexReader {
         // Per-field doc-id lookup (#405). Built from `vector_ids` so it
         // reflects the same set the search path used to filter at every
         // call; finalised into `Arc<[u64]>` for cheap clone semantics.
-        let vector_ids_by_field = build_vector_ids_by_field(&vector_ids);
+        let vector_ids_by_field = build_vector_ids_by_field(&vector_ids, &field_dict);
 
         // Per-field ordinal → pool-position tables (Issue #686). The
         // identity `ordinal == position` holds exactly when the segment
@@ -921,12 +948,18 @@ impl HnswIndexReader {
                             header.vector_count
                         )));
                     }
+                    // Transient rehydration for the sidecar's String-shaped
+                    // assignment input (eager-only path; nothing retained).
+                    let assignment: Vec<(u64, String)> = vector_ids
+                        .iter()
+                        .map(|&(id, fid)| (id, field_dict[fid as usize].to_string()))
+                        .collect();
                     let pool = RerankStoragePool::from_sidecar_payload(
                         header.storage_kind,
                         dimension,
                         header.vector_count as usize,
                         payload,
-                        &vector_ids,
+                        &assignment,
                     )?;
                     Some(Arc::new(pool))
                 } else {
@@ -939,6 +972,7 @@ impl HnswIndexReader {
         Ok(Self {
             vectors,
             vector_ids,
+            field_dict,
             dimension,
             distance_metric,
             m,
@@ -1072,18 +1106,18 @@ impl VectorIndexReader for HnswIndexReader {
         if self.is_deleted(doc_id) {
             return Ok(None);
         }
-        self.vectors
-            .get(&(doc_id, field_name.to_string()), self.dimension)
+        self.vectors.get(doc_id, field_name, self.dimension)
     }
 
     fn get_vectors_for_doc(&self, doc_id: u64) -> Result<Vec<(String, Vector)>> {
         let mut result = Vec::new();
-        for (id, field) in &self.vector_ids {
-            if *id == doc_id
-                && !self.is_deleted(*id)
-                && let Some(vec) = self.vectors.get(&(*id, field.clone()), self.dimension)?
+        for &(id, fid) in &self.vector_ids {
+            let field = &self.field_dict[fid as usize];
+            if id == doc_id
+                && !self.is_deleted(id)
+                && let Some(vec) = self.vectors.get(id, field, self.dimension)?
             {
-                result.push((field.clone(), vec));
+                result.push((field.to_string(), vec));
             }
         }
         Ok(result)
@@ -1095,14 +1129,19 @@ impl VectorIndexReader for HnswIndexReader {
             if self.is_deleted(*id) {
                 result.push(None);
             } else {
-                result.push(self.vectors.get(&(*id, field.clone()), self.dimension)?);
+                result.push(self.vectors.get(*id, field, self.dimension)?);
             }
         }
         Ok(result)
     }
 
     fn vector_ids(&self) -> Result<Vec<(u64, String)>> {
-        Ok(self.vector_ids.clone())
+        // Rehydrated at the trait boundary (Issue #633 PR-B).
+        Ok(self
+            .vector_ids
+            .iter()
+            .map(|&(id, fid)| (id, self.field_dict[fid as usize].to_string()))
+            .collect())
     }
 
     fn doc_ids_for_field(&self, field_name: &str) -> Arc<[u64]> {
@@ -1149,18 +1188,7 @@ impl VectorIndexReader for HnswIndexReader {
     }
 
     fn contains_vector(&self, doc_id: u64, field_name: &str) -> bool {
-        match &self.vectors {
-            VectorStorage::Owned(vectors) => {
-                vectors.contains_key(&(doc_id, field_name.to_string()))
-            }
-            VectorStorage::OwnedQuantized(pool) => pool.contains(doc_id, field_name),
-            VectorStorage::OwnedPq(pool) => pool.contains(doc_id, field_name),
-            #[cfg(feature = "pq-fastscan")]
-            VectorStorage::OwnedPqFastScan(pool) => pool.contains(doc_id, field_name),
-            VectorStorage::OnDemand { offsets, .. } => {
-                offsets.contains_key(&(doc_id, field_name.to_string()))
-            }
-        }
+        self.vectors.contains(doc_id, field_name)
     }
 
     fn get_vector_range(
@@ -1169,41 +1197,47 @@ impl VectorIndexReader for HnswIndexReader {
         end_doc_id: u64,
     ) -> Result<Vec<(u64, String, Vector)>> {
         let mut result = Vec::new();
-        for (id, field) in &self.vector_ids {
-            if *id >= start_doc_id
-                && *id < end_doc_id
-                && !self.is_deleted(*id)
-                && let Some(vec) = self.vectors.get(&(*id, field.clone()), self.dimension)?
+        for &(id, fid) in &self.vector_ids {
+            let field = &self.field_dict[fid as usize];
+            if id >= start_doc_id
+                && id < end_doc_id
+                && !self.is_deleted(id)
+                && let Some(vec) = self.vectors.get(id, field, self.dimension)?
             {
-                result.push((*id, field.clone(), vec));
+                result.push((id, field.to_string(), vec));
             }
         }
         Ok(result)
     }
 
     fn get_vectors_by_field(&self, field_name: &str) -> Result<Vec<(u64, Vector)>> {
+        // One dictionary resolve, then integer compares per record.
+        let Some(target) =
+            crate::vector::index::format::resolve_field_id(&self.field_dict, field_name)
+        else {
+            return Ok(Vec::new());
+        };
         let mut result = Vec::new();
-        for (id, field) in &self.vector_ids {
-            if field == field_name
-                && !self.is_deleted(*id)
-                && let Some(vec) = self.vectors.get(&(*id, field.clone()), self.dimension)?
+        for &(id, fid) in &self.vector_ids {
+            if fid == target
+                && !self.is_deleted(id)
+                && let Some(vec) = self.vectors.get(id, field_name, self.dimension)?
             {
-                result.push((*id, vec));
+                result.push((id, vec));
             }
         }
         Ok(result)
     }
 
     fn field_names(&self) -> Result<Vec<String>> {
-        use std::collections::HashSet;
-        let fields: HashSet<String> = self.vector_ids.iter().map(|val| val.1.clone()).collect();
-        Ok(fields.into_iter().collect())
+        Ok(self.field_dict.iter().map(|f| f.to_string()).collect())
     }
 
     fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
         Ok(Box::new(HnswVectorIterator {
             storage: self.vectors.clone(),
             keys: self.vector_ids.clone(),
+            field_dict: self.field_dict.clone(),
             current: 0,
             dimension: self.dimension,
             deletion_bitmap: self.deletion_bitmap.clone(),
@@ -1235,7 +1269,9 @@ impl VectorIndexReader for HnswIndexReader {
 
         match &self.vectors {
             VectorStorage::Owned(map) => {
-                for (id, field) in &self.vector_ids {
+                for &(id, fid) in &self.vector_ids {
+                    let field = &self.field_dict[fid as usize];
+                    let (id, field) = (&id, &field.to_string());
                     if let Some(vector) = map.get(&(*id, field.clone())) {
                         if vector.dimension() != self.dimension {
                             errors.push(format!(
@@ -1261,8 +1297,9 @@ impl VectorIndexReader for HnswIndexReader {
                 }
             }
             VectorStorage::OwnedQuantized(pool) => {
-                for (id, field) in &self.vector_ids {
-                    if !pool.contains(*id, field) {
+                for &(id, fid) in &self.vector_ids {
+                    let field = &self.field_dict[fid as usize];
+                    if !pool.contains(id, field) {
                         errors.push(format!(
                             "Vector {}:{} found in keys but missing in quantized pool",
                             id, field
@@ -1276,8 +1313,9 @@ impl VectorIndexReader for HnswIndexReader {
                 );
             }
             VectorStorage::OwnedPq(pool) => {
-                for (id, field) in &self.vector_ids {
-                    if !pool.contains(*id, field) {
+                for &(id, fid) in &self.vector_ids {
+                    let field = &self.field_dict[fid as usize];
+                    if !pool.contains(id, field) {
                         errors.push(format!(
                             "Vector {}:{} found in keys but missing in PQ pool",
                             id, field
@@ -1292,8 +1330,9 @@ impl VectorIndexReader for HnswIndexReader {
             }
             #[cfg(feature = "pq-fastscan")]
             VectorStorage::OwnedPqFastScan(pool) => {
-                for (id, field) in &self.vector_ids {
-                    if !pool.contains(*id, field) {
+                for &(id, fid) in &self.vector_ids {
+                    let field = &self.field_dict[fid as usize];
+                    if !pool.contains(id, field) {
                         errors.push(format!(
                             "Vector {}:{} found in keys but missing in PQ FastScan pool",
                             id, field
@@ -1307,8 +1346,9 @@ impl VectorIndexReader for HnswIndexReader {
                 );
             }
             VectorStorage::OnDemand { offsets, .. } => {
-                for (id, field) in &self.vector_ids {
-                    if !offsets.contains_key(&(*id, field.clone())) {
+                for &(id, fid) in &self.vector_ids {
+                    let field = &self.field_dict[fid as usize];
+                    if !offsets.contains_key(&(id, fid)) {
                         errors.push(format!(
                             "Vector {}:{} in ids but missing in storage",
                             id, field
@@ -1342,7 +1382,8 @@ impl VectorIndexReader for HnswIndexReader {
 /// Iterator for HNSW vector index.
 struct HnswVectorIterator {
     storage: VectorStorage,
-    keys: Vec<(u64, String)>,
+    keys: Vec<(u64, u16)>,
+    field_dict: Arc<[Arc<str>]>,
     current: usize,
     dimension: usize,
     deletion_bitmap: Option<Arc<DeletionBitmap>>,
@@ -1353,22 +1394,20 @@ impl VectorIterator for HnswVectorIterator {
         // Use a loop instead of recursion to avoid stack overflow when
         // many consecutive entries are deleted.
         while self.current < self.keys.len() {
-            let (doc_id, field) = &self.keys[self.current];
+            let (doc_id, fid) = self.keys[self.current];
+            let field = &self.field_dict[fid as usize];
 
             // Skip deleted entries
             if let Some(bitmap) = &self.deletion_bitmap
-                && bitmap.is_deleted(*doc_id)
+                && bitmap.is_deleted(doc_id)
             {
                 self.current += 1;
                 continue;
             }
 
-            if let Some(vec) = self
-                .storage
-                .get(&(*doc_id, field.clone()), self.dimension)?
-            {
+            if let Some(vec) = self.storage.get(doc_id, field, self.dimension)? {
                 self.current += 1;
-                return Ok(Some((*doc_id, field.clone(), vec)));
+                return Ok(Some((doc_id, field.to_string(), vec)));
             } else {
                 return Err(LaurusError::internal(format!(
                     "Vector {}:{} found in keys but missing in storage",
@@ -1381,8 +1420,9 @@ impl VectorIterator for HnswVectorIterator {
 
     fn skip_to(&mut self, doc_id: u64, field_name: &str) -> Result<bool> {
         while self.current < self.keys.len() {
-            let (id, field) = &self.keys[self.current];
-            if *id > doc_id || (*id == doc_id && field.as_str() >= field_name) {
+            let (id, fid) = self.keys[self.current];
+            let field = &self.field_dict[fid as usize];
+            if id > doc_id || (id == doc_id && field.as_ref() as &str >= field_name) {
                 return Ok(true);
             }
             self.current += 1;
@@ -1392,7 +1432,8 @@ impl VectorIterator for HnswVectorIterator {
 
     fn position(&self) -> (u64, String) {
         if self.current < self.keys.len() {
-            self.keys[self.current].clone()
+            let (id, fid) = self.keys[self.current];
+            (id, self.field_dict[fid as usize].to_string())
         } else {
             (u64::MAX, String::new())
         }
