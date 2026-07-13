@@ -94,6 +94,31 @@ pub enum LaurusError {
     #[error("Incompatible format: {0}")]
     IncompatibleFormat(String),
 
+    /// A batch ingestion call failed partway through (fail-fast semantics).
+    ///
+    /// Batch ingestion applies documents sequentially and stops at the first
+    /// failure. The `applied` documents that preceded the failure remain in
+    /// the WAL and NRT buffers — they are searchable, become durable at the
+    /// next commit, and are replayed on crash recovery. There is no batch
+    /// rollback; retrying the batch (or its suffix starting at
+    /// `failed_index`) is idempotent under put semantics. With fail-fast
+    /// sequential processing `applied == failed_index` always holds; both are
+    /// carried so callers get the count without knowing that invariant.
+    #[error(
+        "batch ingest failed at doc {failed_index} (id '{failed_id}') after {applied} documents were applied: {source}"
+    )]
+    BatchIngest {
+        /// Zero-based position of the failing document in the input batch.
+        failed_index: usize,
+        /// External id of the failing document.
+        failed_id: String,
+        /// Number of documents successfully applied before the failure.
+        applied: usize,
+        /// The underlying error that failed the document at `failed_index`.
+        #[source]
+        source: Box<LaurusError>,
+    },
+
     /// JSON serialization/deserialization errors
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),

@@ -109,6 +109,25 @@ engine.add_document("doc-3", doc3).await?;
 
 > **Tip:** Commits are relatively expensive because they flush segments to storage. For bulk indexing, batch many documents before calling `commit()`.
 
+## Batch Ingestion
+
+`put_documents` / `add_documents` are the batched forms of `put_document` / `add_document`. They apply their `(id, doc)` pairs **sequentially, in input order**, and under the default `PerRecord` policy they make the whole batch durable with a **single WAL fsync at batch end** instead of one per record:
+
+```rust
+let docs: Vec<(String, Document)> = build_batch();
+engine.put_documents(docs).await?; // one fsync, all docs as durable as singular puts
+engine.commit().await?;            // one segment flush for the whole batch
+```
+
+Semantics to be aware of:
+
+- **Ordering**: duplicate external IDs within one `put_documents` batch dedup exactly like the same puts issued sequentially — the last occurrence wins. Repeating an ID in `add_documents` legitimately appends multiple chunks.
+- **Fail-fast, no rollback**: the batch stops at the first document that cannot be applied and returns `LaurusError::BatchIngest { failed_index, failed_id, applied, .. }`. The `applied` documents before the failure are **not** rolled back — they stay in the WAL and NRT buffers (searchable immediately, durable at the next commit, replayed on crash recovery), and the batch-end WAL flush runs on the error path too. Retrying the batch, or its suffix starting at `failed_index`, is idempotent under put semantics.
+- **Durability**: when the call returns `Ok`, every document in the batch is exactly as durable as a successful singular put. A crash mid-call loses at most the un-fsync'd tail; recovery replays the fsync'd prefix per document, and a torn trailing record is dropped by the CRC framing as usual.
+- **Sizing**: the engine clones each document into the WAL as it goes, so batch memory is dominated by the caller's `Vec`. Batches of 1,000-10,000 documents per call are a good default; chunk larger corpora into multiple calls (and commit periodically to bound segment sizes).
+- **Under `Group` policy**: the group thresholds keep firing mid-batch, so that policy's bounded loss window is preserved; the batch-end flush still runs.
+- **Concurrent singular writes**: a `put_document` / `add_document` / `delete_documents` call that completes while another task's batch is in flight keeps its full per-record durability — singular writes re-assert the fsync before acknowledging, so a batch never weakens anyone else's guarantee.
+
 ## WAL Durability Policy
 
 By default, each `add`/`delete` fsyncs the WAL before returning, so a successful write can never be lost to a crash. When ingesting at high volume, that per-write fsync becomes the throughput bottleneck. The `WalSyncPolicy` lets you trade per-write durability for throughput:

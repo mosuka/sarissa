@@ -15,6 +15,8 @@ cargo doc --open
 | `Engine::builder(storage, schema)` | `EngineBuilder` を作成 |
 | `engine.put_document(id, doc).await?` | ドキュメントのUpsert（IDが存在する場合は置き換え） |
 | `engine.add_document(id, doc).await?` | ドキュメントをチャンクとして追加（複数のチャンクが同一IDを共有可能） |
+| `engine.put_documents(docs).await?` | `(id, doc)` ペアのバッチ Upsert — WAL fsync はバッチごとに 1 回（[バッチインジェスト](persistence.md#バッチインジェスト) 参照） |
+| `engine.add_documents(docs).await?` | `(id, doc)` ペアのバッチチャンク追加 — 耐久性・エラー意味論は `put_documents` と同一 |
 | `engine.delete_documents(id).await?` | 外部IDによるすべてのドキュメント/チャンクの削除 |
 | `engine.get_documents(id).await?` | 外部IDによるすべてのドキュメント/チャンクの取得 |
 | `engine.search(request).await?` | 検索リクエストの実行 |
@@ -26,6 +28,8 @@ cargo doc --open
 | `engine.stats()?` | インデックス統計の取得 |
 
 > **`put_document` と `add_document` の違い:** `put_document` はUpsertを実行します。同じ外部IDのドキュメントが既に存在する場合、削除して置き換えます。`add_document` は常に追加し、複数のドキュメントチャンクが同じ外部IDを共有できます。詳細は [Schema & Fields -- ドキュメントのインデキシング](../concepts/schema_and_fields.md#indexing-documents) を参照してください。
+>
+> **バッチ形式:** `put_documents` / `add_documents` は `(id, doc)` ペアを入力順に逐次適用します（1 回の `put_documents` バッチ内で重複した ID は逐次 put と同じくデデュープされ、最後の出現が勝ちます）。適用できないドキュメントに遭遇すると fail-fast で `LaurusError::BatchIngest { failed_index, failed_id, applied, .. }` を返します。バッチロールバックはありません: 適用済みドキュメントは WAL と NRT バッファに残るため、バッチ（またはその suffix）の再試行は冪等です。耐久性の詳細は[バッチインジェスト](persistence.md#バッチインジェスト)を参照してください。
 
 ### EngineBuilder
 

@@ -284,6 +284,10 @@ impl Engine {
     /// or indexing into either the lexical or vector store fails.
     pub async fn put_document(&self, id: &str, doc: Document) -> Result<()> {
         let _ = self.index_internal(id, doc, false).await?;
+        // Re-assert per-record durability: a concurrent batch may hold a WAL
+        // sync-deferral scope, which would otherwise leave this acknowledged
+        // write unsynced. A no-op when the append already self-synced.
+        self.log.ensure_per_record_durability()?;
         Ok(())
     }
 
@@ -310,7 +314,124 @@ impl Engine {
     /// or vector store fails.
     pub async fn add_document(&self, id: &str, doc: Document) -> Result<()> {
         let _ = self.index_internal(id, doc, true).await?;
+        // Re-assert per-record durability: a concurrent batch may hold a WAL
+        // sync-deferral scope, which would otherwise leave this acknowledged
+        // write unsynced. A no-op when the append already self-synced.
+        self.log.ensure_per_record_durability()?;
         Ok(())
+    }
+
+    /// Index a batch of documents, replacing any existing documents that
+    /// share an external ID (batched form of [`Self::put_document`]).
+    ///
+    /// Documents are applied **sequentially, in input order** — the WAL
+    /// doc_id/seq allocation order is the crash-recovery replay order, and
+    /// duplicate external IDs within one batch must dedup exactly like the
+    /// equivalent sequence of [`Self::put_document`] calls (the last
+    /// occurrence wins). Both underlying stores serialize writes behind
+    /// mutexes, so unlike [`Self::search_batch`] there is nothing to gain
+    /// from processing batch entries concurrently.
+    ///
+    /// Under the default [`WalSyncPolicy::PerRecord`](crate::store::log::WalSyncPolicy)
+    /// the whole batch is made durable with a **single WAL fsync** at batch
+    /// end instead of one per record: per-record fsync is suppressed for the
+    /// duration of the call (via [`DocumentLog::defer_sync`](crate::store::log::DocumentLog::defer_sync))
+    /// and [`Self::flush_wal`] runs once before returning, on both the
+    /// success and the error path. When the call returns `Ok`, every
+    /// document in the batch is as durable as a singular put.
+    ///
+    /// # Parameters
+    ///
+    /// - `docs` - `(external_id, document)` pairs, applied in order.
+    ///   An empty batch is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Fails fast at the first document that cannot be applied, returning
+    /// [`LaurusError::BatchIngest`](crate::error::LaurusError::BatchIngest) with the failing position, its external
+    /// id, and the number of documents already applied. Applied documents
+    /// are **not** rolled back: they stay in the WAL and NRT buffers,
+    /// searchable immediately, durable at the next commit, and replayed on
+    /// crash recovery — so retrying the batch (or its suffix from
+    /// `failed_index`) is idempotent. The failing document inherits the
+    /// singular-put semantics: its WAL record (if written) is retried by
+    /// crash recovery and discarded by the next successful commit.
+    pub async fn put_documents(&self, docs: Vec<(String, Document)>) -> Result<()> {
+        self.index_batch_internal(docs, false).await
+    }
+
+    /// Index a batch of document chunks, always appending (batched form of
+    /// [`Self::add_document`]).
+    ///
+    /// Unlike [`Self::put_documents`], existing documents with the same
+    /// external ID are **not** deleted, so a batch may legitimately repeat
+    /// an ID to add multiple chunks of the same logical document in one
+    /// call.
+    ///
+    /// Ordering, durability (single WAL fsync per batch under the default
+    /// per-record policy), and fail-fast error semantics are identical to
+    /// [`Self::put_documents`].
+    ///
+    /// # Parameters
+    ///
+    /// - `docs` - `(external_id, document)` pairs, applied in order.
+    ///   An empty batch is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Fails fast with [`LaurusError::BatchIngest`](crate::error::LaurusError::BatchIngest); see
+    /// [`Self::put_documents`] for the exact semantics.
+    pub async fn add_documents(&self, docs: Vec<(String, Document)>) -> Result<()> {
+        self.index_batch_internal(docs, true).await
+    }
+
+    /// Shared sequential loop behind [`Self::put_documents`] /
+    /// [`Self::add_documents`].
+    ///
+    /// Wraps per-document [`Self::index_internal`] calls in a WAL
+    /// sync-deferral scope and flushes the WAL exactly once at batch end on
+    /// both exit paths, converting the first per-document failure into
+    /// [`LaurusError::BatchIngest`](crate::error::LaurusError::BatchIngest).
+    ///
+    /// # Parameters
+    ///
+    /// - `docs` - `(external_id, document)` pairs, applied in order.
+    /// - `as_chunk` - `false` for put (delete-first) semantics, `true` for
+    ///   add (append-chunk) semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LaurusError::BatchIngest`](crate::error::LaurusError::BatchIngest) on the first failing document,
+    /// or the WAL flush error if the batch applied fully but the final
+    /// fsync failed (retrying the whole batch is idempotent).
+    async fn index_batch_internal(
+        &self,
+        docs: Vec<(String, Document)>,
+        as_chunk: bool,
+    ) -> Result<()> {
+        if docs.is_empty() {
+            return Ok(());
+        }
+        let deferral = self.log.defer_sync();
+        for (index, (id, doc)) in docs.into_iter().enumerate() {
+            if let Err(e) = self.index_internal(&id, doc, as_chunk).await {
+                drop(deferral);
+                // Make the applied prefix durable before reporting the
+                // failure, keeping the per-record durability contract at
+                // batch granularity. If the fsync itself fails the records
+                // stay marked dirty and are retried by the next flush_wal /
+                // commit, so the per-document error remains the primary one.
+                let _ = self.log.flush_wal();
+                return Err(crate::error::LaurusError::BatchIngest {
+                    failed_index: index,
+                    failed_id: id,
+                    applied: index,
+                    source: Box::new(e),
+                });
+            }
+        }
+        drop(deferral);
+        self.log.flush_wal()
     }
 
     async fn index_internal(&self, id: &str, mut doc: Document, as_chunk: bool) -> Result<u64> {
@@ -324,7 +445,7 @@ impl Engine {
         self.apply_dynamic_schema(&mut doc).await?;
 
         if !as_chunk {
-            self.delete_documents(id).await?;
+            self.delete_documents_internal(id).await?;
         }
 
         // 2. Write-Ahead Log: assign doc_id + persist (before any index updates)
@@ -542,6 +663,28 @@ impl Engine {
     /// Returns an error if the WAL write, lexical deletion, or vector
     /// deletion fails for any matched document.
     pub async fn delete_documents(&self, id: &str) -> Result<()> {
+        self.delete_documents_internal(id).await?;
+        // Re-assert per-record durability: a concurrent batch may hold a WAL
+        // sync-deferral scope, which would otherwise leave these acknowledged
+        // deletes unsynced. A no-op when the appends already self-synced.
+        self.log.ensure_per_record_durability()?;
+        Ok(())
+    }
+
+    /// Body of [`Self::delete_documents`] without the per-record durability
+    /// re-assertion, so the batch-ingest path (whose put semantics
+    /// delete-first per document inside a WAL sync-deferral scope) does not
+    /// fsync once per deleted document.
+    ///
+    /// # Parameters
+    ///
+    /// - `id` - The external document identifier to delete.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the WAL write, lexical deletion, or vector
+    /// deletion fails for any matched document.
+    async fn delete_documents_internal(&self, id: &str) -> Result<()> {
         let doc_ids = self.lexical.find_doc_ids_by_term("_id", id)?;
         for doc_id in doc_ids {
             // 1. Write to log
@@ -2635,6 +2778,271 @@ mod tests {
                 "id{i} should retain the last put's title"
             );
         }
+    }
+
+    /// Build a `(id, doc)` batch entry with a single `title` text field, for
+    /// the `put_documents` / `add_documents` tests below.
+    fn batch_entry(id: &str, title: &str) -> (String, crate::data::Document) {
+        use crate::data::DataValue;
+        let mut doc = crate::data::Document::new();
+        doc.fields
+            .insert("title".into(), DataValue::Text(title.into()));
+        (id.to_string(), doc)
+    }
+
+    /// Build an engine over `MemoryStorage` with a single `title` text field,
+    /// for the `put_documents` / `add_documents` tests below.
+    async fn title_only_engine() -> Engine {
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::TextOption;
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .build();
+        Engine::new(storage, schema).await.unwrap()
+    }
+
+    /// #551: an empty batch is a no-op — no WAL activity, no error.
+    #[tokio::test]
+    async fn test_put_documents_empty_batch_is_noop() {
+        let engine = title_only_engine().await;
+        engine.put_documents(Vec::new()).await.unwrap();
+        engine.add_documents(Vec::new()).await.unwrap();
+        assert!(
+            !engine.log.wal_is_dirty(),
+            "an empty batch must not leave unsynced WAL bytes"
+        );
+        assert_eq!(engine.stats().unwrap().document_count, 0);
+    }
+
+    /// #551: `put_documents` must produce exactly the same final state as the
+    /// equivalent sequence of singular `put_document` calls.
+    #[tokio::test]
+    async fn test_put_documents_matches_sequential_puts() {
+        let batch_engine = title_only_engine().await;
+        let sequential_engine = title_only_engine().await;
+
+        let docs: Vec<_> = (0..20)
+            .map(|i| batch_entry(&format!("id{i}"), &format!("title-{i}")))
+            .collect();
+
+        for (id, doc) in docs.clone() {
+            sequential_engine.put_document(&id, doc).await.unwrap();
+        }
+        batch_engine.put_documents(docs).await.unwrap();
+
+        batch_engine.commit().await.unwrap();
+        sequential_engine.commit().await.unwrap();
+
+        assert_eq!(
+            batch_engine.stats().unwrap().document_count,
+            sequential_engine.stats().unwrap().document_count,
+        );
+        for i in 0..20 {
+            let batch_docs = batch_engine.get_documents(&format!("id{i}")).await.unwrap();
+            let seq_docs = sequential_engine
+                .get_documents(&format!("id{i}"))
+                .await
+                .unwrap();
+            assert_eq!(batch_docs.len(), 1, "id{i} must resolve to one doc");
+            assert_eq!(
+                batch_docs[0].fields.get("title"),
+                seq_docs[0].fields.get("title"),
+                "id{i} must carry the same title on both paths"
+            );
+        }
+    }
+
+    /// #551: duplicate external ids **within one batch** must dedup exactly
+    /// like the same puts issued sequentially (last occurrence wins) — the
+    /// batch mirror of `test_put_document_dedupes_duplicate_ids_in_batch`.
+    #[tokio::test]
+    async fn test_put_documents_dedupes_duplicate_ids_in_batch() {
+        let engine = title_only_engine().await;
+
+        // 10 unique ids × 3 revisions interleaved in a single batch call.
+        let mut docs = Vec::new();
+        for rev in 0..3 {
+            for i in 0..10 {
+                docs.push(batch_entry(&format!("id{i}"), &format!("id{i}-rev{rev}")));
+            }
+        }
+        engine.put_documents(docs).await.unwrap();
+        engine.commit().await.unwrap();
+
+        assert_eq!(
+            engine.stats().unwrap().document_count,
+            10,
+            "exactly 10 unique docs should be live after in-batch dedup"
+        );
+        for i in 0..10 {
+            let docs = engine.get_documents(&format!("id{i}")).await.unwrap();
+            assert_eq!(docs.len(), 1, "id{i} should resolve to a single doc");
+            let title = docs[0]
+                .fields
+                .get("title")
+                .and_then(|v| v.as_text())
+                .map(String::from);
+            assert_eq!(
+                title.as_deref(),
+                Some(format!("id{i}-rev2").as_str()),
+                "id{i} must retain the last occurrence in the batch"
+            );
+        }
+    }
+
+    /// #551: `add_documents` never delete-firsts, so repeating an id within
+    /// one batch legitimately accumulates chunks.
+    #[tokio::test]
+    async fn test_add_documents_same_id_creates_chunks() {
+        let engine = title_only_engine().await;
+
+        let docs: Vec<_> = (0..4)
+            .map(|i| batch_entry("doc", &format!("chunk-{i}")))
+            .collect();
+        engine.add_documents(docs).await.unwrap();
+        engine.commit().await.unwrap();
+
+        let chunks = engine.get_documents("doc").await.unwrap();
+        assert_eq!(
+            chunks.len(),
+            4,
+            "all four chunks sharing the external id must be live"
+        );
+    }
+
+    /// #551: fail-fast semantics — the batch stops at the first failing doc,
+    /// reports its position/id and the applied count, and the applied prefix
+    /// stays NRT-visible (no rollback).
+    #[tokio::test]
+    async fn test_put_documents_failfast_reports_index_and_applied() {
+        use crate::engine::schema::{DynamicFieldPolicy, FieldOption};
+        use crate::lexical::core::field::TextOption;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .dynamic_field_policy(DynamicFieldPolicy::Strict)
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        // Docs 0-2 are fine; doc 3 carries an undeclared field, which the
+        // Strict policy rejects in apply_dynamic_schema (before any WAL /
+        // store mutation for that doc).
+        let mut docs: Vec<_> = (0..3)
+            .map(|i| batch_entry(&format!("ok{i}"), &format!("title-{i}")))
+            .collect();
+        let mut bad = crate::data::Document::new();
+        bad.fields.insert(
+            "undeclared".into(),
+            crate::data::DataValue::Text("boom".into()),
+        );
+        docs.push(("bad".to_string(), bad));
+        docs.push(batch_entry("never", "never-applied"));
+
+        let err = engine
+            .put_documents(docs)
+            .await
+            .expect_err("Strict policy must fail the batch at doc 3");
+        match err {
+            crate::error::LaurusError::BatchIngest {
+                failed_index,
+                failed_id,
+                applied,
+                ..
+            } => {
+                assert_eq!(failed_index, 3);
+                assert_eq!(failed_id, "bad");
+                assert_eq!(applied, 3);
+            }
+            other => panic!("expected BatchIngest, got: {other}"),
+        }
+        assert!(
+            !engine.log.wal_is_dirty(),
+            "the applied prefix must be flushed durable on the error path"
+        );
+
+        // The applied prefix must be live (NRT) — doc 4 must not have been
+        // attempted.
+        for i in 0..3 {
+            let docs = engine.get_documents(&format!("ok{i}")).await.unwrap();
+            assert_eq!(docs.len(), 1, "applied doc ok{i} must stay visible");
+        }
+        assert!(
+            engine.get_documents("never").await.unwrap().is_empty(),
+            "docs after the failing one must not be applied"
+        );
+    }
+
+    /// #551: under the default `PerRecord` policy a batch of N docs must fsync
+    /// the WAL exactly once (deferred-fsync scope), not once per record, and
+    /// leave nothing unsynced.
+    #[tokio::test]
+    async fn test_put_documents_single_wal_fsync_per_batch() {
+        let engine = title_only_engine().await;
+
+        // Prime the WAL writer so the sync counter exists, then baseline it.
+        engine
+            .put_document("prime", batch_entry("prime", "prime").1)
+            .await
+            .unwrap();
+        let baseline = engine.log.wal_sync_count();
+
+        let docs: Vec<_> = (0..50)
+            .map(|i| batch_entry(&format!("id{i}"), &format!("title-{i}")))
+            .collect();
+        engine.put_documents(docs).await.unwrap();
+
+        assert_eq!(
+            engine.log.wal_sync_count(),
+            baseline + 1,
+            "a 50-doc batch must amortize to exactly one WAL fsync"
+        );
+        assert!(
+            !engine.log.wal_is_dirty(),
+            "the batch-end flush must leave no unsynced WAL bytes"
+        );
+    }
+
+    /// #551: singular writes acknowledged while a **concurrent batch** holds
+    /// the WAL sync-deferral scope must keep their per-record durability —
+    /// the deferral flag is global, so without the explicit re-assertion in
+    /// `put_document` / `add_document` / `delete_documents` their records
+    /// would be left unsynced until the batch ends.
+    #[tokio::test]
+    async fn test_singular_writes_stay_durable_during_concurrent_batch_deferral() {
+        let engine = title_only_engine().await;
+        engine
+            .put_document("seed", batch_entry("seed", "seed").1)
+            .await
+            .unwrap();
+
+        // Simulate an in-flight put_documents batch on another task.
+        let _foreign_batch = engine.log.defer_sync();
+
+        engine
+            .put_document("a", batch_entry("a", "a").1)
+            .await
+            .unwrap();
+        assert!(
+            !engine.log.wal_is_dirty(),
+            "a singular put must be fsync'd before ack even during a batch"
+        );
+
+        engine
+            .add_document("b", batch_entry("b", "b").1)
+            .await
+            .unwrap();
+        assert!(
+            !engine.log.wal_is_dirty(),
+            "a singular add must be fsync'd before ack even during a batch"
+        );
+
+        engine.delete_documents("seed").await.unwrap();
+        assert!(
+            !engine.log.wal_is_dirty(),
+            "a singular delete must be fsync'd before ack even during a batch"
+        );
     }
 
     /// #828: updating many docs that are still in the uncommitted buffer must

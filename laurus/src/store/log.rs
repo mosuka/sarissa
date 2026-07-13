@@ -51,7 +51,7 @@
 
 use std::io::{Read, Write};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
@@ -250,6 +250,11 @@ struct WalWriterState {
     /// (framed length, including the CRC for v2). Drives the
     /// [`WalSyncPolicy::Group`] byte threshold; reset to 0 on flush.
     unsynced_bytes: usize,
+    /// Test-only: number of `flush_and_sync()` calls performed on this writer.
+    /// Lets tests assert fsync amortization exactly (e.g. the batch-ingest
+    /// path syncing once per batch instead of once per record).
+    #[cfg(test)]
+    sync_count: usize,
 }
 
 /// Unified document log providing WAL, doc_id generation, and document storage.
@@ -277,6 +282,12 @@ pub struct DocumentLog {
     /// [`WalSyncPolicy::PerRecord`]; [`WalSyncPolicy::Group`] defers the fsync to
     /// amortize it over a batch.
     sync_policy: WalSyncPolicy,
+    /// Number of active [`WalSyncDeferral`] scopes (see [`Self::defer_sync`]).
+    /// While non-zero, the per-append fsync of [`WalSyncPolicy::PerRecord`] is
+    /// suppressed so a batch-ingest caller can amortize one fsync over the
+    /// whole batch via [`Self::flush_wal`]. [`WalSyncPolicy::Group`] thresholds
+    /// are unaffected (its loss-window contract is preserved mid-batch).
+    sync_deferral_depth: AtomicUsize,
 }
 
 impl DocumentLog {
@@ -352,6 +363,7 @@ impl DocumentLog {
             next_seq: AtomicU64::new(1),
             doc_store: RwLock::new(doc_store),
             sync_policy,
+            sync_deferral_depth: AtomicUsize::new(0),
         })
     }
 
@@ -423,6 +435,8 @@ impl DocumentLog {
             dirty: false,
             unsynced_records: 0,
             unsynced_bytes: 0,
+            #[cfg(test)]
+            sync_count: 0,
         });
         Ok(())
     }
@@ -456,7 +470,7 @@ impl DocumentLog {
             },
         };
 
-        Self::write_record(&mut writer_guard, &record, self.sync_policy)?;
+        self.write_record(&mut writer_guard, &record)?;
 
         Ok((doc_id, seq))
     }
@@ -481,7 +495,7 @@ impl DocumentLog {
             },
         };
 
-        Self::write_record(&mut writer_guard, &record, self.sync_policy)?;
+        self.write_record(&mut writer_guard, &record)?;
 
         Ok(seq)
     }
@@ -603,25 +617,34 @@ impl DocumentLog {
             state.dirty = false;
             state.unsynced_records = 0;
             state.unsynced_bytes = 0;
+            #[cfg(test)]
+            {
+                state.sync_count += 1;
+            }
         }
         Ok(())
     }
 
-    /// Append a record and fsync according to `policy`.
+    /// Append a record and fsync according to the effective sync policy.
     ///
     /// Under [`WalSyncPolicy::PerRecord`] the record is always fsync'd before
-    /// returning (per-record durability — the default contract). Under
-    /// [`WalSyncPolicy::Group`] the fsync is deferred and only happens once the
-    /// batch reaches `max_records` records or `max_bytes` bytes since the last
-    /// sync, amortizing one fsync over the batch; [`Self::flush_wal`] (called at
-    /// commit) forces any trailing partial batch durable.
-    fn write_record(
-        state: &mut Option<WalWriterState>,
-        record: &LogRecord,
-        policy: WalSyncPolicy,
-    ) -> Result<()> {
+    /// returning (per-record durability — the default contract), unless a
+    /// [`WalSyncDeferral`] scope is active (see [`Self::defer_sync`]), in which
+    /// case the fsync is left to the scope owner's batch-end
+    /// [`Self::flush_wal`]. Under [`WalSyncPolicy::Group`] the fsync is
+    /// deferred and only happens once the batch reaches `max_records` records
+    /// or `max_bytes` bytes since the last sync, amortizing one fsync over the
+    /// batch — deferral scopes do not suppress these threshold flushes, so the
+    /// Group policy's bounded loss window holds even mid-batch;
+    /// [`Self::flush_wal`] (called at commit) forces any trailing partial
+    /// batch durable.
+    fn write_record(&self, state: &mut Option<WalWriterState>, record: &LogRecord) -> Result<()> {
         Self::append_record_bytes(state, record)?;
-        if Self::batch_ready(state, policy) {
+        let flush_now = match self.sync_policy {
+            WalSyncPolicy::PerRecord => self.sync_deferral_depth.load(Ordering::Acquire) == 0,
+            group @ WalSyncPolicy::Group { .. } => Self::batch_ready(state, group),
+        };
+        if flush_now {
             Self::flush_writer(state)?;
         }
         Ok(())
@@ -664,6 +687,53 @@ impl DocumentLog {
         Self::flush_writer(&mut writer_guard)
     }
 
+    /// Re-assert the per-record durability contract after a singular append.
+    ///
+    /// Under [`WalSyncPolicy::PerRecord`] this forces any appended-but-unsynced
+    /// WAL bytes durable. It is a no-op when the append already self-synced
+    /// (the common case — the dirty guard skips the fsync), but it is the
+    /// load-bearing fsync when a **concurrent batch** holds a
+    /// [`Self::defer_sync`] scope: the scope suppresses the per-record fsync
+    /// globally, so a singular write acknowledged during a batch would
+    /// otherwise silently lose its durability guarantee. Singular write entry
+    /// points call this before returning. Under [`WalSyncPolicy::Group`] it is
+    /// a no-op by design — that policy's bounded loss window applies to
+    /// singular writes too.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing or fsyncing the open WAL writer fails.
+    pub fn ensure_per_record_durability(&self) -> Result<()> {
+        match self.sync_policy {
+            WalSyncPolicy::PerRecord => self.flush_wal(),
+            WalSyncPolicy::Group { .. } => Ok(()),
+        }
+    }
+
+    /// Open a WAL sync-deferral scope for a batch of appends.
+    ///
+    /// While the returned [`WalSyncDeferral`] guard is alive, appends under
+    /// [`WalSyncPolicy::PerRecord`] skip their per-record fsync; the scope
+    /// owner is responsible for calling [`Self::flush_wal`] once at batch end
+    /// (on both success and error paths) so the whole batch becomes durable
+    /// with a single fsync. Under [`WalSyncPolicy::Group`] the scope changes
+    /// nothing: the group thresholds keep firing, preserving that policy's
+    /// bounded loss window.
+    ///
+    /// Scopes may nest (e.g. concurrent batches on different tasks); the
+    /// per-record fsync resumes once every guard has been dropped. Dropping
+    /// the guard does **not** flush — records appended inside an abandoned
+    /// scope stay buffered until the next append, [`Self::flush_wal`], or
+    /// commit makes them durable.
+    ///
+    /// # Returns
+    ///
+    /// An RAII guard that re-enables per-record fsync when dropped.
+    pub fn defer_sync(&self) -> WalSyncDeferral<'_> {
+        self.sync_deferral_depth.fetch_add(1, Ordering::AcqRel);
+        WalSyncDeferral { log: self }
+    }
+
     /// Test-only: whether the open writer has appended-but-unsynced bytes.
     ///
     /// Lets tests observe that a deferred (group-commit) batch has been flushed
@@ -675,6 +745,20 @@ impl DocumentLog {
             .lock()
             .as_ref()
             .is_some_and(|state| state.dirty)
+    }
+
+    /// Test-only: number of fsyncs performed by the currently open WAL writer.
+    ///
+    /// The counter belongs to the open [`WalWriterState`] and therefore resets
+    /// when the writer is recreated (e.g. after [`Self::truncate`]). Used to
+    /// assert fsync amortization exactly — e.g. that a deferred batch of N
+    /// appends syncs once, not N times.
+    #[cfg(test)]
+    pub(crate) fn wal_sync_count(&self) -> usize {
+        self.wal_writer
+            .lock()
+            .as_ref()
+            .map_or(0, |state| state.sync_count)
     }
 
     /// Read all records from the WAL.
@@ -914,6 +998,23 @@ impl DocumentLog {
     }
 }
 
+/// RAII guard for a WAL sync-deferral scope (see [`DocumentLog::defer_sync`]).
+///
+/// While alive, appends under [`WalSyncPolicy::PerRecord`] skip their
+/// per-record fsync so a batch caller can amortize one fsync over the whole
+/// batch. Dropping the guard only re-enables per-record fsync; it does not
+/// flush — the scope owner must call [`DocumentLog::flush_wal`] at batch end.
+#[derive(Debug)]
+pub struct WalSyncDeferral<'a> {
+    log: &'a DocumentLog,
+}
+
+impl Drop for WalSyncDeferral<'_> {
+    fn drop(&mut self) {
+        self.log.sync_deferral_depth.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1148,6 +1249,80 @@ mod tests {
         let records = log.read_all().unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].seq, 1);
+    }
+
+    /// #551: while a `defer_sync` scope is alive, per-record appends skip
+    /// their fsync; the batch-end `flush_wal` makes everything durable with a
+    /// single sync, and the records round-trip.
+    #[test]
+    fn defer_sync_suppresses_per_record_fsync_until_flush() {
+        let log = make_log();
+
+        let deferral = log.defer_sync();
+        for i in 0..5 {
+            log.append(&format!("ext_{i}"), small_doc()).unwrap();
+        }
+        assert!(
+            log.wal_is_dirty(),
+            "deferred appends must stay unsynced until the batch-end flush"
+        );
+        assert_eq!(
+            log.wal_sync_count(),
+            0,
+            "no per-record fsync may run inside the deferral scope"
+        );
+
+        drop(deferral);
+        log.flush_wal().unwrap();
+        assert!(!log.wal_is_dirty());
+        assert_eq!(
+            log.wal_sync_count(),
+            1,
+            "the whole batch must amortize to exactly one fsync"
+        );
+        assert_eq!(log.read_all().unwrap().len(), 5);
+    }
+
+    /// #551: dropping the deferral guard restores the per-record contract —
+    /// the next append self-syncs (including any bytes left over from an
+    /// abandoned scope).
+    #[test]
+    fn defer_sync_drop_restores_per_record_fsync() {
+        let log = make_log();
+
+        {
+            let _deferral = log.defer_sync();
+            log.append("ext_0", small_doc()).unwrap();
+            assert!(log.wal_is_dirty());
+            // Abandoned scope: no flush_wal before drop.
+        }
+
+        log.append("ext_1", small_doc()).unwrap();
+        assert!(
+            !log.wal_is_dirty(),
+            "the first append after the scope must sync itself and the leftover bytes"
+        );
+        assert_eq!(log.read_all().unwrap().len(), 2);
+    }
+
+    /// #551: a deferral scope does not suppress the `Group` policy's batch
+    /// thresholds — its bounded loss window holds even mid-batch.
+    #[test]
+    fn defer_sync_keeps_group_thresholds_firing() {
+        let log = make_group_log(2, usize::MAX);
+
+        let _deferral = log.defer_sync();
+        log.append("ext_0", small_doc()).unwrap();
+        assert!(
+            log.wal_is_dirty(),
+            "below the record threshold the group batch stays unsynced"
+        );
+        log.append("ext_1", small_doc()).unwrap();
+        assert!(
+            !log.wal_is_dirty(),
+            "the group record threshold must fire despite the deferral scope"
+        );
+        assert_eq!(log.wal_sync_count(), 1);
     }
 
     /// The default policy is per-record, and `group_with_defaults` uses the

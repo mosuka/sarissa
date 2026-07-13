@@ -150,6 +150,8 @@ graph LR
 | :--- | :--- |
 | `put_document(id, doc)` | Upsert -- replaces any existing document with the same ID |
 | `add_document(id, doc)` | Append -- adds as a new chunk (multiple chunks can share an ID) |
+| `put_documents(docs)` | Batched upsert -- applies `(id, doc)` pairs in order with one WAL fsync per batch |
+| `add_documents(docs)` | Batched append -- like `put_documents` but never deletes existing chunks |
 | `get_documents(id)` | Retrieve all documents/chunks by external ID |
 | `delete_documents(id)` | Delete all documents/chunks by external ID |
 | `commit()` | Flush pending changes to storage (makes documents searchable) |
