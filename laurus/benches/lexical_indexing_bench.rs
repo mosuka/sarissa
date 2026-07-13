@@ -344,6 +344,38 @@ fn bench_bulk_ingest(c: &mut Criterion) {
     group.finish();
 }
 
+/// End-to-end `add_documents(N) + commit` — the batch-API twin of
+/// `ingest/bulk` (#551). One WAL fsync per batch instead of one per record,
+/// so the delta vs `ingest/bulk` is only visible on the FileStorage backend
+/// (`LAURUS_BENCH_DISK=1`); on MemoryStorage the two should be equal.
+fn bench_bulk_ingest_batch_api(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("ingest/bulk_batch_api");
+    group.sample_size(SAMPLE_SIZE_SLOW);
+
+    for &n in &ingest_corpus_sizes() {
+        group.throughput(Throughput::Elements(n as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let engine = rt.block_on(build_empty_engine()).unwrap();
+                    let docs = build_documents(n);
+                    (engine, docs)
+                },
+                |(engine, docs)| {
+                    rt.block_on(async {
+                        engine.add_documents(docs).await.unwrap();
+                        engine.commit().await.unwrap();
+                    });
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
 /// `(add × K + commit) × M` so M segments accumulate. M = 8 typically
 /// crosses the default `TieredMergePolicy::max_segments_per_tier = 4`
 /// threshold, so the M-sweep also exposes any auto-merge work.
@@ -403,6 +435,7 @@ criterion_group!(
     bench_add_documents,
     bench_commit,
     bench_bulk_ingest,
+    bench_bulk_ingest_batch_api,
     bench_multi_segment_commit,
 );
 criterion_main!(benches);

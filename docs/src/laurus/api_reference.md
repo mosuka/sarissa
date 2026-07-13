@@ -15,6 +15,8 @@ The central coordinator for all indexing and search operations.
 | `Engine::builder(storage, schema)` | Create an `EngineBuilder` |
 | `engine.put_document(id, doc).await?` | Upsert a document (replace if ID exists) |
 | `engine.add_document(id, doc).await?` | Add a document as a chunk (multiple chunks can share an ID) |
+| `engine.put_documents(docs).await?` | Batched upsert of `(id, doc)` pairs — one WAL fsync per batch (see [Batch Ingestion](persistence.md#batch-ingestion)) |
+| `engine.add_documents(docs).await?` | Batched chunk append of `(id, doc)` pairs — same durability and error semantics as `put_documents` |
 | `engine.delete_documents(id).await?` | Delete all documents/chunks by external ID |
 | `engine.get_documents(id).await?` | Get all documents/chunks by external ID |
 | `engine.search(request).await?` | Execute a search request |
@@ -26,6 +28,8 @@ The central coordinator for all indexing and search operations.
 | `engine.stats()?` | Get index statistics |
 
 > **`put_document` vs `add_document`:** `put_document` performs an upsert — if a document with the same external ID already exists, it is deleted and replaced. `add_document` always appends, allowing multiple document chunks to share the same external ID. See [Schema & Fields — Indexing Documents](../concepts/schema_and_fields.md#indexing-documents) for details.
+>
+> **Batch forms:** `put_documents` / `add_documents` apply their `(id, doc)` pairs sequentially in input order (duplicate IDs within one `put_documents` batch dedup exactly like sequential puts — the last occurrence wins) and fail fast with `LaurusError::BatchIngest { failed_index, failed_id, applied, .. }` on the first document that cannot be applied. There is no batch rollback: applied documents stay in the WAL and NRT buffers, so retrying the batch (or its suffix) is idempotent. See [Batch Ingestion](persistence.md#batch-ingestion) for the durability details.
 
 ### EngineBuilder
 

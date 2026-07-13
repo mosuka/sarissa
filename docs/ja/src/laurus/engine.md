@@ -151,6 +151,8 @@ graph LR
 | :--- | :--- |
 | `put_document(id, doc)` | Upsert -- 同じIDのドキュメントが既存の場合は置き換え |
 | `add_document(id, doc)` | 追加 -- 新しいチャンクとして追加（複数のチャンクが同一IDを共有可能） |
+| `put_documents(docs)` | バッチ Upsert -- `(id, doc)` ペアを順序どおり適用し、WAL fsync はバッチごとに 1 回 |
+| `add_documents(docs)` | バッチ追加 -- `put_documents` と同様だが既存チャンクを削除しない |
 | `get_documents(id)` | 外部IDによるすべてのドキュメント/チャンクの取得 |
 | `delete_documents(id)` | 外部IDによるすべてのドキュメント/チャンクの削除 |
 | `commit()` | 保留中の変更をストレージにフラッシュ（ドキュメントが検索可能になる） |
