@@ -520,6 +520,23 @@ Each vector index type stores its data in a single segment file:
 | Flat | `.flat` | Raw vectors and metadata |
 | IVF | `.ivf` | Cluster centroids, assigned vectors, and metadata |
 
+### Writer retention across commits
+
+For HNSW, the store keeps its writer cached **across commits** (Issue #864):
+after a commit the writer's in-memory state is equivalent to the file it just
+wrote, so the first upsert after a commit extends it in place instead of
+reloading (and dequantizing) the whole `.hnsw` from storage — under
+commit-heavy ingest that reload was O(index size) per cycle. The cache is
+dropped whenever the index is rewritten *behind* the writer — auto-compaction
+firing inside a commit, or an explicit `optimize()` — because both rebuild the
+file through a fresh writer and clear the deletion bitmap, and a stale
+retained writer would write the reclaimed vectors back — and whenever a
+commit fails partway, where the writer/disk agreement is unknown. As a bonus,
+a retained writer with no pending changes skips the index rewrite entirely,
+so a no-change `commit()` costs no `.hnsw` write at all. Flat and IVF keep
+the previous drop-on-commit behavior until they are audited for the same
+invariants.
+
 ## Code Example
 
 ```rust

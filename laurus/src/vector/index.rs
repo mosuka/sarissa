@@ -102,6 +102,29 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
         Ok(())
     }
 
+    /// Whether a store may keep its cached writer across `commit()` calls
+    /// (Issue #572 / #864) instead of dropping it, so the first upsert after
+    /// a commit does not reload the whole index from storage.
+    ///
+    /// Retention is sound only when **both** hold for this index type:
+    ///
+    /// 1. The writer's post-commit in-memory state is equivalent to the file
+    ///    it just wrote (idempotent `finalize()`, non-consuming `write()`,
+    ///    incremental graph/buffer reuse), so subsequent commits from the
+    ///    retained writer produce the same bytes a freshly loaded writer
+    ///    would.
+    /// 2. Every disk mutation that bypasses the writer — compaction via
+    ///    [`Self::maybe_auto_compact`], [`Self::optimize`] — invalidates the
+    ///    store's writer cache, otherwise a stale retained writer would
+    ///    rewrite physically reclaimed (deleted) vectors back into the index
+    ///    with no deletion bitmap marking them.
+    ///
+    /// Defaults to `false` (the store drops the writer on commit, today's
+    /// behavior); `HnswIndex` opts in after auditing both conditions.
+    fn retain_writer_after_commit(&self) -> bool {
+        false
+    }
+
     /// Create a searcher tailored for this index implementation.
     ///
     /// Returns a boxed [`VectorIndexSearcher`] capable of executing search/count operations.
