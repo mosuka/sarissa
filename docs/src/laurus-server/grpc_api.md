@@ -8,7 +8,7 @@ All services are defined under the `laurus.v1` protobuf package.
 | :--- | :--- | :--- |
 | `HealthService` | `Check` | Health checking |
 | `IndexService` | `CreateIndex`, `GetIndex`, `GetSchema`, `AddField`, `DeleteField` | Index lifecycle and schema |
-| `DocumentService` | `PutDocument`, `AddDocument`, `GetDocuments`, `DeleteDocuments`, `Commit`, `FlushWal` | Document CRUD, commit, and WAL flush |
+| `DocumentService` | `PutDocument`, `AddDocument`, `PutDocuments`, `AddDocuments`, `GetDocuments`, `DeleteDocuments`, `Commit`, `FlushWal` | Document CRUD, bulk ingestion, commit, and WAL flush |
 | `SearchService` | `Search`, `SearchStream` | Unary and streaming search |
 
 ---
@@ -282,6 +282,39 @@ rpc AddDocument(AddDocumentRequest) returns (AddDocumentResponse);
 ```
 
 Request fields are the same as `PutDocument`.
+
+### `PutDocuments`
+
+Batched upsert. Entries are applied sequentially, in input order, with one WAL fsync for the whole batch — much faster than one `PutDocument` call per document. Duplicate IDs within one batch dedup exactly like the same puts issued one by one (the last occurrence wins).
+
+```protobuf
+rpc PutDocuments(PutDocumentsRequest) returns (PutDocumentsResponse);
+
+message DocumentEntry {
+  string id = 1;
+  Document document = 2;
+}
+
+message PutDocumentsRequest {
+  repeated DocumentEntry documents = 1;
+}
+
+message PutDocumentsResponse {
+  uint32 applied = 1; // equals the request size on success
+}
+```
+
+The call fails fast at the first entry that cannot be applied. Already-applied entries are **not** rolled back — they are durable at the next commit — and the error status message carries the failing position, its ID, and the applied count, so retrying the batch (or its suffix) is idempotent. A batch that fails on a caller mistake (e.g. a schema violation) returns `INVALID_ARGUMENT`; storage failures return `INTERNAL`.
+
+### `AddDocuments`
+
+Batched chunk append. Like `PutDocuments` but never deletes existing documents, so a batch may legitimately repeat an ID to add multiple chunks of the same logical document.
+
+```protobuf
+rpc AddDocuments(AddDocumentsRequest) returns (AddDocumentsResponse);
+```
+
+Request/response fields mirror `PutDocuments`.
 
 ### `GetDocuments`
 

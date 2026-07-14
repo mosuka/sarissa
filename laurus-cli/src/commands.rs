@@ -14,6 +14,7 @@
 //! - [`serve`] - gRPC (and optional HTTP gateway) server.
 
 pub mod add;
+pub mod bulk;
 pub mod commit;
 pub mod create;
 pub mod delete;

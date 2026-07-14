@@ -38,6 +38,7 @@ laurus serve --config config.toml
 | POST | `/v1/documents/{id}` | `DocumentService/AddDocument` | ドキュメントの追加（チャンク） |
 | GET | `/v1/documents/{id}` | `DocumentService/GetDocuments` | ID でドキュメントを取得 |
 | DELETE | `/v1/documents/{id}` | `DocumentService/DeleteDocuments` | ID でドキュメントを削除 |
+| POST | `/v1/documents:bulk` | `DocumentService/PutDocuments` / `AddDocuments` | ドキュメントのバルクインジェスト（`?mode=put\|add`、既定は `put`） |
 | POST | `/v1/commit` | `DocumentService/Commit` | 保留中の変更をコミット |
 | POST | `/v1/flush_wal` | `DocumentService/FlushWal` | full commit なしでバッファされた WAL レコードを durable 化 |
 | POST | `/v1/search` | `SearchService/Search` | 検索（単発） |
@@ -140,6 +141,24 @@ curl -X POST http://localhost:8080/v1/documents/doc1 \
     }
   }'
 ```
+
+### ドキュメントのバルクインジェスト（POST）
+
+1 回の呼び出しで多数のドキュメントを適用します — エントリは入力順に逐次処理され、バッチ全体で WAL fsync は 1 回です。`?mode=put`（既定）は Upsert（重複 ID はデデュープ、最後が勝ち）、`?mode=add` はチャンク追加（繰り返した ID は蓄積）です。
+
+```bash
+curl -X POST 'http://localhost:8080/v1/documents:bulk?mode=put' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "documents": [
+      {"id": "doc1", "document": {"fields": {"title": "Hello"}}},
+      {"id": "doc2", "document": {"fields": {"title": "World"}}}
+    ]
+  }'
+# => {"applied": 2}
+```
+
+適用できない最初のエントリで fail-fast します。適用済みエントリはロールバックされず（次のコミットで永続化）、エラーには失敗位置が含まれるため、バッチまたはその suffix の再試行は冪等です。
 
 ### ドキュメントの取得
 

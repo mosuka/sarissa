@@ -55,10 +55,25 @@ pub fn create_router(state: GatewayState) -> Router {
                 .get(document::get_documents)
                 .delete(document::delete_documents),
         )
+        .route("/v1/documents:bulk", post(document::bulk_documents))
         .route("/v1/commit", post(document::commit))
         .route("/v1/flush_wal", post(document::flush_wal))
         .route("/v1/search", post(search::search))
         .route("/v1/search/stream", post(search::search_stream))
         .route("/v1/search/batch", post(search::search_batch))
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The router must build without panicking — in particular the literal
+    /// `:bulk` suffix in `/v1/documents:bulk` must be accepted by axum 0.8's
+    /// `{param}` syntax (a bare colon is a plain path character there).
+    #[tokio::test]
+    async fn router_builds_with_bulk_route() {
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+        let _router = create_router(GatewayState::new(channel));
+    }
 }

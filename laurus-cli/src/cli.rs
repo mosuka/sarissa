@@ -127,6 +127,23 @@ pub enum AddResource {
         #[arg(long)]
         data: String,
     },
+    /// Bulk-add document chunks from a JSONL file (one entry per line).
+    ///
+    /// Each line is `{"id": "...", "document": {"fields": {...}}}` — the
+    /// same document JSON shape as `add doc --data`. Unlike `put docs`,
+    /// repeated ids accumulate as chunks. Commits automatically (per
+    /// `--commit-every` and once at the end).
+    Docs {
+        /// Path to the JSONL file to ingest.
+        #[arg(long)]
+        file: std::path::PathBuf,
+        /// Documents per engine batch call.
+        #[arg(long, default_value_t = 1000)]
+        batch_size: usize,
+        /// Commit every N applied documents (0 = only the final commit).
+        #[arg(long, default_value_t = 0)]
+        commit_every: usize,
+    },
     /// Dynamically add a new field to an existing index.
     Field {
         /// The name of the new field.
@@ -168,6 +185,23 @@ pub enum PutResource {
         /// Document data as a JSON string.
         #[arg(long)]
         data: String,
+    },
+    /// Bulk-upsert documents from a JSONL file (one entry per line).
+    ///
+    /// Each line is `{"id": "...", "document": {"fields": {...}}}` — the
+    /// same document JSON shape as `put doc --data`. Entries are applied in
+    /// order (duplicate ids dedup, last wins) with one WAL fsync per batch.
+    /// Commits automatically (per `--commit-every` and once at the end).
+    Docs {
+        /// Path to the JSONL file to ingest.
+        #[arg(long)]
+        file: std::path::PathBuf,
+        /// Documents per engine batch call.
+        #[arg(long, default_value_t = 1000)]
+        batch_size: usize,
+        /// Commit every N applied documents (0 = only the final commit).
+        #[arg(long, default_value_t = 0)]
+        commit_every: usize,
     },
 }
 
