@@ -204,7 +204,7 @@ async fn optimize_reclaims_deleted_documents() {
 
     // Compaction physically rebuilds the graph without the deleted docs and
     // drops the bitmap file.
-    store.optimize().unwrap();
+    store.optimize().await.unwrap();
     assert!(
         !storage.file_exists(DELMAP_FILE),
         "optimize() must remove the .delmap after purging"
@@ -258,7 +258,7 @@ async fn deleting_nearest_still_finds_next_nearest() {
     assert!(before.iter().all(|id| (40..N).contains(id)));
 
     // The same invariant must hold after compaction.
-    store.optimize().unwrap();
+    store.optimize().await.unwrap();
     assert!(!storage.file_exists(DELMAP_FILE));
     let after = hit_ids(&store.search(request(10)).unwrap());
     assert_eq!(after.len(), 10);

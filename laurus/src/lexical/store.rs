@@ -263,7 +263,14 @@ impl LexicalStore {
     /// engine.commit().unwrap();
     /// ```
     pub fn commit(&self) -> Result<()> {
-        if let Some(mut writer) = self.writer_cache.lock().take() {
+        // Hold the writer-cache lock across the whole ladder (Issue #864): a
+        // writer constructed concurrently while `maybe_merge` replaces
+        // segments would seed its segment-range cache from a racing,
+        // mid-merge `.meta` scan and never be invalidated. With the lock
+        // held, new writers can only be constructed strictly before or
+        // strictly after the merge, where the scan sees a consistent set.
+        let mut writer_guard = self.writer_cache.lock();
+        if let Some(mut writer) = writer_guard.take() {
             writer.commit()?;
         }
         // Sync storage to ensure all file metadata (creation, rename, size) is
@@ -277,6 +284,7 @@ impl LexicalStore {
         self.index.maybe_merge()?;
         self.index.storage().sync()?;
         self.index.refresh()?;
+        drop(writer_guard);
         *self.searcher_cache.write() = None;
         Ok(())
     }
@@ -323,9 +331,30 @@ impl LexicalStore {
     /// engine.optimize().unwrap();
     /// ```
     pub fn optimize(&self) -> Result<()> {
-        self.index.optimize()?;
+        // Hold the writer-cache lock across the force-merge (Issue #864):
+        // without it a concurrent upsert can run against the live writer's
+        // stale segment cache while the merge deletes those segments, marking
+        // deletions in ghost segments (lost dedup / duplicate versions).
+        let mut writer_guard = self.writer_cache.lock();
+        let merge_result = self.index.optimize();
+        // The force-merge replaces committed segments (and their deletion
+        // bitmaps) behind any live writer — rebuild its cached segment view
+        // even when the merge errored partway, since segments may already
+        // have been replaced by then. If the rebuild itself fails, drop the
+        // writer entirely: an unrebuildable cache must not survive to serve
+        // stale (or, worse, empty) ranges.
+        if let Some(writer) = writer_guard.as_mut()
+            && let Err(e) = writer.invalidate_segment_cache()
+        {
+            *writer_guard = None;
+            drop(writer_guard);
+            *self.searcher_cache.write() = None;
+            merge_result?;
+            return Err(e);
+        }
+        drop(writer_guard);
         *self.searcher_cache.write() = None;
-        Ok(())
+        merge_result
     }
 
     /// Refresh the reader to see latest changes.

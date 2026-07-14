@@ -1635,6 +1635,16 @@ impl VectorIndexWriter for HnswIndexWriter {
         self.storage.is_some()
     }
 
+    fn has_pending_changes(&self) -> bool {
+        // `finalize()` sets the flag and every mutation (add_vectors,
+        // delete_document/s, build) clears it, so a finalized writer's
+        // in-memory state has already been captured by the finalize+write
+        // pair and dropping it loses nothing. Note the load path constructs
+        // writers with `is_finalized: false`, so a freshly loaded writer
+        // conservatively reports pending changes.
+        !self.is_finalized
+    }
+
     fn delete_document(&mut self, doc_id: u64) -> Result<()> {
         if self.is_finalized {
             self.is_finalized = false;

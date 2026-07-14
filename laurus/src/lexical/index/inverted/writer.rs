@@ -166,6 +166,34 @@ pub struct InvertedIndexWriter {
 
     /// Pending deletions that are not yet reflected in the reader (NRT).
     pending_deletions: std::collections::HashSet<u64>,
+
+    /// Cached `(segment_id, min_doc_id, max_doc_id)` for every committed
+    /// segment, mirroring the `*.meta` files on storage (Issue #559 / #864).
+    ///
+    /// Built from the constructor's existing recovery scan (no extra I/O),
+    /// extended in place whenever this writer flushes a segment, and rebuilt
+    /// by [`Self::invalidate_segment_cache`] after an external segment
+    /// rewrite ([`LexicalStore::optimize`](crate::lexical::store::LexicalStore::optimize)
+    /// force-merge — the only path that rewrites segments behind a live
+    /// writer; `LexicalStore::commit` drops the writer before it merges).
+    /// Lets [`Self::find_segments_for_doc`] answer from memory instead of
+    /// listing + JSON-parsing every `.meta` file per upsert.
+    segment_ranges: Vec<(String, u64, u64)>,
+
+    /// Highest `max_doc_id` across [`Self::segment_ranges`] (0 when no
+    /// segments exist). Fresh doc IDs handed out by the WAL are strictly
+    /// greater, so the steady-state ingest path rejects the "is this doc in a
+    /// committed segment?" question with one integer compare.
+    max_committed_doc_id: u64,
+
+    /// Lazily created [`DeletionManager`](crate::maintenance::deletion::DeletionManager)
+    /// reused across upserts of already-committed documents (Issue #571).
+    /// Construction loads every `.delmap` bitmap from storage, so building it
+    /// once per writer — and only when an overwrite actually needs it —
+    /// replaces a full bitmap reload per call. Dropped together with
+    /// [`Self::segment_ranges`] on [`Self::invalidate_segment_cache`] because
+    /// a force-merge deletes the segments (and bitmaps) it holds in memory.
+    deletion_manager: Option<crate::maintenance::deletion::DeletionManager>,
 }
 
 impl std::fmt::Debug for InvertedIndexWriter {
@@ -184,9 +212,13 @@ impl std::fmt::Debug for InvertedIndexWriter {
 impl InvertedIndexWriter {
     /// Create a new inverted index writer (schema-less mode).
     pub fn new(storage: Arc<dyn Storage>, config: InvertedIndexWriterConfig) -> Result<Self> {
-        // Recover state from existing segments
+        // Recover state from existing segments. The same scan also seeds the
+        // segment-range cache (Issue #559 / #864), so the cache is warm from
+        // birth at no extra I/O.
         let mut next_doc_id = 0;
         let mut max_segment_id = -1i32;
+        let mut segment_ranges = Vec::new();
+        let mut max_committed_doc_id = 0u64;
 
         if let Ok(files) = storage.list_files() {
             for file in files {
@@ -201,6 +233,8 @@ impl InvertedIndexWriter {
                             next_doc_id = next_doc_id.max(local_id + 1);
                         }
                         max_segment_id = max_segment_id.max(meta.generation as i32);
+                        max_committed_doc_id = max_committed_doc_id.max(meta.max_doc_id);
+                        segment_ranges.push((meta.segment_id, meta.min_doc_id, meta.max_doc_id));
                     }
                 }
             }
@@ -239,6 +273,9 @@ impl InvertedIndexWriter {
             last_wal_seq: base_metadata.last_wal_seq,
             base_metadata,
             pending_deletions: std::collections::HashSet::new(),
+            segment_ranges,
+            max_committed_doc_id,
+            deletion_manager: None,
         })
     }
 
@@ -722,6 +759,11 @@ impl InvertedIndexWriter {
 
         self.write_segment_files(&segment_name)?;
 
+        // Mirror the freshly written `.meta` into the segment-range cache
+        // (Issue #559 / #864) so an overwrite of one of these docs later in
+        // this writer's life resolves without rescanning storage.
+        self.extend_segment_cache(&segment_name);
+
         // Clear buffers
         self.buffered_docs.clear();
         self.buffered_doc_ids.clear();
@@ -800,6 +842,7 @@ impl InvertedIndexWriter {
             self.index_dirty = false;
         }
         let paths = self.write_segment_files(segment_name)?;
+        self.extend_segment_cache(segment_name);
         self.buffered_docs.clear();
         self.buffered_doc_ids.clear();
         self.index_dirty = false;
@@ -1259,8 +1302,12 @@ impl InvertedIndexWriter {
         Ok(())
     }
 
-    /// Write segment metadata.
-    fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
+    /// Doc-ID range `(min, max)` of the currently buffered documents,
+    /// `(0, 0)` when the buffer is empty. Shared by
+    /// [`Self::write_segment_metadata`] and [`Self::extend_segment_cache`] so
+    /// the on-storage `.meta` and the in-memory segment-range cache can never
+    /// disagree.
+    fn buffered_doc_id_range(&self) -> (u64, u64) {
         let min_id = self
             .buffered_docs
             .iter()
@@ -1273,6 +1320,28 @@ impl InvertedIndexWriter {
             .map(|(id, _)| *id)
             .max()
             .unwrap_or(0);
+        (min_id, max_id)
+    }
+
+    /// Append the segment just written from the current buffer to
+    /// [`Self::segment_ranges`] and raise [`Self::max_committed_doc_id`]
+    /// (Issue #559 / #864). Callers must invoke this after
+    /// [`Self::write_segment_files`] and **before** clearing the buffers the
+    /// range is computed from.
+    ///
+    /// # Parameters
+    ///
+    /// - `segment_name` - Name the segment's files were written under.
+    fn extend_segment_cache(&mut self, segment_name: &str) {
+        let (min_id, max_id) = self.buffered_doc_id_range();
+        self.max_committed_doc_id = self.max_committed_doc_id.max(max_id);
+        self.segment_ranges
+            .push((segment_name.to_string(), min_id, max_id));
+    }
+
+    /// Write segment metadata.
+    fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
+        let (min_id, max_id) = self.buffered_doc_id_range();
 
         // Create SegmentInfo
         let info = SegmentInfo {
@@ -1464,28 +1533,40 @@ impl InvertedIndexWriter {
     fn mark_persisted_doc_deleted(&mut self, doc_id: u64) -> Result<()> {
         let segments = self.find_segments_for_doc(doc_id)?;
 
-        for (segment_id, min_doc_id, max_doc_id) in segments {
-            // Found the segment, update deletion bitmap
-            let manager = crate::maintenance::deletion::DeletionManager::new(
-                Default::default(), // Use default config for now
-                self.storage.clone(),
-            )?;
-
-            manager.initialize_segment(&segment_id, min_doc_id, max_doc_id)?;
-
-            let delete_result = manager.delete_document(&segment_id, doc_id, "upsert");
-            if delete_result.is_err() {
-                // If initializing failed (e.g. bitmap corrupted), try force re-init
-                // In production code we should be more careful, but here we prioritize consistency
-                manager.initialize_segment(&segment_id, min_doc_id, max_doc_id)?;
-                manager.delete_document(&segment_id, doc_id, "upsert")?;
+        if !segments.is_empty() {
+            // Create the deletion manager on first use and keep it for the
+            // writer's lifetime (Issue #571): construction reloads every
+            // `.delmap` bitmap from storage, and the fresh-id ingest path
+            // (empty `segments`) never needs it at all.
+            if self.deletion_manager.is_none() {
+                self.deletion_manager = Some(crate::maintenance::deletion::DeletionManager::new(
+                    Default::default(), // Use default config for now
+                    self.storage.clone(),
+                )?);
             }
+            let mut deleted = 0;
+            for (segment_id, min_doc_id, max_doc_id) in &segments {
+                let manager = self.deletion_manager.as_ref().ok_or_else(|| {
+                    LaurusError::internal("deletion manager missing after initialization")
+                })?;
 
-            // Update segment metadata to reflect deletions
-            self.update_segment_meta_deletions(&segment_id)?;
+                manager.initialize_segment(segment_id, *min_doc_id, *max_doc_id)?;
 
+                let delete_result = manager.delete_document(segment_id, doc_id, "upsert");
+                if delete_result.is_err() {
+                    // If initializing failed (e.g. bitmap corrupted), try force re-init
+                    // In production code we should be more careful, but here we prioritize consistency
+                    manager.initialize_segment(segment_id, *min_doc_id, *max_doc_id)?;
+                    manager.delete_document(segment_id, doc_id, "upsert")?;
+                }
+
+                // Update segment metadata to reflect deletions
+                self.update_segment_meta_deletions(segment_id)?;
+
+                deleted += 1;
+            }
             // Track globally
-            self.stats.deleted_count += 1;
+            self.stats.deleted_count += deleted;
         }
 
         // Add to pending deletions for NRT visibility
@@ -1499,34 +1580,74 @@ impl InvertedIndexWriter {
         self.pending_deletions.contains(&doc_id)
     }
 
-    /// Find all segments containing the global doc_id by scanning segment metadata files.
+    /// Find all segments containing the global doc_id.
     /// Returns a list of (segment_id, min_doc_id, max_doc_id).
+    ///
+    /// Served from [`Self::segment_ranges`] (Issue #559 / #864) — the cache
+    /// mirrors the on-storage `*.meta` files, so this no longer lists and
+    /// JSON-parses them per call. Fresh doc IDs (the steady-state ingest
+    /// path) are rejected with a single compare against
+    /// [`Self::max_committed_doc_id`].
     fn find_segments_for_doc(&self, doc_id: u64) -> Result<Vec<(String, u64, u64)>> {
-        let mut segments = Vec::new();
-        let files = self.storage.list_files()?;
-        for file in files {
+        // Fast path: WAL doc IDs are monotonic, so an ID above every
+        // committed segment's max cannot be in any of them.
+        if doc_id > self.max_committed_doc_id {
+            return Ok(Vec::new());
+        }
+        // In Stable ID mode, we check if the ID is within the min/max range.
+        // Note: This might match multiple segments if ranges overlap across shards,
+        // or if we have multiple versions of the same document (upserts).
+        // To be 100% sure, we should check if the document actually exists in
+        // the segment. For now, assume the range is specific enough.
+        Ok(self
+            .segment_ranges
+            .iter()
+            .filter(|(_, min_doc_id, max_doc_id)| doc_id >= *min_doc_id && doc_id <= *max_doc_id)
+            .cloned()
+            .collect())
+    }
+
+    /// Rebuild [`Self::segment_ranges`] / [`Self::max_committed_doc_id`] from
+    /// the `*.meta` files on storage and drop the cached
+    /// [`Self::deletion_manager`].
+    ///
+    /// Must be called after an external segment rewrite that this writer did
+    /// not perform itself — today that is only
+    /// [`LexicalStore::optimize`](crate::lexical::store::LexicalStore::optimize)'s
+    /// force-merge, which replaces every segment (and its deletion bitmap)
+    /// behind a live writer. `LexicalStore::commit` needs no call: it drops
+    /// the cached writer before merging, so the next writer rebuilds the
+    /// cache in its constructor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if listing the storage fails; malformed `.meta` files
+    /// are skipped, matching the constructor's recovery scan.
+    pub fn invalidate_segment_cache(&mut self) -> Result<()> {
+        // Build the new view first and swap it in only on success: clearing
+        // eagerly and then failing (e.g. on `list_files`) would leave the
+        // writer alive with an EMPTY cache and `max_committed_doc_id == 0`,
+        // silently skipping every subsequent overwrite's deletion via the
+        // fast path — worse than the error itself.
+        let mut segment_ranges = Vec::new();
+        let mut max_committed_doc_id = 0u64;
+        for file in self.storage.list_files()? {
             if !file.ends_with(".meta") || file == "index.meta" {
                 continue;
             }
-            let input = match self.storage.open_input(&file) {
-                Ok(input) => input,
-                Err(_) => continue,
+            let Ok(input) = self.storage.open_input(&file) else {
+                continue;
             };
-            let meta: SegmentInfo = match serde_json::from_reader(input) {
-                Ok(m) => m,
-                Err(_) => continue,
+            let Ok(meta) = serde_json::from_reader::<_, SegmentInfo>(input) else {
+                continue;
             };
-
-            // In Stable ID mode, we check if the ID is within the min/max range.
-            // Note: This might match multiple segments if ranges overlap across shards,
-            // or if we have multiple versions of the same document (upserts).
-            if doc_id >= meta.min_doc_id && doc_id <= meta.max_doc_id {
-                // To be 100% sure, we should check if the document actually exists in this segment.
-                // For now, assume this range is specific enough.
-                segments.push((meta.segment_id.clone(), meta.min_doc_id, meta.max_doc_id));
-            }
+            max_committed_doc_id = max_committed_doc_id.max(meta.max_doc_id);
+            segment_ranges.push((meta.segment_id, meta.min_doc_id, meta.max_doc_id));
         }
-        Ok(segments)
+        self.segment_ranges = segment_ranges;
+        self.max_committed_doc_id = max_committed_doc_id;
+        self.deletion_manager = None;
+        Ok(())
     }
 
     /// Rewrite segment metadata to mark `has_deletions = true`.
@@ -1583,6 +1704,10 @@ impl Drop for InvertedIndexWriter {
 impl LexicalIndexWriter for InvertedIndexWriter {
     fn add_document(&mut self, doc: Document) -> Result<u64> {
         InvertedIndexWriter::add_document(self, doc)
+    }
+
+    fn invalidate_segment_cache(&mut self) -> Result<()> {
+        InvertedIndexWriter::invalidate_segment_cache(self)
     }
 
     fn upsert_document(&mut self, doc_id: u64, doc: Document) -> Result<()> {

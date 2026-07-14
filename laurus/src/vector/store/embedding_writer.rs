@@ -170,6 +170,10 @@ impl VectorIndexWriter for EmbeddingVectorIndexWriter {
         self.inner.pending_docs()
     }
 
+    fn has_pending_changes(&self) -> bool {
+        self.inner.has_pending_changes()
+    }
+
     fn close(&mut self) -> Result<()> {
         self.inner.close()
     }

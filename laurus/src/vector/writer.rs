@@ -122,6 +122,23 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     /// This removes the document from the index buffer if it hasn't been finalized.
     fn delete_document(&mut self, doc_id: u64) -> Result<()>;
 
+    /// Whether the writer holds changes that have not been written to storage
+    /// yet (Issue #864).
+    ///
+    /// Unlike [`Self::pending_docs`] — which reports the number of *buffered
+    /// documents* and is therefore `0` both for a clean just-committed writer
+    /// and for a dirty writer whose buffer was emptied by deletions — this
+    /// answers "would dropping the writer lose an uncommitted mutation?".
+    /// Stores use it to skip the full index rewrite on a no-change commit of
+    /// a retained writer, and to flush a dirty writer before dropping it in
+    /// `optimize()`.
+    ///
+    /// The default implementation conservatively returns `true` (always
+    /// commit). Writers that track a finalized flag should override it.
+    fn has_pending_changes(&self) -> bool {
+        true
+    }
+
     /// Delete documents matching a metadata field value.
     ///
     /// This removes matching documents from the index buffer regarding the filtering criteria.

@@ -202,4 +202,20 @@ pub trait LexicalIndexWriter: Send + Sync + std::fmt::Debug {
     fn is_updated_deleted(&self, _doc_id: u64) -> bool {
         false
     }
+
+    /// Invalidate any cached view of the committed segments (Issue #864).
+    ///
+    /// Called by the store after an operation that rewrites segments behind a
+    /// live writer (today only
+    /// [`LexicalStore::optimize`](crate::lexical::store::LexicalStore::optimize)'s
+    /// force-merge), so a writer that caches segment metadata rebuilds it
+    /// from storage. The default implementation is a no-op for writers that
+    /// hold no such cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if rebuilding the cached view from storage fails.
+    fn invalidate_segment_cache(&mut self) -> Result<()> {
+        Ok(())
+    }
 }

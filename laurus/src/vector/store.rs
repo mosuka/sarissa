@@ -333,31 +333,69 @@ impl VectorStore {
 
     /// Commit any pending changes to the index.
     ///
-    /// If a cached writer exists, this method takes it and calls
-    /// [`commit()`](crate::vector::writer::VectorIndexWriter::commit) (which
-    /// finalizes the index and writes it to storage). It then syncs the
-    /// underlying storage to ensure all file metadata is flushed to disk,
+    /// If a cached writer exists, this method calls
+    /// [`commit()`](crate::vector::writer::VectorIndexWriter::commit) on it
+    /// (which finalizes the index and writes it to storage). It then syncs
+    /// the underlying storage to ensure all file metadata is flushed to disk,
     /// refreshes the index metadata, and invalidates the searcher cache so
     /// that subsequent searches see the committed data.
     ///
+    /// When the index opts in via
+    /// [`VectorIndex::retain_writer_after_commit`] (Issue #572 / #864), the
+    /// committed writer stays in the cache — its in-memory state is
+    /// equivalent to the file it just wrote — so the first upsert after the
+    /// commit does not reload the whole index from storage. The cache is
+    /// still dropped when auto-compaction ran: compaction rewrites the index
+    /// through a fresh writer and clears the deletion bitmap, so a retained
+    /// writer would resurrect the physically reclaimed vectors on its next
+    /// commit. The writer-cache lock is held across the whole ladder so a
+    /// concurrent upsert cannot interleave with the commit.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the writer commit, storage sync, or index refresh
-    /// fails.
+    /// Returns an error if the writer commit, deletion persistence,
+    /// compaction, storage sync, or index refresh fails.
     pub async fn commit(&self) -> Result<()> {
-        if let Some(mut writer) = self.writer_cache.lock().await.take() {
-            // commit() calls finalize() then write() to persist to storage
-            writer.commit()?;
+        let mut writer_guard = self.writer_cache.lock().await;
+        // commit() calls finalize() then write() to persist to storage. A
+        // retained writer with no pending changes is skipped — its state was
+        // already captured by the previous finalize+write, so re-committing
+        // would only rewrite an identical index file.
+        let flush_result = match writer_guard.as_mut() {
+            Some(writer) if writer.has_pending_changes() => writer.commit(),
+            _ => Ok(()),
+        };
+        let ladder_result = flush_result
+            // Persist any pending logical deletions (Issue #624) so the
+            // deletion bitmap survives restarts. The WAL also records
+            // deletions, so this is a durability optimization rather than the
+            // source of truth.
+            .and_then(|_| self.index.persist_deletions())
+            // Automatically compact when the deletion ratio crosses the
+            // configured threshold (Issue #782), so logically deleted vectors
+            // are physically reclaimed rather than accumulating indefinitely.
+            // A no-op unless the index supports it and `auto_compaction` is
+            // enabled.
+            .and_then(|_| self.index.maybe_auto_compact());
+        match ladder_result {
+            Ok(compacted) => {
+                if compacted || !self.index.retain_writer_after_commit() {
+                    *writer_guard = None;
+                }
+            }
+            Err(e) => {
+                // A mid-ladder failure leaves the writer/disk agreement
+                // unknown — compaction in particular may have partially
+                // rewritten the index and cleared the deletion bitmap before
+                // failing. Drop the cache so the next writer reloads ground
+                // truth from storage (the pre-retention behavior on every
+                // path), instead of retrying — or resurrecting from — a
+                // stale writer.
+                *writer_guard = None;
+                return Err(e);
+            }
         }
-        // Persist any pending logical deletions (Issue #624) so the deletion
-        // bitmap survives restarts. The WAL also records deletions, so this is
-        // a durability optimization rather than the source of truth.
-        self.index.persist_deletions()?;
-        // Automatically compact when the deletion ratio crosses the configured
-        // threshold (Issue #782), so logically deleted vectors are physically
-        // reclaimed rather than accumulating indefinitely. A no-op unless the
-        // index supports it and `auto_compaction` is enabled.
-        self.index.maybe_auto_compact()?;
+        drop(writer_guard);
         // Sync storage to ensure all file metadata (creation, rename, size) is
         // flushed to disk. This is critical on Windows where directory listings
         // and file visibility may be cached until the directory is synced.
@@ -373,11 +411,34 @@ impl VectorStore {
     /// and then invalidates the searcher cache so the next search creates a
     /// fresh searcher reflecting the optimized state.
     ///
+    /// The cached writer is committed first when it holds buffered documents
+    /// (so optimization compacts the full state and nothing is lost), and the
+    /// cache is dropped in every case: `optimize()` rewrites the index
+    /// through a fresh writer and clears the deletion bitmap, so a writer
+    /// retained across it would resurrect the physically reclaimed vectors
+    /// on its next commit (Issue #864).
+    ///
     /// # Errors
     ///
-    /// Returns an error if the underlying index optimization fails.
-    pub fn optimize(&self) -> Result<()> {
+    /// Returns an error if flushing the cached writer or the underlying index
+    /// optimization fails.
+    pub async fn optimize(&self) -> Result<()> {
+        let mut writer_guard = self.writer_cache.lock().await;
+        // Flush uncommitted mutations first. `has_pending_changes` (not
+        // `pending_docs`) is the gate: a writer whose buffer was emptied by
+        // deletions has zero pending docs but still holds an uncommitted
+        // delete-everything mutation that dropping would silently discard.
+        let flush_result = match writer_guard.as_mut() {
+            Some(writer) if writer.has_pending_changes() => writer.commit(),
+            _ => Ok(()),
+        };
+        // Always drop the cache — optimize() rewrites the index through a
+        // fresh writer and clears the deletion bitmap — and drop it on the
+        // flush error path too, where the writer/disk agreement is unknown.
+        *writer_guard = None;
+        flush_result?;
         self.index.optimize()?;
+        drop(writer_guard);
         *self.searcher_cache.write() = None;
         Ok(())
     }

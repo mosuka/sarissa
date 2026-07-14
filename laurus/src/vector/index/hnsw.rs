@@ -413,6 +413,17 @@ impl VectorIndex for HnswIndex {
         })
     }
 
+    fn retain_writer_after_commit(&self) -> bool {
+        // Audited for Issue #864: `finalize()` is idempotent and appends
+        // incrementally to the existing graph, `write(&self)` is
+        // non-consuming, and `delete_document` only invalidates the graph
+        // when a buffered vector was actually removed — so a retained
+        // writer's state stays equivalent to the file it just wrote. The
+        // bypassing mutations (`optimize` / auto-compaction) are handled by
+        // `VectorStore`, which invalidates its writer cache on both.
+        true
+    }
+
     fn optimize(&self) -> Result<()> {
         self.check_closed()?;
 
