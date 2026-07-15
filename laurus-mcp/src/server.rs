@@ -19,9 +19,10 @@ use tonic::transport::Channel;
 use tracing::info;
 
 use laurus_server::proto::laurus::v1::{
-    AddDocumentRequest, AddFieldRequest, CommitRequest, CreateIndexRequest, DeleteDocumentsRequest,
-    DeleteFieldRequest, GetDocumentsRequest, GetIndexRequest, GetSchemaRequest, PutDocumentRequest,
-    SearchBatchRequest, SearchRequest, document_service_client::DocumentServiceClient,
+    AddDocumentRequest, AddDocumentsRequest, AddFieldRequest, CommitRequest, CreateIndexRequest,
+    DeleteDocumentsRequest, DeleteFieldRequest, DocumentEntry, GetDocumentsRequest,
+    GetIndexRequest, GetSchemaRequest, PutDocumentRequest, PutDocumentsRequest, SearchBatchRequest,
+    SearchRequest, document_service_client::DocumentServiceClient,
     index_service_client::IndexServiceClient, search_service_client::SearchServiceClient,
 };
 
@@ -93,6 +94,17 @@ struct AddDocumentParams {
     ///
     /// Field names and value types must match the index schema.
     document: Value,
+}
+
+/// Parameters for the `put_documents` / `add_documents` tools.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct BulkDocumentsParams {
+    /// Array of `{"id": "...", "document": {...}}` entries, applied
+    /// sequentially in input order with one WAL fsync for the whole batch.
+    ///
+    /// Each `document` is a JSON object of fields matching the index schema
+    /// (the same shape as the `put_document` tool's `document`).
+    documents: Vec<Value>,
 }
 
 /// Parameters for the `get_documents` tool.
@@ -557,6 +569,107 @@ impl LaurusMcpServer {
         }
     }
 
+    /// Convert the bulk tools' JSON entries into proto `DocumentEntry`
+    /// values, naming the offending position on the first invalid entry.
+    fn bulk_entries(documents: Vec<Value>) -> Result<Vec<DocumentEntry>, String> {
+        documents
+            .into_iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                let id = entry
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| format!("documents[{index}]: missing string \"id\""))?
+                    .to_string();
+                let document = entry
+                    .get("document")
+                    .cloned()
+                    .ok_or_else(|| format!("documents[{index}]: missing \"document\" key"))?;
+                let document = convert::json_to_document(document)
+                    .map_err(|e| format!("documents[{index}]: {e}"))?;
+                Ok(DocumentEntry {
+                    id,
+                    document: Some(document),
+                })
+            })
+            .collect()
+    }
+
+    /// Batched upsert of documents in one round trip.
+    ///
+    /// Entries are applied sequentially, in input order, with one WAL fsync
+    /// for the whole batch; a failure aborts at the offending entry without
+    /// rolling back the already-applied prefix (retrying is idempotent).
+    #[tool(
+        description = "Put (upsert) MANY documents in one call. Pass documents as an array of {\"id\": \"...\", \"document\": {...}} entries; they are applied in order (duplicate ids dedup, last wins) with one WAL fsync for the whole batch, which is much faster than calling put_document per document. Call commit afterwards to persist changes."
+    )]
+    async fn put_documents(
+        &self,
+        Parameters(params): Parameters<BulkDocumentsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let channel = match self.channel.read().await.clone() {
+            Some(ch) => ch,
+            None => {
+                return Ok(Self::tool_error(
+                    "Not connected. Call the connect tool first.",
+                ));
+            }
+        };
+
+        let documents = match Self::bulk_entries(params.documents) {
+            Ok(entries) => entries,
+            Err(e) => return Ok(Self::tool_error(format!("Invalid batch: {e}"))),
+        };
+
+        match DocumentServiceClient::new(channel)
+            .put_documents(PutDocumentsRequest { documents })
+            .await
+        {
+            Ok(resp) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "{} documents put (upserted). Call commit to persist changes.",
+                resp.into_inner().applied
+            ))])),
+            Err(e) => Ok(Self::tool_error(format!("Failed to put documents: {e}"))),
+        }
+    }
+
+    /// Batched chunk append of documents in one round trip.
+    ///
+    /// Like `put_documents` but never deletes existing documents, so a batch
+    /// may repeat an id to add multiple chunks of one logical document.
+    #[tool(
+        description = "Add MANY documents as new chunks in one call. Pass documents as an array of {\"id\": \"...\", \"document\": {...}} entries; unlike put_documents, existing documents are never deleted, so repeating an id adds multiple chunks. One WAL fsync covers the whole batch. Call commit afterwards to persist changes."
+    )]
+    async fn add_documents(
+        &self,
+        Parameters(params): Parameters<BulkDocumentsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let channel = match self.channel.read().await.clone() {
+            Some(ch) => ch,
+            None => {
+                return Ok(Self::tool_error(
+                    "Not connected. Call the connect tool first.",
+                ));
+            }
+        };
+
+        let documents = match Self::bulk_entries(params.documents) {
+            Ok(entries) => entries,
+            Err(e) => return Ok(Self::tool_error(format!("Invalid batch: {e}"))),
+        };
+
+        match DocumentServiceClient::new(channel)
+            .add_documents(AddDocumentsRequest { documents })
+            .await
+        {
+            Ok(resp) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "{} documents added as chunks. Call commit to persist changes.",
+                resp.into_inner().applied
+            ))])),
+            Err(e) => Ok(Self::tool_error(format!("Failed to add documents: {e}"))),
+        }
+    }
+
     /// Get all stored documents for a given ID.
     #[tool(
         description = "Retrieve all stored documents (including chunks) by external ID. Returns a JSON array of documents matching the ID."
@@ -816,7 +929,8 @@ impl ServerHandler for LaurusMcpServer {
             .with_instructions(
                 "Laurus search engine MCP server (gRPC client). \
              Tools: connect, create_index, get_stats, get_schema, add_field, delete_field, \
-             put_document, add_document, get_documents, delete_documents, commit, search. \
+             put_document, add_document, put_documents, add_documents, get_documents, \
+             delete_documents, commit, search. \
              Start by calling connect(endpoint) to connect to a running laurus-server, \
              then use the other tools to manage and search the index."
                     .to_string(),

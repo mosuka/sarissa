@@ -11,6 +11,17 @@ service DocumentService {
   // Add a document as a new chunk (multiple chunks can share an ID).
   rpc AddDocument(AddDocumentRequest) returns (AddDocumentResponse);
 
+  // Batched upsert: apply (id, document) entries sequentially, in input
+  // order, with one WAL fsync for the whole batch. Fails fast at the first
+  // entry that cannot be applied; already-applied entries are not rolled
+  // back, so retrying the batch (or its suffix) is idempotent.
+  rpc PutDocuments(PutDocumentsRequest) returns (PutDocumentsResponse);
+
+  // Batched chunk append: like PutDocuments but never deletes existing
+  // documents, so a batch may legitimately repeat an ID to add multiple
+  // chunks of the same logical document.
+  rpc AddDocuments(AddDocumentsRequest) returns (AddDocumentsResponse);
+
   // Get all documents (including chunks) by external ID.
   rpc GetDocuments(GetDocumentsRequest) returns (GetDocumentsResponse);
 
@@ -39,6 +50,32 @@ message AddDocumentRequest {
 }
 
 message AddDocumentResponse {}
+
+// One (external id, document) pair of a batched write.
+message DocumentEntry {
+  string id = 1;
+  Document document = 2;
+}
+
+message PutDocumentsRequest {
+  // Applied sequentially, in order. Duplicate ids within one batch dedup
+  // exactly like the same puts issued one by one (the last occurrence wins).
+  repeated DocumentEntry documents = 1;
+}
+
+message PutDocumentsResponse {
+  // Number of documents applied (equals the request size on success).
+  uint32 applied = 1;
+}
+
+message AddDocumentsRequest {
+  repeated DocumentEntry documents = 1;
+}
+
+message AddDocumentsResponse {
+  // Number of documents applied (equals the request size on success).
+  uint32 applied = 1;
+}
 
 message GetDocumentsRequest {
   string id = 1;

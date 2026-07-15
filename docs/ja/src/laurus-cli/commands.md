@@ -237,24 +237,44 @@ laurus add doc --id <ID> --data <JSON>
 | `--id <ID>` | はい | 外部ドキュメント ID（文字列） |
 | `--data <JSON>` | はい | JSON 文字列としてのドキュメントフィールド |
 
-JSON フォーマットはフィールド名と値を対応付けたフラットなオブジェクトです:
+JSON はドキュメントの serde 形式です: `fields` オブジェクトの各フィールド名に、外部タグ付きの値（`Text`・`Int64`・`Float64`・`Bool`・`VectorValue` など）を対応付けます。
 
 ```json
 {
-  "title": "Introduction to Rust",
-  "body": "Rust is a systems programming language.",
-  "category": "programming"
+  "fields": {
+    "title": {"Text": "Introduction to Rust"},
+    "body": {"Text": "Rust is a systems programming language."},
+    "year": {"Int64": 2024}
+  }
 }
 ```
 
 **例:**
 
 ```bash
-laurus add doc --id doc1 --data '{"title":"Hello World","body":"This is a test document."}'
+laurus add doc --id doc1 --data '{"fields":{"title":{"Text":"Hello World"},"body":{"Text":"This is a test document."}}}'
 # Document 'doc1' added. Run 'commit' to persist changes.
 ```
 
 > **ヒント:** 複数のドキュメントが同じ外部 ID を共有できます（チャンキングパターン）。各チャンクに対して `add doc` を使用してください。
+
+### `add docs`
+
+JSONL ファイルからドキュメントチャンクをバルク追加します — 1 行に 1 エントリの `{"id": "...", "document": {"fields": {...}}}` 形式で、`document` は `add doc --data` と同じ JSON 形式です。エントリはエンジンのバッチ API（バッチごとに WAL fsync 1 回）で適用され、`add doc` と異なり**自動的にコミット**します（`--commit-every` 件ごと + 最後に 1 回）。
+
+```bash
+laurus add docs --file <JSONL> [--batch-size 1000] [--commit-every 0]
+```
+
+**引数:**
+
+| フラグ | 必須 | 説明 |
+| :--- | :--- | :--- |
+| `--file <JSONL>` | はい | 取り込む JSONL ファイルのパス |
+| `--batch-size <N>` | いいえ | エンジンのバッチ呼び出しあたりのドキュメント数（既定 `1000`） |
+| `--commit-every <N>` | いいえ | N 件適用ごとにコミット。`0` = 最後の 1 回のみ（既定） |
+
+繰り返した ID はチャンクとして蓄積されます。途中で失敗した場合、エラーは該当行を示し、適用済みの prefix はコミットされるため、残りの行から再実行してインジェストを継続できます。
 
 ---
 
@@ -278,11 +298,32 @@ laurus put doc --id <ID> --data <JSON>
 **例:**
 
 ```bash
-laurus put doc --id doc1 --data '{"title":"Updated Title","body":"This replaces the existing document."}'
+laurus put doc --id doc1 --data '{"fields":{"title":{"Text":"Updated Title"},"body":{"Text":"This replaces the existing document."}}}'
 # Document 'doc1' put (upserted). Run 'commit' to persist changes.
 ```
 
 > **注意:** `add doc` とは異なり、`put doc` は指定 ID の既存チャンクをすべて置き換えます。チャンクを追記したい場合は `add doc` を、ドキュメント全体を置き換えたい場合は `put doc` を使用してください。
+
+### `put docs`
+
+JSONL ファイルからドキュメントをバルク Upsert します — 1 行に 1 エントリの `{"id": "...", "document": {"fields": {...}}}` 形式で、エンジンのバッチ API（バッチごとに WAL fsync 1 回）で適用されます。重複した ID は順にデデュープされます（最後の出現が勝ち）。`add docs` と同じく**自動的にコミット**します。
+
+```bash
+laurus put docs --file <JSONL> [--batch-size 1000] [--commit-every 0]
+```
+
+引数は `add docs` と同じです。途中で失敗した場合、エラーは該当行を示し、適用済みの prefix はコミットされます。put は冪等なので、ファイル全体（または残りの suffix）の再実行は安全です。
+
+**例:**
+
+```bash
+cat > docs.jsonl <<'JSONL'
+{"id": "doc1", "document": {"fields": {"title": {"Text": "Hello"}}}}
+{"id": "doc2", "document": {"fields": {"title": {"Text": "World"}}}}
+JSONL
+laurus put docs --file docs.jsonl
+# 2 documents put (upserted) and committed.
+```
 
 ---
 

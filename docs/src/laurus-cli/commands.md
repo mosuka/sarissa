@@ -237,24 +237,44 @@ laurus add doc --id <ID> --data <JSON>
 | `--id <ID>` | Yes | External document ID (string) |
 | `--data <JSON>` | Yes | Document fields as a JSON string |
 
-The JSON format is a flat object mapping field names to values:
+The JSON is the document's serde shape: a `fields` object mapping each field name to an externally-tagged value (`Text`, `Int64`, `Float64`, `Bool`, `VectorValue`, ...):
 
 ```json
 {
-  "title": "Introduction to Rust",
-  "body": "Rust is a systems programming language.",
-  "category": "programming"
+  "fields": {
+    "title": {"Text": "Introduction to Rust"},
+    "body": {"Text": "Rust is a systems programming language."},
+    "year": {"Int64": 2024}
+  }
 }
 ```
 
 **Example:**
 
 ```bash
-laurus add doc --id doc1 --data '{"title":"Hello World","body":"This is a test document."}'
+laurus add doc --id doc1 --data '{"fields":{"title":{"Text":"Hello World"},"body":{"Text":"This is a test document."}}}'
 # Document 'doc1' added. Run 'commit' to persist changes.
 ```
 
 > **Tip:** Multiple documents can share the same external ID (chunking pattern). Use `add doc` for each chunk.
+
+### `add docs`
+
+Bulk-add document chunks from a JSONL file — one `{"id": "...", "document": {"fields": {...}}}` entry per line, where `document` uses the same JSON shape as `add doc --data`. Entries are applied through the engine's batch API (one WAL fsync per batch) and, unlike `add doc`, the command **commits automatically**: every `--commit-every` applied documents and once at the end.
+
+```bash
+laurus add docs --file <JSONL> [--batch-size 1000] [--commit-every 0]
+```
+
+**Arguments:**
+
+| Flag | Required | Description |
+| :--- | :--- | :--- |
+| `--file <JSONL>` | Yes | Path to the JSONL file to ingest |
+| `--batch-size <N>` | No | Documents per engine batch call (default `1000`) |
+| `--commit-every <N>` | No | Commit every N applied documents; `0` = only the final commit (default) |
+
+Repeated IDs accumulate as chunks. On a mid-file failure the error names the offending line, the applied prefix is committed, and re-running the remaining lines continues the ingest.
 
 ---
 
@@ -278,11 +298,32 @@ laurus put doc --id <ID> --data <JSON>
 **Example:**
 
 ```bash
-laurus put doc --id doc1 --data '{"title":"Updated Title","body":"This replaces the existing document."}'
+laurus put doc --id doc1 --data '{"fields":{"title":{"Text":"Updated Title"},"body":{"Text":"This replaces the existing document."}}}'
 # Document 'doc1' put (upserted). Run 'commit' to persist changes.
 ```
 
 > **Note:** Unlike `add doc`, `put doc` replaces all existing chunks for the given ID. Use `add doc` when you want to append chunks, and `put doc` when you want to replace the entire document.
+
+### `put docs`
+
+Bulk-upsert documents from a JSONL file — one `{"id": "...", "document": {"fields": {...}}}` entry per line, applied through the engine's batch API (one WAL fsync per batch). Duplicate IDs dedup in order (the last occurrence wins). Like `add docs`, the command **commits automatically**.
+
+```bash
+laurus put docs --file <JSONL> [--batch-size 1000] [--commit-every 0]
+```
+
+Arguments are the same as `add docs`. On a mid-file failure the error names the offending line and the applied prefix is committed; because puts are idempotent, re-running the whole file (or its remaining suffix) is safe.
+
+**Example:**
+
+```bash
+cat > docs.jsonl <<'JSONL'
+{"id": "doc1", "document": {"fields": {"title": {"Text": "Hello"}}}}
+{"id": "doc2", "document": {"fields": {"title": {"Text": "World"}}}}
+JSONL
+laurus put docs --file docs.jsonl
+# 2 documents put (upserted) and committed.
+```
 
 ---
 

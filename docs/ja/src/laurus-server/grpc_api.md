@@ -8,7 +8,7 @@
 | :--- | :--- | :--- |
 | `HealthService` | `Check` | ヘルスチェック |
 | `IndexService` | `CreateIndex`, `GetIndex`, `GetSchema`, `AddField`, `DeleteField` | インデックスのライフサイクルとスキーマ |
-| `DocumentService` | `PutDocument`, `AddDocument`, `GetDocuments`, `DeleteDocuments`, `Commit`, `FlushWal` | ドキュメント CRUD・コミット・WAL flush |
+| `DocumentService` | `PutDocument`, `AddDocument`, `PutDocuments`, `AddDocuments`, `GetDocuments`, `DeleteDocuments`, `Commit`, `FlushWal` | ドキュメント CRUD・バルクインジェスト・コミット・WAL flush |
 | `SearchService` | `Search`, `SearchStream` | 単発検索とストリーミング検索 |
 
 ---
@@ -281,6 +281,39 @@ rpc AddDocument(AddDocumentRequest) returns (AddDocumentResponse);
 ```
 
 リクエストフィールドは `PutDocument` と同じです。
+
+### `PutDocuments`
+
+バッチ Upsert。エントリは入力順に逐次適用され、バッチ全体で WAL fsync は 1 回です — ドキュメントごとに `PutDocument` を呼ぶよりはるかに高速です。1 バッチ内で重複した ID は、同じ put を 1 件ずつ発行した場合とまったく同じようにデデュープされます（最後の出現が勝ち）。
+
+```protobuf
+rpc PutDocuments(PutDocumentsRequest) returns (PutDocumentsResponse);
+
+message DocumentEntry {
+  string id = 1;
+  Document document = 2;
+}
+
+message PutDocumentsRequest {
+  repeated DocumentEntry documents = 1;
+}
+
+message PutDocumentsResponse {
+  uint32 applied = 1; // 成功時はリクエストサイズと一致
+}
+```
+
+適用できない最初のエントリで fail-fast します。適用済みエントリはロールバック**されず**（次のコミットで永続化）、エラーステータスのメッセージに失敗位置・その ID・適用済み件数が含まれるため、バッチ（またはその suffix）の再試行は冪等です。呼び出し側の誤り（スキーマ違反など）で失敗したバッチは `INVALID_ARGUMENT`、ストレージ障害は `INTERNAL` を返します。
+
+### `AddDocuments`
+
+バッチチャンク追加。`PutDocuments` と同様ですが既存ドキュメントを削除しないため、同一論理ドキュメントの複数チャンクを追加する目的で ID をバッチ内で繰り返せます。
+
+```protobuf
+rpc AddDocuments(AddDocumentsRequest) returns (AddDocumentsResponse);
+```
+
+リクエスト/レスポンスのフィールドは `PutDocuments` と対になります。
 
 ### `GetDocuments`
 

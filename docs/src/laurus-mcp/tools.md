@@ -239,6 +239,54 @@ Result: `Document 'doc-1' added as chunk. Call commit to persist changes.`
 
 ---
 
+## put_documents
+
+Put (upsert) many documents in one call. Entries are applied sequentially, in input order, with one WAL fsync for the whole batch — much faster than calling `put_document` per document. Duplicate IDs within one batch dedup (the last occurrence wins). Call `commit` afterwards.
+
+### Parameters
+
+| Name | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `documents` | array | Yes | Array of `{"id": "...", "document": {...}}` entries; each `document` has the same shape as `put_document`'s |
+
+### Example
+
+```text
+Tool: put_documents
+documents: [
+  {"id": "doc-1", "document": {"title": "Hello"}},
+  {"id": "doc-2", "document": {"title": "World"}}
+]
+```
+
+Result: `2 documents put (upserted). Call commit to persist changes.`
+
+A failure aborts at the offending entry without rolling back the already-applied prefix, so retrying the batch (or its suffix) is idempotent.
+
+---
+
+## add_documents
+
+Add many documents as new chunks in one call. Unlike `put_documents`, existing documents are never deleted, so repeating an ID adds multiple chunks of the same logical document. One WAL fsync covers the whole batch. Call `commit` afterwards.
+
+### Parameters
+
+Same as `put_documents`.
+
+### Example
+
+```text
+Tool: add_documents
+documents: [
+  {"id": "doc-1", "document": {"title": "Part 1"}},
+  {"id": "doc-1", "document": {"title": "Part 2"}}
+]
+```
+
+Result: `2 documents added as chunks. Call commit to persist changes.`
+
+---
+
 ## get_documents
 
 Retrieve all stored documents (including chunks) by external ID.

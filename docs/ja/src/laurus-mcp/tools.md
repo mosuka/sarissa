@@ -183,6 +183,54 @@ document: {"title": "Hello World - Part 2", "body": "これは続きです。"}
 
 ---
 
+## put_documents
+
+1 回の呼び出しで多数のドキュメントを Put（Upsert）します。エントリは入力順に逐次適用され、バッチ全体で WAL fsync は 1 回です — ドキュメントごとに `put_document` を呼ぶよりはるかに高速です。1 バッチ内で重複した ID はデデュープされます（最後の出現が勝ち）。実行後に `commit` を呼び出してください。
+
+### パラメータ
+
+| 名前 | 型 | 必須 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `documents` | array | はい | `{"id": "...", "document": {...}}` エントリの配列。各 `document` は `put_document` と同じ形式 |
+
+### 例
+
+```text
+Tool: put_documents
+documents: [
+  {"id": "doc-1", "document": {"title": "Hello"}},
+  {"id": "doc-2", "document": {"title": "World"}}
+]
+```
+
+結果: `2 documents put (upserted). Call commit to persist changes.`
+
+失敗した場合は該当エントリで中断し、適用済みの prefix はロールバックされないため、バッチ（またはその suffix）の再試行は冪等です。
+
+---
+
+## add_documents
+
+1 回の呼び出しで多数のドキュメントを新しいチャンクとして追加します。`put_documents` と異なり既存ドキュメントは削除されないため、ID を繰り返すと同一論理ドキュメントの複数チャンクになります。バッチ全体で WAL fsync は 1 回です。実行後に `commit` を呼び出してください。
+
+### パラメータ
+
+`put_documents` と同じです。
+
+### 例
+
+```text
+Tool: add_documents
+documents: [
+  {"id": "doc-1", "document": {"title": "Part 1"}},
+  {"id": "doc-1", "document": {"title": "Part 2"}}
+]
+```
+
+結果: `2 documents added as chunks. Call commit to persist changes.`
+
+---
+
 ## get_documents
 
 外部 ID で全ドキュメント（チャンクを含む）を取得します。

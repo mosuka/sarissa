@@ -38,6 +38,7 @@ If `http_port` is not set, only the gRPC server starts.
 | POST | `/v1/documents/{id}` | `DocumentService/AddDocument` | Add a document (chunk) |
 | GET | `/v1/documents/{id}` | `DocumentService/GetDocuments` | Get documents by ID |
 | DELETE | `/v1/documents/{id}` | `DocumentService/DeleteDocuments` | Delete documents by ID |
+| POST | `/v1/documents:bulk` | `DocumentService/PutDocuments` / `AddDocuments` | Bulk-ingest documents (`?mode=put\|add`, default `put`) |
 | POST | `/v1/commit` | `DocumentService/Commit` | Commit pending changes |
 | POST | `/v1/flush_wal` | `DocumentService/FlushWal` | Force buffered WAL records durable without a full commit |
 | POST | `/v1/search` | `SearchService/Search` | Search (unary) |
@@ -144,6 +145,30 @@ curl -X POST http://localhost:8080/v1/documents/doc1 \
     }
   }'
 ```
+
+### Bulk-Ingest Documents (POST)
+
+Applies many documents in one call — entries are processed sequentially, in
+input order, with one WAL fsync for the whole batch. `?mode=put` (the
+default) upserts (duplicate ids dedup, last wins); `?mode=add` appends
+chunks, so repeated ids accumulate:
+
+```bash
+curl -X POST 'http://localhost:8080/v1/documents:bulk?mode=put' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "documents": [
+      {"id": "doc1", "document": {"fields": {"title": "Hello"}}},
+      {"id": "doc2", "document": {"fields": {"title": "World"}}}
+    ]
+  }'
+# => {"applied": 2}
+```
+
+The call fails fast at the first entry that cannot be applied;
+already-applied entries are not rolled back (they become durable at the next
+commit), and the error names the failing position, so retrying the batch or
+its suffix is idempotent.
 
 ### Get Documents
 

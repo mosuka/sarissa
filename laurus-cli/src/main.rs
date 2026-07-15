@@ -26,7 +26,7 @@ use clap::Parser;
 use crate::cli::{
     AddResource, Cli, Command, CreateResource, DeleteResource, GetResource, McpCommand, PutResource,
 };
-use crate::commands::{add, commit, create, delete, get, mcp, put, repl, search, serve};
+use crate::commands::{add, bulk, commit, create, delete, get, mcp, put, repl, search, serve};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -48,12 +48,40 @@ async fn main() -> Result<()> {
         },
         Command::Add(cmd) => match cmd.resource {
             AddResource::Doc { id, data } => add::run_doc(&id, &data, &index_dir).await,
+            AddResource::Docs {
+                file,
+                batch_size,
+                commit_every,
+            } => {
+                bulk::run(
+                    &file,
+                    bulk::BulkMode::Add,
+                    batch_size,
+                    commit_every,
+                    &index_dir,
+                )
+                .await
+            }
             AddResource::Field { name, field_option } => {
                 add::run_field(&name, &field_option, &index_dir).await
             }
         },
         Command::Put(cmd) => match cmd.resource {
             PutResource::Doc { id, data } => put::run_doc(&id, &data, &index_dir).await,
+            PutResource::Docs {
+                file,
+                batch_size,
+                commit_every,
+            } => {
+                bulk::run(
+                    &file,
+                    bulk::BulkMode::Put,
+                    batch_size,
+                    commit_every,
+                    &index_dir,
+                )
+                .await
+            }
         },
         Command::Delete(cmd) => match cmd.resource {
             DeleteResource::Docs { id } => delete::run_docs(&id, &index_dir).await,
