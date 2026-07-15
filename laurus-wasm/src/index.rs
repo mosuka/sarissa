@@ -71,6 +71,28 @@ fn documents_to_js(docs: Vec<laurus::Document>) -> Result<JsValue, JsValue> {
     js_sys::JSON::parse(&json_str)
 }
 
+/// Convert a JS array of `[id, doc]` pairs into the engine's
+/// `(String, Document)` batch, naming the offending position on any entry
+/// that is not a `[string, object]` pair.
+fn pairs_to_documents(docs: JsValue) -> Result<Vec<(String, laurus::Document)>, JsValue> {
+    let pairs: Vec<(String, serde_json::Value)> = serde_wasm_bindgen::from_value(docs)
+        .map_err(|e| JsValue::from_str(&format!("Invalid documents: expected an array of [id, doc] pairs: {e}")))?;
+    pairs
+        .into_iter()
+        .enumerate()
+        .map(|(index, (id, doc))| {
+            let document = json_to_document(&doc)
+                .map_err(|e| JsValue::from_str(&format!("documents[{index}]: {}", js_error_string(&e))))?;
+            Ok((id, document))
+        })
+        .collect()
+}
+
+/// Best-effort string form of a `JsValue` error for message composition.
+fn js_error_string(e: &JsValue) -> String {
+    e.as_string().unwrap_or_else(|| format!("{e:?}"))
+}
+
 /// Build a [`PerFieldEmbedder`] from JS callback embedders and the schema.
 ///
 /// Reads the schema to find which vector fields reference which embedder name,
@@ -279,6 +301,46 @@ impl WasmIndex {
             .add_document(&id, document)
             .await
             .map_err(laurus_err)
+    }
+
+    /// Index many documents in one call, replacing existing documents by id.
+    ///
+    /// Batched form of `putDocument`: the `[id, doc]` pairs are applied
+    /// sequentially, in order, with one WAL fsync for the whole batch.
+    /// Duplicate ids within one batch deduplicate exactly like the same puts
+    /// issued one by one (the last occurrence wins). Fails fast at the first
+    /// document that cannot be indexed; documents applied before the failure
+    /// are **not** rolled back (retrying the batch is idempotent).
+    ///
+    /// # Arguments
+    ///
+    /// * `docs` - A JS array of `[id, doc]` pairs.
+    #[wasm_bindgen(js_name = "putDocuments")]
+    pub async fn put_documents(&self, docs: JsValue) -> Result<(), JsValue> {
+        let batch = pairs_to_documents(docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        self.engine.put_documents(batch).await.map_err(laurus_err)
+    }
+
+    /// Append many document versions in one call, without removing existing
+    /// versions.
+    ///
+    /// Batched form of `addDocument`. Ordering, single-fsync durability, and
+    /// fail-fast error semantics match `putDocuments`, but repeated ids
+    /// accumulate as separate versions instead of deduplicating.
+    ///
+    /// # Arguments
+    ///
+    /// * `docs` - A JS array of `[id, doc]` pairs.
+    #[wasm_bindgen(js_name = "addDocuments")]
+    pub async fn add_documents(&self, docs: JsValue) -> Result<(), JsValue> {
+        let batch = pairs_to_documents(docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        self.engine.add_documents(batch).await.map_err(laurus_err)
     }
 
     /// Retrieve all document versions stored under `id`.

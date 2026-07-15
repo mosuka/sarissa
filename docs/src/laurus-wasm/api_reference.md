@@ -46,6 +46,20 @@ Append a document version (multi-version RAG pattern).
 
 - **Parameters / Returns:** Same as `putDocument`.
 
+#### `putDocuments(docs)`
+
+Batched upsert. Applies the pairs in order with one WAL fsync for the whole batch; duplicate ids within one batch dedup (last occurrence wins). Fails fast at the first bad entry, and the applied prefix is not rolled back (retrying is idempotent).
+
+- **Parameters:**
+  - `docs` (`Array<[string, object]>`) -- An array of `[id, document]` pairs.
+- **Returns:** `Promise<void>`
+
+#### `addDocuments(docs)`
+
+Batched chunk append. Like `putDocuments` but repeated ids accumulate as separate versions.
+
+- **Parameters / Returns:** Same as `putDocuments`.
+
 #### `getDocuments(id)`
 
 Retrieve all versions of a document.

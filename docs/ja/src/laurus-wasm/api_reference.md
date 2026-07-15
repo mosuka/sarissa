@@ -46,6 +46,20 @@ OPFS で永続化されたインデックスを開くか、新規作成します
 
 - **引数・戻り値:** `putDocument` と同じ
 
+#### `putDocuments(docs)`
+
+バッチ upsert。ペアをバッチ全体で WAL fsync 1 回で順に適用します。1 バッチ内で重複した ID はデデュープされます（最後が勝ち）。最初の不正エントリで fail-fast し、適用済みの prefix はロールバックされません（再試行は冪等）。
+
+- **引数:**
+  - `docs` (`Array<[string, object]>`) -- `[id, document]` ペアの配列
+- **戻り値:** `Promise<void>`
+
+#### `addDocuments(docs)`
+
+バッチチャンク追記。`putDocuments` と同様ですが、繰り返した ID は別バージョンとして蓄積されます。
+
+- **引数・戻り値:** `putDocuments` と同じ
+
 #### `getDocuments(id)`
 
 ドキュメントの全バージョンを取得します。

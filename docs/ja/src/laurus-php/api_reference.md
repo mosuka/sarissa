@@ -22,6 +22,8 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $
 | :--- | :--- |
 | `putDocument(string $id, array $doc): void` | ドキュメントをアップサート（upsert）します。同じ ID の既存バージョンをすべて置換します。 |
 | `addDocument(string $id, array $doc): void` | 既存バージョンを削除せずにドキュメントチャンクを追記します。 |
+| `putDocuments(array $docs): void` | バッチ upsert。`$docs` は `[$id, $doc]` ペアの配列で、バッチごとに WAL fsync 1 回で順に適用します（重複 ID はデデュープ、最後が勝ち）。最初の不正エントリで fail-fast し、適用済みの prefix はロールバックされません。 |
+| `addDocuments(array $docs): void` | バッチチャンク追記。`putDocuments` と同様ですが、繰り返した ID は別バージョンとして蓄積されます。 |
 | `getDocuments(string $id): array` | 指定 ID の全保存バージョンを返します。 |
 | `deleteDocuments(string $id): void` | 指定 ID の全バージョンを削除します。 |
 | `commit(): void` | バッファリングされた書き込みをフラッシュし、すべての保留中の変更を検索可能にします。 |

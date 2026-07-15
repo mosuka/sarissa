@@ -22,6 +22,8 @@ Laurus::Index.new(path: nil, schema: nil, wal_sync_policy: nil)
 | :--- | :--- |
 | `put_document(id, doc)` | ドキュメントをアップサート（upsert）します。同じ ID の既存バージョンをすべて置換します。 |
 | `add_document(id, doc)` | 既存バージョンを削除せずにドキュメントチャンクを追記します。 |
+| `put_documents(docs)` | バッチ upsert。`docs` は `[id, hash]` ペアの `Array` で、バッチごとに WAL fsync 1 回で順に適用します（重複 ID はデデュープ、最後が勝ち）。最初の不正エントリで fail-fast し、適用済みの prefix はロールバックされません。 |
+| `add_documents(docs)` | バッチチャンク追記。`put_documents` と同様ですが、繰り返した ID は別バージョンとして蓄積されます。 |
 | `get_documents(id) -> Array<Hash>` | 指定 ID の全保存バージョンを返します。 |
 | `delete_documents(id)` | 指定 ID の全バージョンを削除します。 |
 | `commit` | バッファリングされた書き込みをフラッシュし、すべての保留中の変更を検索可能にします。 |

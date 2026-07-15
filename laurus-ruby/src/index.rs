@@ -135,6 +135,52 @@ impl RbIndex {
             .map_err(laurus_err)
     }
 
+    /// Index many documents in one call, replacing existing documents by id.
+    ///
+    /// Batched form of `put_document`: the `[id, hash]` pairs are applied
+    /// sequentially, in order, with one WAL fsync for the whole batch.
+    /// Duplicate ids within one batch deduplicate exactly like the same puts
+    /// issued one by one (the last occurrence wins). Fails fast at the first
+    /// document that cannot be indexed; documents applied before the failure
+    /// are **not** rolled back (retrying the batch is idempotent).
+    ///
+    /// # Arguments
+    ///
+    /// * `docs` - An Array of `[id, hash]` pairs.
+    fn put_documents(&self, docs: RArray) -> Result<(), Error> {
+        let ruby = Ruby::get().expect("called from Ruby thread");
+        let batch = pairs_to_documents(&ruby, docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let engine = self.engine.clone();
+        self.rt
+            .block_on(engine.put_documents(batch))
+            .map_err(laurus_err)
+    }
+
+    /// Append many document versions in one call, without removing existing
+    /// versions.
+    ///
+    /// Batched form of `add_document`. Ordering, single-fsync durability, and
+    /// fail-fast error semantics match `put_documents`, but repeated ids
+    /// accumulate as separate versions instead of deduplicating.
+    ///
+    /// # Arguments
+    ///
+    /// * `docs` - An Array of `[id, hash]` pairs.
+    fn add_documents(&self, docs: RArray) -> Result<(), Error> {
+        let ruby = Ruby::get().expect("called from Ruby thread");
+        let batch = pairs_to_documents(&ruby, docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let engine = self.engine.clone();
+        self.rt
+            .block_on(engine.add_documents(batch))
+            .map_err(laurus_err)
+    }
+
     /// Retrieve all document versions stored under `id`.
     ///
     /// # Arguments
@@ -365,6 +411,50 @@ impl RbIndex {
 ///
 /// # Arguments
 ///
+/// Convert an Array of `[id, hash]` pairs into the engine's
+/// `(String, Document)` batch, raising an ArgumentError that names the
+/// offending position on any entry that is not a two-element `[String, Hash]`
+/// pair.
+///
+/// # Arguments
+///
+/// * `ruby` - The current Ruby interpreter handle.
+/// * `docs` - An Array of `[id, hash]` pairs.
+fn pairs_to_documents(
+    ruby: &Ruby,
+    docs: RArray,
+) -> Result<Vec<(String, laurus::Document)>, Error> {
+    let mut batch = Vec::with_capacity(docs.len());
+    for (index, item) in docs.into_iter().enumerate() {
+        let pair: RArray = TryConvert::try_convert(item).map_err(|_| {
+            Error::new(
+                ruby.exception_arg_error(),
+                format!("documents[{index}]: expected an [id, hash] pair"),
+            )
+        })?;
+        if pair.len() != 2 {
+            return Err(Error::new(
+                ruby.exception_arg_error(),
+                format!("documents[{index}]: expected a 2-element [id, hash] pair"),
+            ));
+        }
+        let id: String = TryConvert::try_convert(pair.entry(0)?).map_err(|_| {
+            Error::new(
+                ruby.exception_arg_error(),
+                format!("documents[{index}]: id must be a String"),
+            )
+        })?;
+        let hash: RHash = TryConvert::try_convert(pair.entry(1)?).map_err(|_| {
+            Error::new(
+                ruby.exception_arg_error(),
+                format!("documents[{index}]: document must be a Hash"),
+            )
+        })?;
+        batch.push((id, hash_to_document(ruby, hash)?));
+    }
+    Ok(batch)
+}
+
 /// * `path` - Optional directory path. `None` means in-memory storage.
 ///
 /// # Returns
@@ -396,6 +486,8 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
     class.define_singleton_method("new", magnus::function!(RbIndex::new, -1))?;
     class.define_method("put_document", magnus::method!(RbIndex::put_document, 2))?;
     class.define_method("add_document", magnus::method!(RbIndex::add_document, 2))?;
+    class.define_method("put_documents", magnus::method!(RbIndex::put_documents, 1))?;
+    class.define_method("add_documents", magnus::method!(RbIndex::add_documents, 1))?;
     class.define_method("get_documents", magnus::method!(RbIndex::get_documents, 1))?;
     class.define_method(
         "delete_documents",
