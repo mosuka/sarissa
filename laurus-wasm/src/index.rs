@@ -75,14 +75,19 @@ fn documents_to_js(docs: Vec<laurus::Document>) -> Result<JsValue, JsValue> {
 /// `(String, Document)` batch, naming the offending position on any entry
 /// that is not a `[string, object]` pair.
 fn pairs_to_documents(docs: JsValue) -> Result<Vec<(String, laurus::Document)>, JsValue> {
-    let pairs: Vec<(String, serde_json::Value)> = serde_wasm_bindgen::from_value(docs)
-        .map_err(|e| JsValue::from_str(&format!("Invalid documents: expected an array of [id, doc] pairs: {e}")))?;
+    let pairs: Vec<(String, serde_json::Value)> =
+        serde_wasm_bindgen::from_value(docs).map_err(|e| {
+            JsValue::from_str(&format!(
+                "Invalid documents: expected an array of [id, doc] pairs: {e}"
+            ))
+        })?;
     pairs
         .into_iter()
         .enumerate()
         .map(|(index, (id, doc))| {
-            let document = json_to_document(&doc)
-                .map_err(|e| JsValue::from_str(&format!("documents[{index}]: {}", js_error_string(&e))))?;
+            let document = json_to_document(&doc).map_err(|e| {
+                JsValue::from_str(&format!("documents[{index}]: {}", js_error_string(&e)))
+            })?;
             Ok((id, document))
         })
         .collect()

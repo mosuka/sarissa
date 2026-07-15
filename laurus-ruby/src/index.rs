@@ -420,10 +420,7 @@ impl RbIndex {
 ///
 /// * `ruby` - The current Ruby interpreter handle.
 /// * `docs` - An Array of `[id, hash]` pairs.
-fn pairs_to_documents(
-    ruby: &Ruby,
-    docs: RArray,
-) -> Result<Vec<(String, laurus::Document)>, Error> {
+fn pairs_to_documents(ruby: &Ruby, docs: RArray) -> Result<Vec<(String, laurus::Document)>, Error> {
     let mut batch = Vec::with_capacity(docs.len());
     for (index, item) in docs.into_iter().enumerate() {
         let pair: RArray = TryConvert::try_convert(item).map_err(|_| {
