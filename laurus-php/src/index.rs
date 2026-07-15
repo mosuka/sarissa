@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use ext_php_rs::convert::FromZval;
 use ext_php_rs::prelude::*;
 use ext_php_rs::types::{ZendHashTable, Zval};
 use laurus::{
@@ -246,6 +247,50 @@ impl PhpIndex {
             .map_err(laurus_err)
     }
 
+    /// Index many documents in one call, replacing existing documents by id.
+    ///
+    /// Batched form of `putDocument()`: the `[id, doc]` pairs are applied
+    /// sequentially, in order, with one WAL fsync for the whole batch.
+    /// Duplicate ids within one batch deduplicate exactly like the same puts
+    /// issued one by one (the last occurrence wins). Fails fast at the first
+    /// document that cannot be indexed; documents applied before the failure
+    /// are **not** rolled back (retrying the batch is idempotent).
+    ///
+    /// # Arguments
+    ///
+    /// * `docs` - An array of `[id, doc]` pairs.
+    pub fn put_documents(&self, docs: &Zval) -> PhpResult<()> {
+        let batch = pairs_to_documents(docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let engine = self.engine.clone();
+        self.rt
+            .block_on(engine.put_documents(batch))
+            .map_err(laurus_err)
+    }
+
+    /// Append many document versions in one call, without removing existing
+    /// versions.
+    ///
+    /// Batched form of `addDocument()`. Ordering, single-fsync durability, and
+    /// fail-fast error semantics match `putDocuments()`, but repeated ids
+    /// accumulate as separate versions instead of deduplicating.
+    ///
+    /// # Arguments
+    ///
+    /// * `docs` - An array of `[id, doc]` pairs.
+    pub fn add_documents(&self, docs: &Zval) -> PhpResult<()> {
+        let batch = pairs_to_documents(docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let engine = self.engine.clone();
+        self.rt
+            .block_on(engine.add_documents(batch))
+            .map_err(laurus_err)
+    }
+
     /// Retrieve all document versions stored under `id`.
     ///
     /// # Arguments
@@ -478,6 +523,40 @@ impl PhpIndex {
 // ---------------------------------------------------------------------------
 
 /// Create a storage backend from an optional path.
+/// Convert an array of `[id, doc]` pairs into the engine's
+/// `(String, Document)` batch, raising an exception that names the offending
+/// position on any entry that is not a two-element `[string, array]` pair.
+///
+/// # Arguments
+///
+/// * `docs` - A PHP array of `[id, doc]` pairs.
+fn pairs_to_documents(docs: &Zval) -> PhpResult<Vec<(String, laurus::Document)>> {
+    let arr = docs
+        .array()
+        .ok_or_else(|| PhpException::from("expected an array of [id, doc] pairs".to_string()))?;
+
+    let mut batch = Vec::with_capacity(arr.len());
+    for (index, (_, pair_zv)) in arr.iter().enumerate() {
+        let pair = pair_zv.array().ok_or_else(|| {
+            PhpException::from(format!("documents[{index}]: expected an [id, doc] pair"))
+        })?;
+        let values: Vec<&Zval> = pair.iter().map(|(_, v)| v).collect();
+        if values.len() != 2 {
+            return Err(PhpException::from(format!(
+                "documents[{index}]: expected a 2-element [id, doc] pair"
+            )));
+        }
+        let id = String::from_zval(values[0]).ok_or_else(|| {
+            PhpException::from(format!("documents[{index}]: id must be a string"))
+        })?;
+        let doc = values[1].array().ok_or_else(|| {
+            PhpException::from(format!("documents[{index}]: document must be an array"))
+        })?;
+        batch.push((id, hashtable_to_document(doc)?));
+    }
+    Ok(batch)
+}
+
 ///
 /// # Arguments
 ///

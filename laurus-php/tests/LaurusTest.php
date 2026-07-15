@@ -138,6 +138,45 @@ class LaurusTest extends TestCase
         $this->assertCount(0, $docs);
     }
 
+    // ── Batch ingestion (#866) ───────────────────────────────────────────
+
+    public function testPutDocumentsEmptyBatchIsNoop(): void
+    {
+        $idx = new Laurus\Index();
+        $idx->putDocuments([]);
+        $idx->addDocuments([]);
+        $idx->commit();
+        $this->assertEquals(0, $idx->stats()["documentCount"]);
+    }
+
+    public function testPutDocumentsAppliesAndDedupes(): void
+    {
+        $idx = new Laurus\Index();
+        $idx->putDocuments([
+            ["doc1", ["title" => "One"]],
+            ["doc2", ["title" => "Two"]],
+            ["doc1", ["title" => "One v2"]], // duplicate id: last wins
+        ]);
+        $idx->commit();
+
+        $this->assertEquals(2, $idx->stats()["documentCount"]);
+        $docs = $idx->getDocuments("doc1");
+        $this->assertCount(1, $docs);
+        $this->assertEquals("One v2", $docs[0]["title"]);
+    }
+
+    public function testAddDocumentsAccumulatesChunks(): void
+    {
+        $idx = new Laurus\Index();
+        $idx->addDocuments([
+            ["doc", ["title" => "chunk 0"]],
+            ["doc", ["title" => "chunk 1"]],
+        ]);
+        $idx->commit();
+
+        $this->assertCount(2, $idx->getDocuments("doc"));
+    }
+
     // ── Statistics ───────────────────────────────────────────────────────
 
     public function testDocumentCount(): void

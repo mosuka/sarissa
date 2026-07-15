@@ -28,6 +28,8 @@ class Index {
 | :--- | :--- |
 | `putDocument(id, doc)` | Upsert a document. Replaces all existing versions. |
 | `addDocument(id, doc)` | Append a document chunk without removing existing versions. |
+| `putDocuments(docs)` | Batched upsert. `docs` is an `Array<[id, doc]>` applied in order with one WAL fsync per batch (duplicate ids dedup, last wins). Fails fast at the first bad entry; the applied prefix is not rolled back. |
+| `addDocuments(docs)` | Batched chunk append. Like `putDocuments` but repeated ids accumulate as separate versions. |
 | `getDocuments(id)` | Return all stored versions for the given ID. |
 | `deleteDocuments(id)` | Delete all versions for the given ID. |
 | `commit()` | Flush writes and make pending changes searchable. |

@@ -139,6 +139,46 @@ impl JsIndex {
             .map_err(laurus_err)
     }
 
+    /// Index many documents in one call, replacing existing documents by id.
+    ///
+    /// Batched form of `putDocument`: the `[id, doc]` pairs are applied
+    /// sequentially, in order, with one WAL fsync for the whole batch.
+    /// Duplicate ids within one batch deduplicate exactly like the same puts
+    /// issued one by one (the last occurrence wins). Fails fast at the first
+    /// document that cannot be indexed; documents applied before the failure
+    /// are **not** rolled back (retrying the batch is idempotent).
+    ///
+    /// # Arguments
+    ///
+    /// * `docs` - An array of `[id, doc]` pairs.
+    #[napi]
+    pub async fn put_documents(&self, docs: Vec<(String, Value)>) -> Result<()> {
+        let batch = pairs_to_documents(docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        self.engine.put_documents(batch).await.map_err(laurus_err)
+    }
+
+    /// Append many document versions in one call, without removing existing
+    /// versions.
+    ///
+    /// Batched form of `addDocument`. Ordering, single-fsync durability, and
+    /// fail-fast error semantics match `putDocuments`, but repeated ids
+    /// accumulate as separate versions instead of deduplicating.
+    ///
+    /// # Arguments
+    ///
+    /// * `docs` - An array of `[id, doc]` pairs.
+    #[napi]
+    pub async fn add_documents(&self, docs: Vec<(String, Value)>) -> Result<()> {
+        let batch = pairs_to_documents(docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        self.engine.add_documents(batch).await.map_err(laurus_err)
+    }
+
     /// Retrieve all document versions stored under `id`.
     ///
     /// # Arguments
@@ -424,6 +464,25 @@ impl JsIndex {
             "vectorFields": vector_fields,
         }))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Batch-ingestion helper
+// ---------------------------------------------------------------------------
+
+/// Convert an array of `(id, doc)` pairs into the engine's
+/// `(String, Document)` batch, naming the offending position on any entry
+/// whose document cannot be converted.
+fn pairs_to_documents(docs: Vec<(String, Value)>) -> Result<Vec<(String, laurus::Document)>> {
+    docs.into_iter()
+        .enumerate()
+        .map(|(index, (id, doc))| {
+            let document = json_to_document(&doc)
+                .map_err(|e| laurus::LaurusError::other(format!("documents[{index}]: {e}")))
+                .map_err(laurus_err)?;
+            Ok((id, document))
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

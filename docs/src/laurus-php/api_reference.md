@@ -22,6 +22,8 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $
 | :--- | :--- |
 | `putDocument(string $id, array $doc): void` | Upsert a document. Replaces all existing versions with the same ID. |
 | `addDocument(string $id, array $doc): void` | Append a document chunk without removing existing versions. |
+| `putDocuments(array $docs): void` | Batched upsert. `$docs` is an array of `[$id, $doc]` pairs, applied in order with one WAL fsync per batch (duplicate ids dedup, last wins). Fails fast at the first bad entry; the applied prefix is not rolled back. |
+| `addDocuments(array $docs): void` | Batched chunk append. Like `putDocuments` but repeated ids accumulate as separate versions. |
 | `getDocuments(string $id): array` | Return all stored versions for the given ID. |
 | `deleteDocuments(string $id): void` | Delete all versions for the given ID. |
 | `commit(): void` | Flush buffered writes and make all pending changes searchable. |

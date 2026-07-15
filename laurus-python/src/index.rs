@@ -261,6 +261,51 @@ impl PyIndex {
             .map_err(laurus_err)
     }
 
+    /// Index many documents in one call, replacing existing documents by id.
+    ///
+    /// Batched form of [`put_document`]: the `(id, dict)` pairs are applied
+    /// sequentially, in order, with a single WAL fsync for the whole batch.
+    /// Duplicate ids within one batch deduplicate exactly like the same puts
+    /// issued one by one (the last occurrence wins).
+    ///
+    /// Args:
+    ///     docs: An iterable of `(id, dict)` pairs.
+    ///
+    /// Fails fast at the first document that cannot be indexed; the raised
+    /// error names the failing position and id. Documents applied before the
+    /// failure are **not** rolled back (retrying the batch is idempotent).
+    /// Call [`commit`] to make the changes visible to searches.
+    pub fn put_documents(&self, py: Python, docs: &Bound<PyAny>) -> PyResult<()> {
+        let batch = pairs_to_documents(py, docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let engine = self.engine.clone();
+        self.rt
+            .block_on(engine.put_documents(batch))
+            .map_err(laurus_err)
+    }
+
+    /// Append many document versions in one call, without removing existing
+    /// versions.
+    ///
+    /// Batched form of [`add_document`]. Ordering, single-fsync durability,
+    /// and fail-fast error semantics match [`put_documents`], but repeated
+    /// ids accumulate as separate versions instead of deduplicating.
+    ///
+    /// Args:
+    ///     docs: An iterable of `(id, dict)` pairs.
+    pub fn add_documents(&self, py: Python, docs: &Bound<PyAny>) -> PyResult<()> {
+        let batch = pairs_to_documents(py, docs)?;
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let engine = self.engine.clone();
+        self.rt
+            .block_on(engine.add_documents(batch))
+            .map_err(laurus_err)
+    }
+
     /// Retrieve all document versions stored under `id`.
     ///
     /// Returns a list of dicts, one per indexed version.
@@ -449,6 +494,36 @@ impl PyIndex {
     fn __repr__(&self) -> String {
         "Index()".to_string()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Batch-ingestion helper
+// ---------------------------------------------------------------------------
+
+/// Convert a Python iterable of `(id, dict)` pairs into the engine's
+/// `(String, Document)` batch, naming the offending position on any entry
+/// that is not a two-element `(str, dict)` pair.
+fn pairs_to_documents(
+    py: Python,
+    docs: &Bound<PyAny>,
+) -> PyResult<Vec<(String, laurus::Document)>> {
+    let iter = docs.try_iter().map_err(|_| {
+        PyRuntimeError::new_err(
+            "expected an iterable of (id, dict) pairs, e.g. [(\"doc1\", {\"title\": \"...\"}), ...]",
+        )
+    })?;
+
+    let mut batch = Vec::new();
+    for (index, item) in iter.enumerate() {
+        let item = item?;
+        let (id, doc): (String, Bound<PyDict>) = item.extract().map_err(|_| {
+            PyRuntimeError::new_err(format!(
+                "documents[{index}]: expected a (id: str, doc: dict) pair"
+            ))
+        })?;
+        batch.push((id, dict_to_document(py, &doc)?));
+    }
+    Ok(batch)
 }
 
 // ---------------------------------------------------------------------------

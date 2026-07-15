@@ -28,6 +28,8 @@ class Index {
 | :--- | :--- |
 | `putDocument(id, doc)` | ドキュメントを上書き保存。 |
 | `addDocument(id, doc)` | 既存バージョンを残してチャンクを追記。 |
+| `putDocuments(docs)` | バッチ upsert。`docs` は `Array<[id, doc]>` で、バッチごとに WAL fsync 1 回で順に適用（重複 ID はデデュープ、最後が勝ち）。最初の不正エントリで fail-fast し、適用済みの prefix はロールバックされません。 |
+| `addDocuments(docs)` | バッチチャンク追記。`putDocuments` と同様ですが、繰り返した ID は別バージョンとして蓄積されます。 |
 | `getDocuments(id)` | 指定 ID の全バージョンを取得。 |
 | `deleteDocuments(id)` | 指定 ID の全バージョンを削除。 |
 | `commit()` | 書き込みをフラッシュし変更を検索可能にする。 |

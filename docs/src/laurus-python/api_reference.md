@@ -28,6 +28,8 @@ class Index:
 | :--- | :--- |
 | `put_document(id, doc)` | Upsert a document. Replaces all existing versions with the same ID. |
 | `add_document(id, doc)` | Append a document chunk without removing existing versions. |
+| `put_documents(docs)` | Batched upsert. `docs` is an iterable of `(id, dict)` pairs, applied in order with one WAL fsync per batch (duplicate ids dedup, last wins). Fails fast at the first bad entry; the applied prefix is not rolled back. |
+| `add_documents(docs)` | Batched chunk append. Like `put_documents` but repeated ids accumulate as separate versions. |
 | `get_documents(id) -> list[dict]` | Return all stored versions for the given ID. |
 | `delete_documents(id)` | Delete all versions for the given ID. |
 | `commit()` | Flush buffered writes and make all pending changes searchable. |
