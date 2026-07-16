@@ -295,11 +295,10 @@ async fn upsert_after_commit_does_not_reload_hnsw() {
 /// preserve every record, both for the live store and after a cold reopen
 /// (proving the retained writer kept writing complete, valid files).
 ///
-/// Membership is asserted via `stats().document_count` (record-level, exact)
-/// rather than exact search hit sets: incremental HNSW appends can
-/// nondeterministically leave nodes unreachable on layer 0 — a pre-existing
-/// bug reproduced on unmodified main, tracked as #868 — so search-based
-/// full-recall assertions would flake for reasons unrelated to retention.
+/// Asserts the exact search hit set (all 30 ids found). This was relaxed to
+/// `document_count` while #868 (HNSW incremental-append reachability) was
+/// open; now that #868 is fixed the full graph is reachable, so the stronger
+/// exact-recall assertion holds.
 #[tokio::test(flavor = "multi_thread")]
 async fn retained_writer_commit_cycles_preserve_all_vectors() {
     let counting = Arc::new(CountingStorage::new());
@@ -324,10 +323,10 @@ async fn retained_writer_commit_cycles_preserve_all_vectors() {
         "all 30 records across 3 retained-writer commit cycles must persist \
          (no loss, no duplication)"
     );
-    let ids = hit_ids(&store, 30);
-    assert!(
-        ids.is_subset(&expected) && !ids.is_empty(),
-        "search must return only the ingested ids: {ids:?}"
+    assert_eq!(
+        hit_ids(&store, 30),
+        expected,
+        "search must return exactly the 30 ingested ids",
     );
 
     // Cold reopen on the same storage: the files must be self-sufficient.
@@ -338,10 +337,10 @@ async fn retained_writer_commit_cycles_preserve_all_vectors() {
         30,
         "a cold reopen must see the same 30 records"
     );
-    let ids = hit_ids(&reopened, 30);
-    assert!(
-        ids.is_subset(&expected) && !ids.is_empty(),
-        "post-reopen search must return only the ingested ids: {ids:?}"
+    assert_eq!(
+        hit_ids(&reopened, 30),
+        expected,
+        "post-reopen search must return exactly the 30 ingested ids",
     );
 }
 
@@ -383,21 +382,22 @@ async fn auto_compaction_invalidates_retained_writer_no_resurrection() {
         .unwrap();
     store.commit().await.unwrap();
 
-    // Deterministic resurrection gate: a stale writer would rewrite the 40
-    // reclaimed records, bouncing the record count from 61 back to 101.
-    // (Search hit sets are not asserted exactly because of the pre-existing
-    // incremental-append reachability bug #868.)
+    // Resurrection gate: a stale writer would rewrite the 40 reclaimed
+    // records, bouncing the record count from 61 back to 101. Now that #868 is
+    // fixed, the full survivor set is reachable, so assert the exact hit set
+    // (the 60 survivors 40..100 plus the new doc 100).
     assert_eq!(
         store.stats().unwrap().document_count,
         61,
         "exactly the 60 survivors + the new doc may exist on disk — more \
          means the stale retained writer resurrected compacted-away records"
     );
-    let ids = hit_ids(&store, 100);
-    assert!(
-        ids.is_disjoint(&deleted),
-        "compacted-away docs must NOT resurface in search after a \
-         post-compaction commit from the (invalidated) writer cache: {ids:?}"
+    let survivors: HashSet<u64> = (40..=100).collect();
+    assert_eq!(
+        hit_ids(&store, 100),
+        survivors,
+        "search must return exactly the 60 survivors + the new doc, and no \
+         compacted-away record",
     );
 }
 
@@ -437,19 +437,20 @@ async fn store_optimize_invalidates_retained_writer() {
         .unwrap();
     store.commit().await.unwrap();
 
-    // Same deterministic gate as the auto-compaction variant (see #868 for
-    // why exact search hit sets are not asserted).
+    // Same gate as the auto-compaction variant; #868 is fixed so the exact
+    // survivor hit set is asserted.
     assert_eq!(
         store.stats().unwrap().document_count,
         61,
         "exactly the 60 survivors + the new doc may exist on disk — more \
          means the stale retained writer resurrected optimized-away records"
     );
-    let ids = hit_ids(&store, 100);
-    assert!(
-        ids.is_disjoint(&deleted),
-        "optimized-away docs must NOT resurface in search after a \
-         post-optimize commit from the (invalidated) writer cache: {ids:?}"
+    let survivors: HashSet<u64> = (40..=100).collect();
+    assert_eq!(
+        hit_ids(&store, 100),
+        survivors,
+        "search must return exactly the 60 survivors + the new doc, and no \
+         optimized-away record",
     );
 }
 

@@ -41,6 +41,18 @@ const LEVEL_RNG_SEED: u64 = 42;
 /// Abstract trait to allow reading from both HnswGraph (serial) and ConcurrentHnswGraph (parallel)
 trait GraphView {
     fn get_neighbors_view(&self, doc_id: u64, level: usize) -> Option<Vec<u64>>;
+
+    /// Whether a node may be traversed/selected during a build-time search.
+    ///
+    /// Defaults to `true` (every node visible), so query-time searches over a
+    /// finished [`HnswGraph`] are unaffected. [`ConcurrentHnswGraph`] overrides
+    /// it to hide nodes that are not yet fully linked (Issue #868 / #621): a
+    /// concurrent inserter must never select a node whose forward edges are
+    /// still being written, or it would connect to a half-built dead end.
+    #[inline]
+    fn is_visible(&self, _doc_id: u64) -> bool {
+        true
+    }
 }
 
 impl GraphView for HnswGraph {
@@ -49,31 +61,75 @@ impl GraphView for HnswGraph {
     }
 }
 
+/// A node's per-level neighbor lists plus a "fully linked" flag used to gate
+/// build-time visibility (Issue #868 / #621).
+struct NodeEntry {
+    /// `false` until this node's forward edges have been written at **all** of
+    /// its levels; set once, with `Release`, as the last step of inserting the
+    /// node. Readers load it with `Acquire`, so observing `true` guarantees
+    /// every `set_neighbors` write for this node is visible.
+    linked: std::sync::atomic::AtomicBool,
+    /// One RwLock-protected neighbor list per level `0..=level`.
+    layers: Vec<RwLock<Vec<u64>>>,
+}
+
 /// A thread-safe view of the HNSW graph during construction
 struct ConcurrentHnswGraph {
     max_level: usize,
-    // Map from doc_id to layers. Each layer is a RwLock-protected list of neighbors
-    nodes: HashMap<u64, Vec<RwLock<Vec<u64>>>>,
+    // Map from doc_id to its NodeEntry (per-level neighbor lists + linked flag)
+    nodes: HashMap<u64, NodeEntry>,
 }
 
 impl ConcurrentHnswGraph {
+    /// Build an entry with empty neighbor lists for levels `0..=level` and the
+    /// given initial `linked` state (`true` for pre-existing/seed nodes that
+    /// are already searchable, `false` for new nodes still to be inserted).
+    fn new_entry(level: usize, linked: bool) -> NodeEntry {
+        let mut layers = Vec::with_capacity(level + 1);
+        for _ in 0..=level {
+            layers.push(RwLock::new(Vec::new()));
+        }
+        NodeEntry {
+            linked: std::sync::atomic::AtomicBool::new(linked),
+            layers,
+        }
+    }
+
     fn new(nodes_with_levels: Vec<(u64, usize)>, max_level: usize) -> Self {
         let mut nodes = HashMap::new();
         for (doc_id, level) in nodes_with_levels {
-            // Initialize levels 0 to level with empty neighbor lists wrapped in RwLock
-            let mut layers = Vec::with_capacity(level + 1);
-            for _ in 0..=level {
-                layers.push(RwLock::new(Vec::new()));
-            }
-            nodes.insert(doc_id, layers);
+            // New nodes start unlinked (invisible to build-time search until
+            // their forward edges are set).
+            nodes.insert(doc_id, Self::new_entry(level, false));
         }
 
         Self { max_level, nodes }
     }
 
+    /// Whether `doc_id` is fully linked and therefore visible to build-time
+    /// search (Issue #868 / #621). Acquire-loads the flag so all of the node's
+    /// `set_neighbors` writes are visible once this returns `true`.
+    #[inline]
+    fn is_linked(&self, doc_id: u64) -> bool {
+        self.nodes
+            .get(&doc_id)
+            .map(|e| e.linked.load(std::sync::atomic::Ordering::Acquire))
+            .unwrap_or(false)
+    }
+
+    /// Publish `doc_id` as fully linked. Must be called **after** every
+    /// `set_neighbors` for the node; the `Release` store pairs with the
+    /// `Acquire` in [`Self::is_linked`].
+    #[inline]
+    fn mark_linked(&self, doc_id: u64) {
+        if let Some(e) = self.nodes.get(&doc_id) {
+            e.linked.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
     fn set_neighbors(&self, doc_id: u64, level: usize, new_neighbors: Vec<u64>) {
-        if let Some(layers) = self.nodes.get(&doc_id)
-            && let Some(lock) = layers.get(level)
+        if let Some(entry) = self.nodes.get(&doc_id)
+            && let Some(lock) = entry.layers.get(level)
         {
             *lock.write() = new_neighbors;
         }
@@ -87,27 +143,27 @@ impl ConcurrentHnswGraph {
         max_conn: usize,
         writer: &HnswIndexWriter,
     ) -> Result<()> {
-        if let Some(layers) = self.nodes.get(&doc_id)
-            && let Some(lock) = layers.get(level)
+        if let Some(entry) = self.nodes.get(&doc_id)
+            && let Some(lock) = entry.layers.get(level)
         {
-            // Acquire lock briefly to add the neighbor and snapshot the list
-            // if pruning is needed.  Distance calculations happen outside the
-            // lock to reduce contention across parallel threads.
-            let needs_pruning = {
-                let mut neighbors = lock.write();
-                if !neighbors.contains(&neighbor_id) {
-                    neighbors.push(neighbor_id);
-                }
-                if neighbors.len() > max_conn {
-                    Some(neighbors.clone())
-                } else {
-                    None
-                }
-            };
-
-            if let Some(snapshot) = needs_pruning {
-                let pruned = writer.prune_neighbors(doc_id, snapshot, max_conn)?;
-                *lock.write() = pruned;
+            // Push + prune under a SINGLE held write lock (Issue #868). The
+            // previous version dropped the lock between snapshotting the list
+            // and writing the pruned result back, so a concurrent thread's
+            // back-edge push in that window was clobbered by the stale
+            // overwrite — losing the only in-edge of some node made it
+            // unreachable from the entry point (silent recall loss). Pruning
+            // needs only the immutable `self.vectors` / `self.doc_id_map`
+            // (via `prune_neighbors`) and touches no node lock, so holding
+            // the write lock across it is deadlock-free; the extra work is an
+            // O(max_conn) distance pass that runs only when a node exceeds
+            // its degree bound.
+            let mut neighbors = lock.write();
+            if !neighbors.contains(&neighbor_id) {
+                neighbors.push(neighbor_id);
+            }
+            if neighbors.len() > max_conn {
+                let pruned = writer.prune_neighbors(doc_id, neighbors.clone(), max_conn)?;
+                *neighbors = pruned;
             }
         }
         Ok(())
@@ -116,17 +172,22 @@ impl ConcurrentHnswGraph {
     fn get_neighbors_raw(&self, doc_id: u64, level: usize) -> Option<Vec<u64>> {
         self.nodes
             .get(&doc_id)
-            .and_then(|layers| layers.get(level).map(|lock| lock.read().clone()))
+            .and_then(|entry| entry.layers.get(level).map(|lock| lock.read().clone()))
     }
 
     fn from_hnsw_graph(graph: HnswGraph, extended_max_level: usize) -> Self {
         let mut nodes = HashMap::with_capacity(graph.node_count());
         for (doc_id, layered_neighbors) in graph.into_iter_nodes() {
-            let mut layers = Vec::with_capacity(layered_neighbors.len());
-            for neighbors in layered_neighbors {
-                layers.push(RwLock::new(neighbors));
-            }
-            nodes.insert(doc_id, layers);
+            let layers = layered_neighbors.into_iter().map(RwLock::new).collect();
+            // Nodes loaded from a finished graph are already fully linked and
+            // searchable.
+            nodes.insert(
+                doc_id,
+                NodeEntry {
+                    linked: std::sync::atomic::AtomicBool::new(true),
+                    layers,
+                },
+            );
         }
 
         Self {
@@ -140,11 +201,8 @@ impl ConcurrentHnswGraph {
             if self.nodes.contains_key(&doc_id) {
                 continue;
             }
-            let mut layers = Vec::with_capacity(level + 1);
-            for _ in 0..=level {
-                layers.push(RwLock::new(Vec::new()));
-            }
-            self.nodes.insert(doc_id, layers);
+            // New nodes start unlinked (invisible until inserted).
+            self.nodes.insert(doc_id, Self::new_entry(level, false));
         }
     }
 }
@@ -152,6 +210,11 @@ impl ConcurrentHnswGraph {
 impl GraphView for ConcurrentHnswGraph {
     fn get_neighbors_view(&self, doc_id: u64, level: usize) -> Option<Vec<u64>> {
         self.get_neighbors_raw(doc_id, level)
+    }
+
+    #[inline]
+    fn is_visible(&self, doc_id: u64) -> bool {
+        self.is_linked(doc_id)
     }
 }
 
@@ -896,20 +959,33 @@ impl HnswIndexWriter {
                 (concurrent_graph, ep, max_level, ep)
             };
 
-        // 3. Parallel Insertion
-        // Each thread inserts one node using `search_entry_point` as the
-        // starting node for greedy search.  The HashMap in ConcurrentHnswGraph
-        // is pre-populated (immutable during this phase); individual neighbor
-        // lists are protected by RwLock.
+        // 3. Concurrent insertion (Issues #868 / #621).
+        //
+        // Every new node is pre-populated into the graph with an empty
+        // neighbor list but marked *unlinked*; a node becomes visible to
+        // build-time search only after `mark_linked` is called at the end of
+        // its own insertion (once its forward edges are set at all levels).
+        // This is the fix for #868: without it, a concurrent `search_layer`
+        // could select a not-yet-inserted node (empty list, a dead end) as a
+        // neighbor, connect far away, get its back-edge pruned, and leave the
+        // node unreachable from the entry point — silent recall loss that at
+        // scale disconnected ~96% of the index. The visibility gate makes each
+        // concurrent insert see only fully-linked nodes, matching serial HNSW
+        // quality; a serial bootstrap warms a connected core so the first
+        // parallel inserts do not all pile onto the lone seed; and a
+        // connectivity-repair pass (below) is the hard backstop that
+        // guarantees full reachability regardless of interleaving.
         let writer_ref = &*self;
 
-        #[cfg(not(target_arch = "wasm32"))]
-        #[allow(unused_mut)]
-        let mut iter = new_doc_ids_in_order.into_par_iter();
-        #[cfg(target_arch = "wasm32")]
-        let mut iter = new_doc_ids_in_order.into_iter();
+        // The search-start node must be visible before any worker runs so
+        // traversals that reach it are not filtered out. For an incremental
+        // build it is the (already-linked) old entry point; for a full build
+        // it is the seed, which has no edges yet but is a valid, linked start.
+        if let Some(sp) = search_entry_point {
+            graph.mark_linked(sp);
+        }
 
-        iter.try_for_each(|doc_id| -> Result<()> {
+        let insert_one = |doc_id: u64| -> Result<()> {
             let doc_vector_idx = *writer_ref.doc_id_map.get(&doc_id).ok_or_else(|| {
                 LaurusError::internal(format!("Doc ID {} not found in doc_id_map", doc_id))
             })?;
@@ -931,7 +1007,11 @@ impl HnswIndexWriter {
             }
 
             // Determine the assigned level from the pre-populated graph
-            let layers_len = graph.nodes.get(&doc_id).map(|l| l.len()).unwrap_or(0);
+            let layers_len = graph
+                .nodes
+                .get(&doc_id)
+                .map(|e| e.layers.len())
+                .unwrap_or(0);
             if layers_len == 0 {
                 return Ok(());
             }
@@ -948,6 +1028,10 @@ impl HnswIndexWriter {
                     changed = false;
                     if let Some(neighbors) = graph.get_neighbors_view(curr_obj, lc) {
                         for neighbor_id in neighbors {
+                            // Skip nodes still being inserted (Issue #868).
+                            if !graph.is_visible(neighbor_id) {
+                                continue;
+                            }
                             let d = writer_ref.calc_dist(vector, neighbor_id)?;
                             if d < dist {
                                 dist = d;
@@ -987,20 +1071,71 @@ impl HnswIndexWriter {
                     )?;
                 }
             }
+
+            // Publish this node as fully linked — MUST be the last step, after
+            // every `set_neighbors`, so a concurrent reader observing the flag
+            // (Acquire) sees all forward edges (Issue #868).
+            graph.mark_linked(doc_id);
             Ok(())
-        })?;
+        };
+
+        // Serial bootstrap: insert the first `bootstrap_count` new nodes
+        // sequentially to warm a connected core before going parallel, so the
+        // first parallel inserts fill a full search frontier from mature nodes
+        // instead of all piling onto a cold seed and pruning each other off
+        // (Issue #868 / #621). The size adapts to the ALREADY-linked core so
+        // it covers every case the build type alone would misjudge: a fresh
+        // full build has only the lone seed linked and needs a full ef-sized
+        // warm-up; an incremental append onto a large base needs none; and an
+        // incremental append onto a *small* base (e.g. seed-then-bulk-load)
+        // still needs a warm-up despite being "incremental". `existing_linked`
+        // is the count of already-linked nodes (loaded core, or ~0 for a fresh
+        // build); bootstrap fills the gap up to `ef_construction`.
+        //
+        // NB: warming the core does not fully fix seed-then-bulk-load — that
+        // pattern also suffers from a low-level entry point, handled (as a
+        // quality follow-up) in Issue #872; the connectivity repair below is
+        // the correctness backstop for it regardless.
+        const BOOTSTRAP_FLOOR: usize = 32;
+        let new_count = new_doc_ids_in_order.len();
+        let existing_linked = graph.nodes.len().saturating_sub(new_count);
+        let bootstrap_count = ef_construction
+            .max(BOOTSTRAP_FLOOR)
+            .saturating_sub(existing_linked)
+            .min(new_count);
+        let parallel_ids: Vec<u64> = new_doc_ids_in_order.split_off(bootstrap_count);
+        for doc_id in new_doc_ids_in_order {
+            insert_one(doc_id)?;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        parallel_ids.into_par_iter().try_for_each(insert_one)?;
+        #[cfg(target_arch = "wasm32")]
+        for doc_id in parallel_ids {
+            insert_one(doc_id)?;
+        }
 
         // 4. Convert ConcurrentGraph to HnswGraph
         let mut final_nodes = HashMap::new();
         let mut final_levels_map = HashMap::new();
 
-        for (doc_id, layers) in graph.nodes {
-            let mut vec_layers = Vec::with_capacity(layers.len());
-            for lock in layers {
+        for (doc_id, entry) in graph.nodes {
+            let mut vec_layers = Vec::with_capacity(entry.layers.len());
+            for lock in entry.layers {
                 vec_layers.push(lock.into_inner()); // Consume RwLock
             }
             final_levels_map.insert(doc_id, vec_layers.len() - 1);
             final_nodes.insert(doc_id, vec_layers);
+        }
+
+        // 5. Connectivity repair (Issue #868). The concurrent build produces a
+        // near-serial-quality graph, but interleaving can still leave a few
+        // nodes with no in-edge and thus unreachable from the entry point.
+        // Guarantee full layer-0 reachability by reconnecting any residual
+        // stragglers to their nearest reachable node. For a healthy build this
+        // touches ~0 nodes.
+        if let Some(ep) = entry_point {
+            self.repair_layer0_connectivity(ep, &mut final_nodes)?;
         }
 
         self.graph = Some(HnswGraph::new(
@@ -1102,6 +1237,14 @@ impl HnswIndexWriter {
 
             if let Some(neighbors) = graph.get_neighbors_view(curr.id, level) {
                 for neighbor_id in neighbors {
+                    // Skip nodes still being inserted (Issue #868). Checked
+                    // before `visited` so a node hidden now can still be
+                    // discovered later in the same search if it becomes
+                    // linked. A no-op for query-time / finished graphs
+                    // (`is_visible` defaults to `true`).
+                    if !graph.is_visible(neighbor_id) {
+                        continue;
+                    }
                     // Use insert() return value to avoid double hash lookup.
                     if !visited.insert(neighbor_id) {
                         continue;
@@ -1185,6 +1328,135 @@ impl HnswIndexWriter {
         candidates.truncate(max_conn);
 
         Ok(candidates.into_iter().map(|c| c.id).collect())
+    }
+
+    /// Guarantee that every node is reachable from `entry` over the layer-0
+    /// adjacency (Issue #868 / #621).
+    ///
+    /// The concurrent build is high quality but not guaranteed connected —
+    /// interleaving can leave a few nodes with no in-edge. This is the hard
+    /// backstop: BFS from `entry`, and for each still-unreachable node (in
+    /// ascending doc_id order for reproducibility) add an in-edge from its
+    /// nearest reachable node **without pruning**, so the repaired node is
+    /// guaranteed to survive; then extend the reachable set through it so one
+    /// repair edge fixes an entire disconnected component. For a healthy build
+    /// the repair count is ~0.
+    ///
+    /// # Parameters
+    ///
+    /// - `entry` - The graph entry point (BFS root) doc id.
+    /// - `nodes` - The final `doc_id -> per-level neighbor lists` map, mutated
+    ///   in place at level 0.
+    ///
+    /// # Returns
+    ///
+    /// The number of repair edges added (a build-quality signal; ~0 expected).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a doc id is missing from `doc_id_map` during the
+    /// nearest-node distance scan.
+    fn repair_layer0_connectivity(
+        &self,
+        entry: u64,
+        nodes: &mut HashMap<u64, Vec<Vec<u64>>>,
+    ) -> Result<usize> {
+        use std::collections::VecDeque;
+
+        // BFS from `entry` over layer-0 adjacency to collect the reachable set.
+        fn bfs_from(start: u64, nodes: &HashMap<u64, Vec<Vec<u64>>>, reachable: &mut HashSet<u64>) {
+            let mut queue = VecDeque::new();
+            if reachable.insert(start) {
+                queue.push_back(start);
+            }
+            while let Some(cur) = queue.pop_front() {
+                if let Some(layers) = nodes.get(&cur)
+                    && let Some(level0) = layers.first()
+                {
+                    for &nb in level0 {
+                        if reachable.insert(nb) {
+                            queue.push_back(nb);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut reachable = HashSet::new();
+        bfs_from(entry, nodes, &mut reachable);
+
+        // Deterministic order over the residual unreachable nodes.
+        let mut remaining: Vec<u64> = nodes
+            .keys()
+            .copied()
+            .filter(|id| !reachable.contains(id))
+            .collect();
+        remaining.sort_unstable();
+
+        // Bound the total repair cost. A healthy concurrent build leaves only
+        // a handful of components (~13/20000 measured), so scanning the whole
+        // reachable set for each is cheap and gives the best-quality
+        // reconnection. But a pathological build (e.g. bulk-appending far more
+        // nodes than an existing tiny base — the cold-start regime) can
+        // fragment into thousands of components; a per-component full scan
+        // would then be O(components × |reachable|) ≈ O(N²). So the first
+        // `FULL_SCAN_BUDGET` components get the exact nearest-reachable node,
+        // and any beyond that attach straight to the entry point (always
+        // reachable) — connectivity is still guaranteed, at O(1) each, keeping
+        // the whole pass linear. Reaching the budget is itself a signal that
+        // the build fragmented; see the seed-then-bulk-load follow-up.
+        const FULL_SCAN_BUDGET: usize = 512;
+        let mut repairs = 0usize;
+        for u in remaining {
+            // May have been pulled in by an earlier repair's cascade.
+            if reachable.contains(&u) {
+                continue;
+            }
+
+            // Pick the in-edge source V: the exact nearest reachable node while
+            // within the scan budget, else the entry point (bounded fallback).
+            let v = if repairs < FULL_SCAN_BUDGET {
+                let u_vec = {
+                    let idx = *self.doc_id_map.get(&u).ok_or_else(|| {
+                        LaurusError::internal(format!(
+                            "Doc ID {u} not found during connectivity repair"
+                        ))
+                    })?;
+                    &self.vectors[idx].2
+                };
+                let mut best: Option<(f32, u64)> = None;
+                for &v in &reachable {
+                    let d = self.calc_dist(u_vec, v)?;
+                    match best {
+                        Some((bd, bid)) if !(d < bd || (d == bd && v < bid)) => {}
+                        _ => best = Some((d, v)),
+                    }
+                }
+                match best {
+                    Some((_, v)) => v,
+                    // `reachable` is non-empty (contains `entry`), so this is
+                    // unreachable in practice; skip defensively.
+                    None => continue,
+                }
+            } else {
+                entry
+            };
+
+            // Add the in-edge V -> U at level 0 without pruning, so U cannot be
+            // dropped again.
+            if let Some(layers) = nodes.get_mut(&v)
+                && let Some(level0) = layers.first_mut()
+                && !level0.contains(&u)
+            {
+                level0.push(u);
+            }
+            repairs += 1;
+
+            // Extend the reachable set through U (fixes its whole component).
+            bfs_from(u, nodes, &mut reachable);
+        }
+
+        Ok(repairs)
     }
 
     /// Check for memory limits.
