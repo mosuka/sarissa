@@ -895,9 +895,24 @@ impl HnswIndexWriter {
         // build, threaded through the serial level-assignment loops below.
         let mut level_rng = rand::rngs::StdRng::seed_from_u64(LEVEL_RNG_SEED);
 
+        // Rebuild from scratch instead of appending when the loaded base is
+        // too small to serve as a routing hierarchy for the new nodes (Issue
+        // #872). A base below `ef_construction` has a near-flat hierarchy (max
+        // level ~0-1), so appending many higher-level nodes onto it can only
+        // route through that low-level core and fragments the graph. Since
+        // `self.vectors` already holds the existing + new vectors and such a
+        // base is by definition small, discarding it and doing a full build is
+        // both correct and cheap — and yields fresh-build quality. A larger
+        // base keeps the incremental path (its hierarchy is real and a rebuild
+        // would be wasteful).
+        let existing = self
+            .graph
+            .take()
+            .filter(|g| g.node_count() >= ef_construction);
+
         // Check if we have an existing graph to append to
-        let (graph, entry_point, max_level, search_entry_point) =
-            if let Some(existing_graph) = self.graph.take() {
+        let (graph, entry_point, max_level, search_entry_point, promoted_ep) =
+            if let Some(existing_graph) = existing {
                 // Identify new vectors
                 for (doc_id, _, _) in &self.vectors {
                     if !existing_graph.contains_node(doc_id) {
@@ -919,13 +934,21 @@ impl HnswIndexWriter {
                 let old_ep = existing_graph.entry_point;
                 let mut ep = old_ep;
 
-                // If we have new nodes with higher level, update entry point
-                if new_max_level > current_max_level {
-                    ep = new_node_levels
+                // If new nodes reach a higher level than the loaded graph, the
+                // entry point is promoted to one of them. `promoted_ep` records
+                // that new top-level node so it can be inserted first and used
+                // as the build search start (Issue #872) — otherwise searches
+                // start from the low-level `old_ep` and can't route through the
+                // upper layers, funneling every insert through the small base.
+                let mut promoted_ep = None;
+                if new_max_level > current_max_level
+                    && let Some(new_top) = new_node_levels
                         .iter()
                         .find(|(_, l)| *l == total_max_level)
                         .map(|(id, _)| *id)
-                        .or(ep);
+                {
+                    ep = Some(new_top);
+                    promoted_ep = Some(new_top);
                 }
 
                 // Convert to ConcurrentHnswGraph and extend
@@ -933,9 +956,19 @@ impl HnswIndexWriter {
                     ConcurrentHnswGraph::from_hnsw_graph(existing_graph, total_max_level);
                 concurrent_graph.add_nodes(new_node_levels.clone());
 
+                // Insert searches start from the loaded graph's entry point so
+                // new nodes connect to the existing component; the promoted top
+                // node (if any) is inserted first from here, then becomes the
+                // start (see the loop below).
                 let search_ep = old_ep.or(ep);
 
-                (concurrent_graph, ep, total_max_level, search_ep)
+                (
+                    concurrent_graph,
+                    ep,
+                    total_max_level,
+                    search_ep,
+                    promoted_ep,
+                )
             } else {
                 // Full build
                 let mut doc_ids_in_order: Vec<u64> =
@@ -956,7 +989,9 @@ impl HnswIndexWriter {
                 new_doc_ids_in_order = doc_ids_in_order;
 
                 let concurrent_graph = ConcurrentHnswGraph::new(new_node_levels.clone(), max_level);
-                (concurrent_graph, ep, max_level, ep)
+                // Full build: the seed `ep` is already the max-level node, so
+                // the search start needs no promotion.
+                (concurrent_graph, ep, max_level, ep, None)
             };
 
         // 3. Concurrent insertion (Issues #868 / #621).
@@ -977,34 +1012,25 @@ impl HnswIndexWriter {
         // guarantees full reachability regardless of interleaving.
         let writer_ref = &*self;
 
-        // The search-start node must be visible before any worker runs so
-        // traversals that reach it are not filtered out. For an incremental
+        // The initial search-start node must be visible before any worker runs
+        // so traversals that reach it are not filtered out. For an incremental
         // build it is the (already-linked) old entry point; for a full build
         // it is the seed, which has no edges yet but is a valid, linked start.
         if let Some(sp) = search_entry_point {
             graph.mark_linked(sp);
         }
 
-        let insert_one = |doc_id: u64| -> Result<()> {
+        let insert_one = |doc_id: u64, start_node: u64| -> Result<()> {
+            // Skip insertion of the search start node itself (the seed / entry
+            // point — other nodes link TO it via bidirectional edges).
+            if start_node == doc_id {
+                return Ok(());
+            }
+
             let doc_vector_idx = *writer_ref.doc_id_map.get(&doc_id).ok_or_else(|| {
                 LaurusError::internal(format!("Doc ID {} not found in doc_id_map", doc_id))
             })?;
             let vector = &writer_ref.vectors[doc_vector_idx].2;
-
-            // Determine the starting node for search.
-            // For incremental builds `search_entry_point` is the OLD entry
-            // point so new nodes (including a promoted EP) always get
-            // connected to the existing graph.
-            let start_node = match search_entry_point {
-                Some(sp) => sp,
-                None => return Ok(()), // No existing node to search from
-            };
-
-            // Skip insertion of the search start node itself (full-build
-            // seed node — other nodes will link TO it via bidirectional edges).
-            if start_node == doc_id {
-                return Ok(());
-            }
 
             // Determine the assigned level from the pre-populated graph
             let layers_len = graph
@@ -1096,23 +1122,42 @@ impl HnswIndexWriter {
         // pattern also suffers from a low-level entry point, handled (as a
         // quality follow-up) in Issue #872; the connectivity repair below is
         // the correctness backstop for it regardless.
-        const BOOTSTRAP_FLOOR: usize = 32;
-        let new_count = new_doc_ids_in_order.len();
-        let existing_linked = graph.nodes.len().saturating_sub(new_count);
-        let bootstrap_count = ef_construction
-            .max(BOOTSTRAP_FLOOR)
-            .saturating_sub(existing_linked)
-            .min(new_count);
-        let parallel_ids: Vec<u64> = new_doc_ids_in_order.split_off(bootstrap_count);
-        for doc_id in new_doc_ids_in_order {
-            insert_one(doc_id)?;
-        }
+        //
+        // The `effective_start` is the node every insert searches from. When
+        // the append promoted the entry point to a new top-level node (#872),
+        // that node is inserted FIRST (searching from the low-level `old_ep`,
+        // so it joins the existing component) and then becomes the start —
+        // matching the full-build regime where searches descend from the
+        // max-level node. Otherwise it stays the loaded/seed entry point.
+        if let Some(start) = search_entry_point {
+            let effective_start = match promoted_ep {
+                Some(pep) => {
+                    insert_one(pep, start)?;
+                    pep
+                }
+                None => start,
+            };
 
-        #[cfg(not(target_arch = "wasm32"))]
-        parallel_ids.into_par_iter().try_for_each(insert_one)?;
-        #[cfg(target_arch = "wasm32")]
-        for doc_id in parallel_ids {
-            insert_one(doc_id)?;
+            const BOOTSTRAP_FLOOR: usize = 32;
+            let new_count = new_doc_ids_in_order.len();
+            let existing_linked = graph.nodes.len().saturating_sub(new_count);
+            let bootstrap_count = ef_construction
+                .max(BOOTSTRAP_FLOOR)
+                .saturating_sub(existing_linked)
+                .min(new_count);
+            let parallel_ids: Vec<u64> = new_doc_ids_in_order.split_off(bootstrap_count);
+            for doc_id in new_doc_ids_in_order {
+                insert_one(doc_id, effective_start)?;
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            parallel_ids
+                .into_par_iter()
+                .try_for_each(|doc_id| insert_one(doc_id, effective_start))?;
+            #[cfg(target_arch = "wasm32")]
+            for doc_id in parallel_ids {
+                insert_one(doc_id, effective_start)?;
+            }
         }
 
         // 4. Convert ConcurrentGraph to HnswGraph
