@@ -179,7 +179,9 @@ fn overwrite_committed_docs_reuses_cache_and_manager() {
          (pre-#864: fresh manager + full .delmap reload per overwrite)"
     );
 
-    // The deletions actually landed: the seeded segment now has a bitmap.
+    // The deletions actually landed: persistence is deferred to the flush
+    // (#875 group commit), after which the seeded segment has a bitmap.
+    writer.flush_deletions().unwrap();
     let delmaps: Vec<String> = storage
         .list_files()
         .unwrap()
@@ -226,6 +228,9 @@ fn mid_life_flush_extends_cache() {
          cache, paying only the one-time DeletionManager construction"
     );
 
+    // Deletion persistence is deferred (#875): flush, then the flushed
+    // segment must own the bitmap.
+    writer.flush_deletions().unwrap();
     let delmaps: Vec<String> = storage
         .list_files()
         .unwrap()
@@ -331,8 +336,10 @@ fn invalidate_failure_preserves_old_cache() {
 
     // ...but the previous cache must still be in force: the segments were
     // not actually replaced (no merge ran), so an overwrite must still
-    // resolve the seeded segment and mark its deletion.
+    // resolve the seeded segment and mark its deletion (persisted by the
+    // deferred flush, #875).
     writer.upsert_document(1, doc("one-v2")).unwrap();
+    writer.flush_deletions().unwrap();
     let delmaps: Vec<String> = storage
         .list_files()
         .unwrap()

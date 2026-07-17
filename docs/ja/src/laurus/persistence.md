@@ -69,17 +69,24 @@ v3 以降、各ペイロードは JSON ではなくコンパクトな rkyv バ�
 
 ## リカバリ
 
-エンジンがビルドされる際（`Engine::builder(...).build().await`）、残っているWALエントリが自動的にチェックされ、リプレイされます（WALはコミット時に切り捨てられるため、残っているエントリはクラッシュしたセッションのものです）。
+エンジンがビルドされる際（`Engine::builder(...).build().await`）、残っているWALエントリが自動的にチェックされ、リプレイされます（WALはコミット時に切り捨てられるため、残っているエントリはクラッシュしたセッションのものです）。リカバリの最後には**自動コミット**が実行されます。リプレイされた状態 —
+[グループコミットで永続化される](deletions.md#グループコミットによる永続化)削除を含む — は
+永続化されて即座に検索可能になり、WALは切り捨てられるため、続けてクラッシュしても再リプレイは
+発生しません。
 
 ```mermaid
 graph TD
     Start["Engine::build()"] --> Check["Check WAL for\nuncommitted entries"]
     Check -->|"Entries found"| Replay["Replay operations\ninto in-memory buffers"]
-    Replay --> Ready["Engine ready"]
+    Replay --> Commit["Auto-commit\n(persist + truncate WAL)"]
+    Commit --> Ready["Engine ready"]
     Check -->|"No entries"| Ready
 ```
 
-リカバリは透過的に行われるため、手動で処理する必要はありません。
+リカバリは透過的に行われるため、手動で処理する必要はありません。なお、クラッシュ後のオープンは
+コミット相当の処理（セグメントフラッシュ、インデックス書き込み）を行うため、そのコミットが
+失敗した場合（ディスクフルなど）は `Engine::build` がエラーを返します。原因解消後の再オープンは
+安全です（リプレイは冪等であり、WALはコミット成功後にのみ切り捨てられます）。
 
 ## コミットライフサイクル
 

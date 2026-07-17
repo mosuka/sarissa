@@ -193,7 +193,24 @@ pub struct InvertedIndexWriter {
     /// replaces a full bitmap reload per call. Dropped together with
     /// [`Self::segment_ranges`] on [`Self::invalidate_segment_cache`] because
     /// a force-merge deletes the segments (and bitmaps) it holds in memory.
+    ///
+    /// Deletion persistence is deferred (Issue #875): the manager buffers
+    /// bitmap changes in memory and [`Self::flush_deletions`] group-commits
+    /// them (called from [`Self::commit`] and, via
+    /// [`LexicalStore::optimize`](crate::lexical::store::LexicalStore::optimize),
+    /// before any force-merge).
     deletion_manager: Option<crate::maintenance::deletion::DeletionManager>,
+
+    /// Segments whose `.meta` still advertises `has_deletions = false` but
+    /// received their first deletion since the last
+    /// [`Self::flush_deletions`] (Issue #875).
+    ///
+    /// The `has_deletions` flip used to open + JSON-parse the `.meta` file on
+    /// **every** delete (and rewrite + fsync it on the first); deferring the
+    /// flip removes both from the upsert hot path. Flushed together with the
+    /// deletion bitmaps — `.delmap` first, then `.meta` — so a reader that
+    /// sees the flag always finds the bitmap.
+    pending_meta_deletions: AHashSet<String>,
 }
 
 impl std::fmt::Debug for InvertedIndexWriter {
@@ -276,6 +293,7 @@ impl InvertedIndexWriter {
             segment_ranges,
             max_committed_doc_id,
             deletion_manager: None,
+            pending_meta_deletions: AHashSet::new(),
         })
     }
 
@@ -1376,6 +1394,15 @@ impl InvertedIndexWriter {
             self.flush_segment()?;
         }
 
+        // Group-commit buffered deletion state (Issue #875). This must run
+        // BEFORE `write_metadata_json` persists `last_wal_seq`: once the
+        // checkpoint is durable, WAL replay skips the delete records, so a
+        // crash between the checkpoint and a later deletion flush would lose
+        // the deletions permanently. In this order a mid-commit crash keeps
+        // the records replayable. It also runs before `LexicalStore::commit`'s
+        // `maybe_merge`, so the merge engine always sees the deletions.
+        self.flush_deletions()?;
+
         // Write index metadata
         self.write_index_metadata()?;
         self.write_metadata_json()?;
@@ -1417,6 +1444,12 @@ impl InvertedIndexWriter {
     }
 
     /// Rollback all pending changes.
+    ///
+    /// Buffered deletion state (deferred bitmap writes and `has_deletions`
+    /// meta flips, Issue #875) is intentionally NOT discarded: deletions were
+    /// never rollback-able (they used to be persisted synchronously at delete
+    /// time) and their WAL records are already acknowledged, so they are kept
+    /// and persisted by the next [`Self::flush_deletions`].
     pub fn rollback(&mut self) -> Result<()> {
         self.check_closed()?;
 
@@ -1539,8 +1572,16 @@ impl InvertedIndexWriter {
             // `.delmap` bitmap from storage, and the fresh-id ingest path
             // (empty `segments`) never needs it at all.
             if self.deletion_manager.is_none() {
+                // The deletion log is disabled (Issue #875): nothing replays
+                // it — crash recovery is fully covered by the engine WAL,
+                // whose delete records precede every index mutation — so its
+                // per-delete append + fsync is pure overhead.
+                let config = crate::maintenance::deletion::DeletionConfig {
+                    enable_deletion_log: false,
+                    ..Default::default()
+                };
                 self.deletion_manager = Some(crate::maintenance::deletion::DeletionManager::new(
-                    Default::default(), // Use default config for now
+                    config,
                     self.storage.clone(),
                 )?);
             }
@@ -1560,8 +1601,9 @@ impl InvertedIndexWriter {
                     manager.delete_document(segment_id, doc_id, "upsert")?;
                 }
 
-                // Update segment metadata to reflect deletions
-                self.update_segment_meta_deletions(segment_id)?;
+                // Queue the segment's `has_deletions` meta flip; persisted by
+                // `flush_deletions` at commit (Issue #875).
+                self.update_segment_meta_deletions(segment_id);
 
                 deleted += 1;
             }
@@ -1646,12 +1688,30 @@ impl InvertedIndexWriter {
         }
         self.segment_ranges = segment_ranges;
         self.max_committed_doc_id = max_committed_doc_id;
+        // Contract (Issue #875): any buffered deletion state must have been
+        // flushed BEFORE the external rewrite that prompted this call —
+        // `LexicalStore::optimize` calls `flush_deletions` ahead of its
+        // force-merge. Dropping the manager (and the pending meta flips)
+        // here discards only state that describes segments which no longer
+        // exist; flushing at this point instead would recreate `.delmap` /
+        // `.meta` files for merged-away segments.
         self.deletion_manager = None;
+        self.pending_meta_deletions.clear();
         Ok(())
     }
 
-    /// Rewrite segment metadata to mark `has_deletions = true`.
-    fn update_segment_meta_deletions(&self, segment_id: &str) -> Result<()> {
+    /// Record that a segment needs its `.meta` `has_deletions` flag flipped.
+    ///
+    /// The actual `.meta` parse + rewrite is deferred to
+    /// [`Self::flush_deletions`] (Issue #875) — this is a set insert, so the
+    /// per-delete hot path pays no storage read, JSON parse, or fsync.
+    fn update_segment_meta_deletions(&mut self, segment_id: &str) {
+        self.pending_meta_deletions.insert(segment_id.to_string());
+    }
+
+    /// Rewrite a segment's `.meta` to `has_deletions = true` (idempotent —
+    /// nothing is written when the flag is already set).
+    fn persist_segment_meta_deletions(&self, segment_id: &str) -> Result<()> {
         let meta_file = format!("{segment_id}.meta");
         let input = self.storage.open_input(&meta_file)?;
         let mut meta: SegmentInfo = serde_json::from_reader(input)
@@ -1667,6 +1727,43 @@ impl InvertedIndexWriter {
             output.close()?;
         }
 
+        Ok(())
+    }
+
+    /// Group-commit all buffered deletion state (Issue #875).
+    ///
+    /// Persists every dirty deletion bitmap via
+    /// [`DeletionManager::flush`](crate::maintenance::deletion::DeletionManager::flush)
+    /// and then flips the pending `.meta` `has_deletions` flags — in that
+    /// order, so a reader (or the merge engine) that observes the flag always
+    /// finds the corresponding `.delmap` on storage.
+    ///
+    /// Called from [`Self::commit`] before the `metadata.json` /
+    /// `last_wal_seq` checkpoint (a crash before the checkpoint keeps the WAL
+    /// delete records replayable), and from
+    /// [`LexicalStore::optimize`](crate::lexical::store::LexicalStore::optimize)
+    /// before its force-merge (the merge engine reads deletions from the
+    /// on-disk `.delmap`, so unflushed deletions would be resurrected into
+    /// the merged segment). Idempotent — a second call without intervening
+    /// deletions writes nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if persisting a bitmap or rewriting a `.meta` fails;
+    /// unpersisted state stays buffered so a later flush retries it.
+    pub fn flush_deletions(&mut self) -> Result<()> {
+        if let Some(manager) = &self.deletion_manager {
+            manager.flush()?;
+        }
+
+        if self.pending_meta_deletions.is_empty() {
+            return Ok(());
+        }
+        let pending: Vec<String> = self.pending_meta_deletions.iter().cloned().collect();
+        for segment_id in pending {
+            self.persist_segment_meta_deletions(&segment_id)?;
+            self.pending_meta_deletions.remove(&segment_id);
+        }
         Ok(())
     }
 
@@ -1708,6 +1805,10 @@ impl LexicalIndexWriter for InvertedIndexWriter {
 
     fn invalidate_segment_cache(&mut self) -> Result<()> {
         InvertedIndexWriter::invalidate_segment_cache(self)
+    }
+
+    fn flush_deletions(&mut self) -> Result<()> {
+        InvertedIndexWriter::flush_deletions(self)
     }
 
     fn upsert_document(&mut self, doc_id: u64, doc: Document) -> Result<()> {

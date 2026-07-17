@@ -575,6 +575,19 @@ pub struct DeletionManager {
 
     /// Global deletion state.
     global_state: RwLock<GlobalDeletionState>,
+
+    /// Segments whose in-memory bitmap has changed since the last
+    /// [`flush`](Self::flush) (Issue #875).
+    ///
+    /// Mutations ([`delete_document`](Self::delete_document) /
+    /// [`delete_documents`](Self::delete_documents) /
+    /// [`resize_segment`](Self::resize_segment)) only update the in-memory
+    /// bitmap and record the segment here; the `.delmap` files are written
+    /// once per group by [`flush`](Self::flush) instead of once per delete.
+    /// This removes the per-delete full-bitmap rewrite (+ fsync) from the
+    /// upsert hot path — the caller is responsible for flushing at its
+    /// durability point (the lexical writer flushes on commit).
+    dirty_segments: RwLock<ahash::AHashSet<String>>,
 }
 
 impl DeletionManager {
@@ -596,6 +609,7 @@ impl DeletionManager {
             deletion_log,
             stats: RwLock::new(DeletionStats::default()),
             global_state: RwLock::new(GlobalDeletionState::new()),
+            dirty_segments: RwLock::new(ahash::AHashSet::new()),
         };
 
         // Load existing bitmaps
@@ -639,7 +653,9 @@ impl DeletionManager {
             bitmaps.insert(segment_id.to_string(), bitmap);
         }
 
-        self.save_bitmap(segment_id)?;
+        // The empty bitmap is persisted by the next `flush` together with the
+        // deletions that prompted the initialization (Issue #875).
+        self.mark_dirty(segment_id);
         self.update_stats();
         let _ = self.update_global_state();
 
@@ -647,16 +663,25 @@ impl DeletionManager {
     }
 
     /// Resize a segment's bitmap.
+    ///
+    /// The resized bitmap is persisted by the next [`flush`](Self::flush).
     pub fn resize_segment(&self, segment_id: &str, new_size: u64) -> Result<()> {
         let bitmaps = self.bitmaps.read().unwrap();
         if let Some(bitmap) = bitmaps.get(segment_id) {
             bitmap.resize(new_size);
-            self.save_bitmap(segment_id)?;
+            self.mark_dirty(segment_id);
         }
         Ok(())
     }
 
     /// Mark a document as deleted.
+    ///
+    /// The deletion is applied to the in-memory bitmap immediately but is only
+    /// persisted to the segment's `.delmap` file by the next
+    /// [`flush`](Self::flush) (Issue #875) — callers must flush at their
+    /// durability point (the lexical writer flushes on commit; crash recovery
+    /// is covered by the engine WAL, which records every delete before the
+    /// index mutation).
     pub fn delete_document(&self, segment_id: &str, doc_id: u64, reason: &str) -> Result<bool> {
         let was_deleted = {
             let bitmaps = self.bitmaps.read().unwrap();
@@ -675,9 +700,9 @@ impl DeletionManager {
             log.log_deletion(segment_id, doc_id, reason)?;
         }
 
-        // Save updated bitmap
+        // Defer bitmap persistence to the next `flush` (Issue #875)
         if was_deleted {
-            self.save_bitmap(segment_id)?;
+            self.mark_dirty(segment_id);
             self.update_stats();
             let _ = self.update_global_state();
         }
@@ -716,7 +741,7 @@ impl DeletionManager {
         }
 
         if deleted_count > 0 {
-            self.save_bitmap(segment_id)?;
+            self.mark_dirty(segment_id);
             self.update_stats();
             let _ = self.update_global_state();
         }
@@ -774,6 +799,9 @@ impl DeletionManager {
             let mut bitmaps = self.bitmaps.write().unwrap();
             bitmaps.remove(segment_id);
         }
+        // Drop any pending dirty mark so a later `flush` cannot resurrect the
+        // `.delmap` file of a segment that no longer exists (Issue #875).
+        self.dirty_segments.write().unwrap().remove(segment_id);
 
         // Delete bitmap file
         let bitmap_file = format!("{segment_id}.delmap");
@@ -782,6 +810,64 @@ impl DeletionManager {
         self.update_stats();
         let _ = self.update_global_state();
         Ok(())
+    }
+
+    /// Record that a segment's in-memory bitmap diverged from its `.delmap`
+    /// file and needs persisting by the next [`flush`](Self::flush).
+    fn mark_dirty(&self, segment_id: &str) {
+        self.dirty_segments
+            .write()
+            .unwrap()
+            .insert(segment_id.to_string());
+    }
+
+    /// Persist every dirty segment's deletion bitmap to its `.delmap` file
+    /// (Issue #875).
+    ///
+    /// This is the single durability point for deletion state: mutations only
+    /// update the in-memory bitmaps and mark their segment dirty, and this
+    /// method group-commits all of them (one `.delmap` write per dirty
+    /// segment instead of one per delete). Idempotent — a second call without
+    /// intervening mutations writes nothing.
+    ///
+    /// # Returns
+    ///
+    /// The IDs of the segments whose bitmap was written, in unspecified
+    /// order (empty when nothing was dirty).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing a bitmap fails; segments not yet written
+    /// (including the failed one) remain marked dirty so a retry or a later
+    /// flush persists them.
+    pub fn flush(&self) -> Result<Vec<String>> {
+        // Claim the dirty set up front: a mutation racing with this flush
+        // re-marks its segment dirty on its own, so draining first can never
+        // drop an unpersisted change (removing after the save could).
+        let dirty: Vec<String> = self.dirty_segments.write().unwrap().drain().collect();
+
+        let mut flushed = Vec::with_capacity(dirty.len());
+        for (i, segment_id) in dirty.iter().enumerate() {
+            if let Err(e) = self.save_bitmap(segment_id) {
+                // Restore the failed segment and every not-yet-written one so
+                // a retry (or the next flush) persists them.
+                let mut dirty_guard = self.dirty_segments.write().unwrap();
+                for seg in &dirty[i..] {
+                    dirty_guard.insert(seg.clone());
+                }
+                return Err(e);
+            }
+            flushed.push(segment_id.clone());
+        }
+        Ok(flushed)
+    }
+
+    /// Check whether any segment has unpersisted deletion state.
+    ///
+    /// Returns `true` when at least one mutation since the last
+    /// [`flush`](Self::flush) is still buffered in memory.
+    pub fn has_dirty_segments(&self) -> bool {
+        !self.dirty_segments.read().unwrap().is_empty()
     }
 
     /// Save bitmap to storage.
@@ -1237,6 +1323,71 @@ mod tests {
         let stats = manager.get_stats();
         assert_eq!(stats.segments_tracked, 1);
         assert_eq!(stats.total_deleted, 2);
+    }
+
+    /// Deferred persistence (Issue #875): mutations must not write the
+    /// `.delmap` file; `flush` persists every dirty segment once and is
+    /// idempotent.
+    #[test]
+    fn test_flush_persists_dirty_bitmaps_once() {
+        let config = DeletionConfig {
+            enable_deletion_log: false,
+            ..Default::default()
+        };
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let manager = DeletionManager::new(config, storage.clone()).unwrap();
+
+        manager.initialize_segment("seg001", 0, 999).unwrap();
+        manager.delete_document("seg001", 100, "test").unwrap();
+        manager.delete_document("seg001", 200, "test").unwrap();
+
+        // Nothing persisted yet — deletions are buffered in memory.
+        assert!(!storage.file_exists("seg001.delmap"));
+        assert!(manager.has_dirty_segments());
+
+        // One flush persists the segment's bitmap.
+        let flushed = manager.flush().unwrap();
+        assert_eq!(flushed, vec!["seg001".to_string()]);
+        assert!(storage.file_exists("seg001.delmap"));
+        assert!(!manager.has_dirty_segments());
+
+        // Idempotent: a second flush without mutations writes nothing.
+        assert!(manager.flush().unwrap().is_empty());
+
+        // The persisted bitmap round-trips into a fresh manager.
+        let reloaded = DeletionManager::new(
+            DeletionConfig {
+                enable_deletion_log: false,
+                ..Default::default()
+            },
+            storage,
+        )
+        .unwrap();
+        assert!(reloaded.is_deleted("seg001", 100));
+        assert!(reloaded.is_deleted("seg001", 200));
+        assert!(!reloaded.is_deleted("seg001", 300));
+    }
+
+    /// `remove_segment` must drop the segment's dirty mark so a later `flush`
+    /// cannot resurrect the `.delmap` of a merged-away segment (Issue #875).
+    #[test]
+    fn test_remove_segment_drops_dirty_mark() {
+        let config = DeletionConfig {
+            enable_deletion_log: false,
+            ..Default::default()
+        };
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let manager = DeletionManager::new(config, storage.clone()).unwrap();
+
+        manager.initialize_segment("seg001", 0, 999).unwrap();
+        manager.delete_document("seg001", 100, "test").unwrap();
+        assert!(manager.has_dirty_segments());
+
+        manager.remove_segment("seg001").unwrap();
+
+        assert!(!manager.has_dirty_segments());
+        assert!(manager.flush().unwrap().is_empty());
+        assert!(!storage.file_exists("seg001.delmap"));
     }
 
     #[test]

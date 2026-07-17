@@ -270,9 +270,18 @@ impl LexicalStore {
         // held, new writers can only be constructed strictly before or
         // strictly after the merge, where the scan sees a consistent set.
         let mut writer_guard = self.writer_cache.lock();
-        if let Some(mut writer) = writer_guard.take() {
+        // Commit through a borrow and drop the writer only on SUCCESS (Issue
+        // #875): taking it out first would destroy its buffered state — the
+        // deferred deletion bitmaps and `has_deletions` meta flips — on a
+        // failed commit (the writer's silent Drop-close retry usually fails
+        // the same way), after which a later successful commit would truncate
+        // the WAL past the delete records and make the loss permanent without
+        // any crash. Keeping the writer cached preserves everything for the
+        // retry the WAL contract assumes.
+        if let Some(writer) = writer_guard.as_mut() {
             writer.commit()?;
         }
+        *writer_guard = None;
         // Sync storage to ensure all file metadata (creation, rename, size) is
         // flushed to disk. This is critical on Windows where directory listings
         // and file visibility may be cached until the directory is synced.
@@ -336,6 +345,17 @@ impl LexicalStore {
         // stale segment cache while the merge deletes those segments, marking
         // deletions in ghost segments (lost dedup / duplicate versions).
         let mut writer_guard = self.writer_cache.lock();
+        // Persist any deletion state still buffered in the live writer BEFORE
+        // the merge (Issue #875): the merge engine consumes deletions from the
+        // on-disk `.delmap` files, so unflushed deletions would be resurrected
+        // into the merged segment — and then silently discarded when the
+        // writer's deletion manager is dropped by `invalidate_segment_cache`
+        // below, with the next commit's WAL truncation making the loss
+        // permanent. Flushing first makes the merge see them; failing here
+        // aborts the optimize with the writer state intact.
+        if let Some(writer) = writer_guard.as_mut() {
+            writer.flush_deletions()?;
+        }
         let merge_result = self.index.optimize();
         // The force-merge replaces committed segments (and their deletion
         // bitmaps) behind any live writer — rebuild its cached segment view
@@ -724,7 +744,21 @@ impl LexicalStore {
         }
 
         // Invalidate caches so the next writer/searcher uses updated config.
-        *self.writer_cache.lock() = None;
+        // Commit the cached writer through a borrow and drop it only on
+        // SUCCESS (Issue #875): a bare `= None` relies on the writer's silent
+        // Drop-close commit, whose failure would destroy the buffered state —
+        // including deferred deletion bitmaps — while this method still
+        // returns `Ok`; a later successful commit would then truncate the WAL
+        // past the acknowledged delete records, resurrecting old document
+        // versions permanently. Reachable during normal ingest: the Dynamic
+        // field policy calls `add_field` automatically for unseen fields.
+        {
+            let mut writer_guard = self.writer_cache.lock();
+            if let Some(writer) = writer_guard.as_mut() {
+                writer.commit()?;
+            }
+            *writer_guard = None;
+        }
         *self.searcher_cache.write() = None;
 
         Ok(())
@@ -760,7 +794,16 @@ impl LexicalStore {
         }
 
         // Invalidate caches so the next writer/searcher uses updated config.
-        *self.writer_cache.lock() = None;
+        // Same commit-then-drop-on-success guard as `add_field` (Issue #875):
+        // never rely on the silent Drop-close commit to persist buffered
+        // deletion state.
+        {
+            let mut writer_guard = self.writer_cache.lock();
+            if let Some(writer) = writer_guard.as_mut() {
+                writer.commit()?;
+            }
+            *writer_guard = None;
+        }
         *self.searcher_cache.write() = None;
 
         Ok(())
