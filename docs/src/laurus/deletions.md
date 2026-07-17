@@ -126,6 +126,20 @@ The bitmap is persisted alongside the index segments (the `.delmap` file) and is
 the WAL during recovery. The on-disk format is versioned: the current writer emits v4 (Roaring),
 and the reader still loads the older v1–v3 (raw ID list) layouts for backward compatibility.
 
+### Group-Committed Persistence
+
+Deletion state is persisted **once per commit**, not once per delete. Each delete (including
+the delete-first step of an upsert) only updates the in-memory bitmap; the `.delmap` files and
+the segments' `has_deletions` metadata flags are written together when `commit()` runs. This
+removes several fsyncs from every existing-ID upsert, which matters for update-heavy ingest.
+
+Durability is unchanged: the WAL records every delete *before* the index mutation, so a crash
+before the commit replays the deletions on the next startup — and recovery finishes with an
+automatic commit, so the replayed state (including deletions) is immediately searchable on the
+reopened engine. Consequently, deletion **visibility is commit-scoped**: like newly added
+documents, a deletion becomes visible to searches after the next `commit()` (upsert
+deduplication within an uncommitted batch is handled separately and is always correct).
+
 ## Next Steps
 
 - How data is persisted: [Persistence & WAL](persistence.md)

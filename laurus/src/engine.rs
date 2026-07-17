@@ -191,10 +191,12 @@ impl Engine {
         let vector_last_seq = self.vector.last_wal_seq();
         let lexical_last_seq = self.lexical.last_wal_seq();
 
+        let mut applied = false;
         for record in records {
             if record.seq <= vector_last_seq && record.seq <= lexical_last_seq {
                 continue;
             }
+            applied = true;
 
             match record.entry {
                 LogEntry::Upsert {
@@ -256,6 +258,20 @@ impl Engine {
                     }
                 }
             }
+        }
+
+        // Persist the replayed state right away (Issue #875). Deletion
+        // persistence is deferred to commit, so without this a freshly
+        // reopened index would serve the *old* versions of upserted/deleted
+        // documents to searchers until the caller's next commit — replayed
+        // deletions only exist in the writer's in-memory bitmaps until then.
+        // Committing here also bounds re-replay work: the WAL is truncated,
+        // so a subsequent crash replays nothing instead of the same records
+        // again. Safe against a crash *during* this commit: the WAL is only
+        // truncated after every store has committed, and replay is
+        // idempotent.
+        if applied {
+            self.commit().await?;
         }
         Ok(())
     }

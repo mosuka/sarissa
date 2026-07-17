@@ -345,3 +345,77 @@ async fn unarmed_faulty_storage_commits_cleanly() -> laurus::Result<()> {
     assert_all_recovered(&engine).await?;
     Ok(())
 }
+
+/// #875: deletion persistence is deferred to commit, with crash safety from
+/// the WAL. This crashes an engine that holds a *buffered* deletion (the
+/// existing-id upsert's delete-first is deferred, and the writer's drop-commit
+/// is made to fail so nothing persists), then reopens and searches WITHOUT a
+/// manual commit: recovery must replay the delete and auto-commit, so the old
+/// version stays invisible and the new version is searchable.
+#[tokio::test(flavor = "multi_thread")]
+async fn deferred_deletion_recovers_after_crash_without_manual_commit() -> laurus::Result<()> {
+    let temp = TempDir::new().expect("temp dir");
+    let inner: Arc<dyn Storage> =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp.path())))?;
+
+    let plan = Arc::new(Mutex::new(FaultPlan {
+        armed: false,
+        target: "lexical/".to_string(),
+        triggered: false,
+    }));
+    let faulty: Arc<dyn Storage> = Arc::new(FaultyStorage {
+        inner: inner.clone(),
+        plan: plan.clone(),
+    });
+
+    let schema = build_schema();
+
+    // Round 1: commit v1, upsert v2 (buffers the deletion of v1), then crash.
+    {
+        let engine = Engine::new(faulty.clone(), schema.clone()).await?;
+        engine.put_document("doc0", make_doc(0)).await?;
+        engine.commit().await?;
+
+        let v2 = Document::builder()
+            .add_field("title", DataValue::Text("updated fresh entry".into()))
+            .add_field("embedding", DataValue::Vector(vec![0.9; 128]))
+            .build();
+        engine.put_document("doc0", v2).await?;
+
+        // Crash: fail the lexical writer's drop-commit so neither the new
+        // segment nor the deferred `.delmap` / checkpoint persists — only the
+        // WAL (whose delete record preceded the mutation) survives.
+        plan.lock().expect("plan lock").armed = true;
+    }
+    plan.lock().expect("plan lock").armed = false;
+
+    // Round 2: reopen and search immediately — NO manual commit. Recovery
+    // replays the delete + upsert and auto-commits (#875), so the replayed
+    // state is fully searchable.
+    {
+        let engine = Engine::new(faulty.clone(), schema.clone()).await?;
+
+        let request = |term: &str| {
+            SearchRequestBuilder::new()
+                .lexical_query(LexicalSearchQuery::Obj(Box::new(TermQuery::new(
+                    "title", term,
+                ))))
+                .build()
+        };
+        let updated = engine.search(request("updated")).await?;
+        assert_eq!(
+            updated.len(),
+            1,
+            "the replayed new version must be searchable without a manual commit"
+        );
+        let old = engine.search(request(SHARED_TERM)).await?;
+        assert_eq!(
+            old.len(),
+            0,
+            "the replayed deletion of the old version must be visible without \
+             a manual commit (#875 recovery auto-commit)"
+        );
+    }
+
+    Ok(())
+}

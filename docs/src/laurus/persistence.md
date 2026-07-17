@@ -69,17 +69,18 @@ Since v3, each payload is a compact rkyv binary record rather than JSON. Vectors
 
 ## Recovery
 
-When an engine is built (`Engine::builder(...).build().await`), it automatically checks for remaining WAL entries and replays them (the WAL is truncated on commit, so any remaining entries are from a crashed session):
+When an engine is built (`Engine::builder(...).build().await`), it automatically checks for remaining WAL entries and replays them (the WAL is truncated on commit, so any remaining entries are from a crashed session). Recovery finishes with an **automatic commit**: the replayed state — including deletions, whose persistence is [group-committed](deletions.md#group-committed-persistence) — is persisted and immediately searchable, and the WAL is truncated, so a subsequent crash has nothing to re-replay:
 
 ```mermaid
 graph TD
     Start["Engine::build()"] --> Check["Check WAL for\nuncommitted entries"]
     Check -->|"Entries found"| Replay["Replay operations\ninto in-memory buffers"]
-    Replay --> Ready["Engine ready"]
+    Replay --> Commit["Auto-commit\n(persist + truncate WAL)"]
+    Commit --> Ready["Engine ready"]
     Check -->|"No entries"| Ready
 ```
 
-Recovery is transparent — you do not need to handle it manually.
+Recovery is transparent — you do not need to handle it manually. Note that a post-crash open therefore does commit-scale work (segment flush, index writes), and `Engine::build` returns an error if that commit fails (e.g. the disk is full); reopening after the condition clears is safe, since replay is idempotent and the WAL is only truncated after the commit succeeds.
 
 ## The Commit Lifecycle
 

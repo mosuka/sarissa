@@ -218,4 +218,23 @@ pub trait LexicalIndexWriter: Send + Sync + std::fmt::Debug {
     fn invalidate_segment_cache(&mut self) -> Result<()> {
         Ok(())
     }
+
+    /// Persist any buffered (deferred) deletion state to storage (Issue #875).
+    ///
+    /// Writers that defer deletion persistence for group-commit (the
+    /// [`InvertedIndexWriter`](crate::lexical::index::inverted::writer::InvertedIndexWriter)
+    /// buffers deletion-bitmap writes and `has_deletions` metadata flips and
+    /// flushes them once per [`commit()`](Self::commit)) must also expose the
+    /// flush for callers that consume deletion state from storage without
+    /// committing — today that is
+    /// [`LexicalStore::optimize`](crate::lexical::store::LexicalStore::optimize),
+    /// whose force-merge reads the on-disk deletion bitmaps. The default
+    /// implementation is a no-op for writers that persist deletions eagerly.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if persisting the buffered deletion state fails.
+    fn flush_deletions(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
