@@ -2,17 +2,64 @@
 //!
 //! This module manages vector index segments, including segment metadata,
 //! merging strategies, and segment lifecycle.
+//!
+//! The segment registry is persisted in a `segments.json` manifest. Since
+//! #634 (PR-1 / #879) the manifest is **versioned, checksummed, and written
+//! atomically** (temp file + CRC-32 trailer + fsync + rename — the same
+//! #784/#786 standard the `.hnsw` segment files follow), so it can serve as
+//! the commit pivot for the segment-per-commit pipeline: a crash mid-save
+//! leaves the previous manifest intact, and a corrupted manifest fails the
+//! open loudly instead of silently starting empty.
 
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::RwLock;
 
-use crate::error::Result;
+use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
+use crate::storage::structured::{StructReader, StructWriter};
 
 use super::merge_policy::MergePolicy;
+
+/// Manifest file name for the segment registry.
+const MANIFEST_FILE: &str = "segments.json";
+
+/// Temporary file the manifest is staged in before the atomic rename.
+const MANIFEST_TMP_FILE: &str = "segments.json.tmp";
+
+/// Current manifest format version (see [`SegmentManifest`]).
+const MANIFEST_VERSION: u32 = 1;
+
+/// Versioned payload of the `segments.json` manifest (#634 PR-1 / #879).
+///
+/// Serialized as JSON and framed with a length prefix plus a CRC-32 trailer
+/// (via `StructWriter`), so corruption is detected at load time. The legacy
+/// format — a bare JSON array of [`ManagedSegmentInfo`] written in place —
+/// is still readable for backward compatibility and is upgraded on the next
+/// save.
+#[derive(Debug, Serialize, Deserialize)]
+struct SegmentManifest {
+    /// Format version (currently [`MANIFEST_VERSION`]).
+    version: u32,
+
+    /// Next segment ordinal handed out by
+    /// [`SegmentManager::generate_segment_id`], persisted so a reopen never
+    /// re-issues an ID even if the highest-numbered segment was merged away.
+    next_segment_id: u64,
+
+    /// Last WAL sequence number applied to the segments in this manifest.
+    ///
+    /// Reserved for the segment-per-commit recovery pivot (#634 PR-4): the
+    /// vector side persists no WAL checkpoint today, so this stays 0 until
+    /// the wiring lands. Persisting it here keeps the manifest format stable
+    /// across the campaign.
+    last_wal_seq: u64,
+
+    /// The registered segments.
+    segments: Vec<ManagedSegmentInfo>,
+}
 
 /// Configuration for segment manager.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,25 +207,42 @@ pub struct SegmentManager {
     storage: Arc<dyn Storage>,
     segments: Arc<RwLock<Vec<ManagedSegmentInfo>>>,
     next_segment_id: Arc<RwLock<u64>>,
+    /// Last WAL sequence number recorded in the manifest (see
+    /// [`SegmentManifest::last_wal_seq`]). Persisted by the next save.
+    last_wal_seq: AtomicU64,
 }
 
 impl SegmentManager {
     /// Create a new segment manager with the given configuration.
+    ///
+    /// Loads the `segments.json` manifest when present and sweeps orphaned
+    /// segment files (a torn flush can leave a `segment_*.hnsw` on storage
+    /// that never made it into the manifest — its documents are covered by
+    /// WAL replay, so the file is garbage).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an existing manifest fails to load or fails its
+    /// CRC check — a corrupted registry must fail the open loudly rather
+    /// than silently starting empty (which would orphan, and then sweep,
+    /// every live segment).
     pub fn new(config: SegmentManagerConfig, storage: Arc<dyn Storage>) -> Result<Self> {
         let manager = Self {
             config,
             storage,
             segments: Arc::new(RwLock::new(Vec::new())),
             next_segment_id: Arc::new(RwLock::new(0)),
+            last_wal_seq: AtomicU64::new(0),
         };
 
-        let _ = manager.load_state();
+        manager.load_state()?;
+        manager.cleanup_orphans();
 
         Ok(manager)
     }
 
     fn load_state(&self) -> Result<()> {
-        let mut reader = match self.storage.open_input("segments.json") {
+        let mut reader = match self.storage.open_input(MANIFEST_FILE) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
@@ -190,40 +254,177 @@ impl SegmentManager {
             return Ok(());
         }
 
-        let segments_info: Vec<ManagedSegmentInfo> = serde_json::from_slice(&content)?;
+        // Legacy format: a bare pretty-printed JSON array written in place
+        // (no framing, no checksum). Detect it by the leading byte and keep
+        // reading it; the next save upgrades to the versioned format.
+        let first = content
+            .iter()
+            .copied()
+            .find(|b| !b.is_ascii_whitespace())
+            .unwrap_or(0);
+        let (segments_info, next_id, wal_seq) = if first == b'[' {
+            let segments: Vec<ManagedSegmentInfo> = serde_json::from_slice(&content)?;
+            (segments, 0, 0)
+        } else {
+            // Versioned format: length-prefixed JSON + CRC-32 trailer
+            // (the StructWriter/StructReader framing).
+            let reader = self.storage.open_input(MANIFEST_FILE)?;
+            let mut struct_reader = StructReader::new(reader)?;
+            let json = struct_reader.read_bytes()?;
+            if !struct_reader.verify_checksum()? {
+                return Err(LaurusError::index(
+                    "segments.json checksum mismatch — manifest is corrupted",
+                ));
+            }
+            let manifest: SegmentManifest = serde_json::from_slice(&json)?;
+            (
+                manifest.segments,
+                manifest.next_segment_id,
+                manifest.last_wal_seq,
+            )
+        };
 
         let mut segments = self.segments.write();
         *segments = segments_info;
 
+        // The persisted counter wins over the max-scan, but never goes
+        // backwards: a merged-away highest segment must not cause ID reuse.
         let max_id = segments
             .iter()
             .filter_map(|s| s.segment_id.strip_prefix("segment_"))
             .filter_map(|s| s.parse::<u64>().ok())
+            .map(|id| id + 1)
             .max()
             .unwrap_or(0);
-
-        *self.next_segment_id.write() = max_id + 1;
+        *self.next_segment_id.write() = next_id.max(max_id);
+        self.last_wal_seq.store(wal_seq, Ordering::Release);
 
         Ok(())
     }
 
+    /// Persist the manifest atomically: temp file + length-prefixed JSON +
+    /// CRC-32 trailer + fsync + rename (#784/#786 parity).
+    ///
+    /// Takes the segment list as a parameter so mutators can call it while
+    /// still holding the `segments` write lock — saving after dropping the
+    /// lock let two racing mutators publish manifests out of order.
+    fn save_state_locked(&self, segments: &[ManagedSegmentInfo]) -> Result<()> {
+        let manifest = SegmentManifest {
+            version: MANIFEST_VERSION,
+            next_segment_id: *self.next_segment_id.read(),
+            last_wal_seq: self.last_wal_seq.load(Ordering::Acquire),
+            segments: segments.to_vec(),
+        };
+        let json = serde_json::to_vec(&manifest)
+            .map_err(|e| LaurusError::index(format!("failed to serialize manifest: {e}")))?;
+
+        // `write_bytes` records the payload's CRC-32 and `close` writes it as
+        // the file trailer; the reader verifies it via `verify_checksum`.
+        let output = self.storage.create_output(MANIFEST_TMP_FILE)?;
+        let mut writer = StructWriter::new(output);
+        writer.write_bytes(&json)?;
+        writer.close()?;
+
+        self.storage.rename_file(MANIFEST_TMP_FILE, MANIFEST_FILE)?;
+        // Make the rename durable/visible (directory metadata) before the
+        // caller treats the new manifest as published.
+        self.storage.sync()?;
+        Ok(())
+    }
+
+    /// Persist the current manifest state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serializing or writing the manifest fails; the
+    /// previously published manifest stays intact (atomic rename).
     pub fn save_state(&self) -> Result<()> {
         let segments = self.segments.read();
-        let content = serde_json::to_vec_pretty(&*segments)?;
+        self.save_state_locked(&segments)
+    }
 
-        let mut writer = self.storage.create_output("segments.json")?;
-        writer.write_all(&content)?;
-        writer.flush()?;
+    /// Record the last applied WAL sequence number; persisted by the next
+    /// save (see [`SegmentManifest::last_wal_seq`]).
+    pub fn set_last_wal_seq(&self, seq: u64) {
+        self.last_wal_seq.store(seq, Ordering::Release);
+    }
 
-        Ok(())
+    /// Last WAL sequence number recorded in the manifest.
+    pub fn last_wal_seq(&self) -> u64 {
+        self.last_wal_seq.load(Ordering::Acquire)
+    }
+
+    /// Best-effort sweep of files that belong to no registered segment.
+    ///
+    /// Only touches names this manager itself generates
+    /// (`segment_NNNNNN.hnsw` plus its `.hnsw.f32` / `.delmap` sidecars and
+    /// `.hnsw.tmp` staging files) and the manifest temp file, so foreign
+    /// files — e.g. a monolithic `vector_index.hnsw` in the same directory —
+    /// are never affected. Runs only after a successful manifest load.
+    fn cleanup_orphans(&self) {
+        let Ok(files) = self.storage.list_files() else {
+            return;
+        };
+        let segments = self.segments.read();
+        for file in files {
+            if file == MANIFEST_TMP_FILE {
+                let _ = self.storage.delete_file(&file);
+                continue;
+            }
+            // Strip a known suffix; skip files that are not segment-shaped.
+            let Some(stem) = file
+                .strip_suffix(".hnsw.tmp")
+                .or_else(|| file.strip_suffix(".hnsw.f32"))
+                .or_else(|| file.strip_suffix(".delmap"))
+                .or_else(|| file.strip_suffix(".hnsw"))
+            else {
+                continue;
+            };
+            let Some(ordinal) = stem.strip_prefix("segment_") else {
+                continue;
+            };
+            if ordinal.is_empty() || !ordinal.bytes().all(|b| b.is_ascii_digit()) {
+                continue;
+            }
+            if !segments.iter().any(|s| s.segment_id == stem) {
+                let _ = self.storage.delete_file(&file);
+            }
+        }
     }
 
     /// Add a new segment.
-    pub fn add_segment(&self, info: ManagedSegmentInfo) -> Result<()> {
+    ///
+    /// Fills in bookkeeping metadata the caller did not provide (#879):
+    /// a zero `size_bytes` is replaced by the on-storage size of the segment
+    /// file plus its sidecars, and a zero `generation` is stamped with the
+    /// next generation after the currently registered maximum — both feed
+    /// the metadata-driven merge policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if persisting the manifest fails.
+    pub fn add_segment(&self, mut info: ManagedSegmentInfo) -> Result<()> {
+        if info.size_bytes == 0 {
+            info.size_bytes = self.measure_segment_size(&info.segment_id);
+        }
         let mut segments = self.segments.write();
+        if info.generation == 0 {
+            info.generation = segments.iter().map(|s| s.generation).max().unwrap_or(0) + 1;
+        }
         segments.push(info);
-        drop(segments);
-        self.save_state()
+        self.save_state_locked(&segments)
+    }
+
+    /// Sum the on-storage sizes of a segment's file and sidecars.
+    fn measure_segment_size(&self, segment_id: &str) -> u64 {
+        [
+            format!("{segment_id}.hnsw"),
+            format!("{segment_id}.hnsw.f32"),
+            format!("{segment_id}.delmap"),
+        ]
+        .iter()
+        .filter_map(|name| self.storage.file_size(name).ok())
+        .sum()
     }
 
     /// Remove a segment.
@@ -231,19 +432,20 @@ impl SegmentManager {
         let mut segments = self.segments.write();
         if let Some(pos) = segments.iter().position(|s| s.segment_id == segment_id) {
             segments.remove(pos);
-            drop(segments);
-            self.save_state()
+            self.save_state_locked(&segments)
         } else {
             Ok(())
         }
     }
 
-    /// Delete physical files associated with a segment.
+    /// Delete physical files associated with a segment, including its
+    /// rerank sidecar (`.hnsw.f32`) and deletion bitmap (`.delmap`) —
+    /// leaving them behind orphans storage after every merge (#879).
     pub fn delete_segment_files(&self, segment_id: &str) -> Result<()> {
-        // HNSW index writer uses segment_id.hnsw as the file name
-        let file_name = format!("{}.hnsw", segment_id);
-        // Best effort deletion - ignore if file doesn't exist
-        let _ = self.storage.delete_file(&file_name);
+        // Best effort deletion - ignore if a file doesn't exist
+        let _ = self.storage.delete_file(&format!("{segment_id}.hnsw"));
+        let _ = self.storage.delete_file(&format!("{segment_id}.hnsw.f32"));
+        let _ = self.storage.delete_file(&format!("{segment_id}.delmap"));
         Ok(())
     }
 
@@ -256,8 +458,7 @@ impl SegmentManager {
         {
             segments[idx] = info;
         }
-        drop(segments);
-        self.save_state()
+        self.save_state_locked(&segments)
     }
 
     /// Get segment information.
@@ -318,9 +519,9 @@ impl SegmentManager {
         // 2. Add new segment
         segments_lock.push(merged_segment);
 
-        // 3. Save state
+        // 3. Save state (lock held — see `save_state_locked`)
+        self.save_state_locked(&segments_lock)?;
         drop(segments_lock);
-        self.save_state()?;
 
         // 4. Cleanup physical files of source segments
         for segment in candidate.segments {
@@ -472,6 +673,286 @@ mod tests {
             assert_eq!(segments.len(), 1);
             assert_eq!(segments[0].segment_id, "segment_000000");
         }
+    }
+
+    /// #879: the versioned manifest round-trips segments, the ID counter,
+    /// and the WAL checkpoint through save + reload.
+    #[test]
+    fn test_versioned_manifest_round_trip() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        {
+            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            let id0 = manager.generate_segment_id();
+            let id1 = manager.generate_segment_id();
+            manager
+                .add_segment(ManagedSegmentInfo::new(id0, 100, 0, 0))
+                .unwrap();
+            manager
+                .add_segment(ManagedSegmentInfo::new(id1.clone(), 200, 100, 0))
+                .unwrap();
+            manager.set_last_wal_seq(42);
+            // Remove the highest-numbered segment: the persisted counter must
+            // still prevent its ID from being reused after reload.
+            manager.remove_segment(&id1).unwrap();
+            manager.save_state().unwrap();
+        }
+
+        {
+            let manager = SegmentManager::new(config, storage).unwrap();
+            let segments = manager.list_segments();
+            assert_eq!(segments.len(), 1);
+            assert_eq!(segments[0].segment_id, "segment_000000");
+            assert_eq!(manager.last_wal_seq(), 42, "WAL checkpoint must persist");
+            assert_eq!(
+                manager.generate_segment_id(),
+                "segment_000002",
+                "the persisted counter must win over the max-scan (no ID reuse)"
+            );
+        }
+    }
+
+    /// #879: the legacy bare-JSON-array manifest still loads and is upgraded
+    /// to the versioned format by the next save.
+    #[test]
+    fn test_legacy_manifest_loads_and_upgrades() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        // Hand-write the pre-#879 format: a bare pretty JSON array.
+        let legacy = serde_json::to_vec_pretty(&vec![create_info("segment_000007", 100)]).unwrap();
+        {
+            let mut out = storage.create_output("segments.json").unwrap();
+            std::io::Write::write_all(&mut out, &legacy).unwrap();
+            out.close().unwrap();
+        }
+
+        let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+        assert_eq!(manager.list_segments().len(), 1);
+        assert_eq!(
+            manager.generate_segment_id(),
+            "segment_000008",
+            "legacy load must derive the counter from the max scan"
+        );
+
+        // A save upgrades the file; a reload parses the versioned format.
+        manager.save_state().unwrap();
+        let manager = SegmentManager::new(config, storage).unwrap();
+        assert_eq!(manager.list_segments().len(), 1);
+        assert_eq!(manager.list_segments()[0].segment_id, "segment_000007");
+    }
+
+    /// #879: a corrupted manifest fails the open loudly — silently starting
+    /// empty would orphan (and then sweep) every live segment.
+    #[test]
+    fn test_corrupted_manifest_fails_open() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        {
+            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            manager
+                .add_segment(create_info("segment_000000", 100))
+                .unwrap();
+        }
+
+        // Flip one byte inside the JSON payload (skip the length prefix).
+        let mut content = Vec::new();
+        {
+            let mut input = storage.open_input("segments.json").unwrap();
+            input.read_to_end(&mut content).unwrap();
+        }
+        let mid = content.len() / 2;
+        content[mid] ^= 0xFF;
+        {
+            let mut out = storage.create_output("segments.json").unwrap();
+            std::io::Write::write_all(&mut out, &content).unwrap();
+            out.close().unwrap();
+        }
+
+        assert!(
+            SegmentManager::new(config, storage).is_err(),
+            "a corrupted manifest must fail the open, not silently start empty"
+        );
+    }
+
+    /// #879: the CRC verify itself is load-bearing — corrupting only the
+    /// trailer (payload still valid JSON) must fail the open.
+    #[test]
+    fn test_crc_trailer_mismatch_fails_open() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        {
+            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            manager
+                .add_segment(create_info("segment_000000", 100))
+                .unwrap();
+        }
+
+        let mut content = Vec::new();
+        {
+            let mut input = storage.open_input("segments.json").unwrap();
+            input.read_to_end(&mut content).unwrap();
+        }
+        // Flip a bit in the 4-byte CRC trailer only — the JSON payload stays
+        // intact, so only the checksum comparison can catch this.
+        let last = content.len() - 1;
+        content[last] ^= 0x01;
+        {
+            let mut out = storage.create_output("segments.json").unwrap();
+            std::io::Write::write_all(&mut out, &content).unwrap();
+            out.close().unwrap();
+        }
+
+        let err = SegmentManager::new(config, storage).unwrap_err();
+        assert!(
+            err.to_string().contains("checksum mismatch"),
+            "the CRC verify must reject a trailer-only corruption, got: {err}"
+        );
+    }
+
+    /// #879: a torn manifest write (garbage left in the staging file) must
+    /// not affect the published manifest; the temp file is swept on open.
+    #[test]
+    fn test_torn_manifest_write_survives() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        {
+            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            manager
+                .add_segment(create_info("segment_000000", 100))
+                .unwrap();
+        }
+        // Simulate a crash mid-save: garbage staged, rename never happened.
+        {
+            let mut out = storage.create_output("segments.json.tmp").unwrap();
+            std::io::Write::write_all(&mut out, b"\x00garbage").unwrap();
+            out.close().unwrap();
+        }
+
+        let manager = SegmentManager::new(config, storage.clone()).unwrap();
+        assert_eq!(
+            manager.list_segments().len(),
+            1,
+            "published manifest intact"
+        );
+        assert!(
+            !storage.file_exists("segments.json.tmp"),
+            "the torn staging file must be swept on open"
+        );
+    }
+
+    /// #879: files belonging to no registered segment are swept on open;
+    /// foreign files (e.g. a monolithic index in the same directory) are
+    /// never touched.
+    #[test]
+    fn test_orphan_sweep_spares_foreign_files() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        let write = |name: &str| {
+            let mut out = storage.create_output(name).unwrap();
+            std::io::Write::write_all(&mut out, b"x").unwrap();
+            out.close().unwrap();
+        };
+
+        {
+            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            manager
+                .add_segment(create_info("segment_000000", 100))
+                .unwrap();
+        }
+        // Registered segment's files: must survive.
+        write("segment_000000.hnsw");
+        write("segment_000000.hnsw.f32");
+        // Orphans from a torn flush: must be swept.
+        write("segment_000042.hnsw");
+        write("segment_000042.hnsw.f32");
+        write("segment_000042.delmap");
+        write("segment_000042.hnsw.tmp");
+        // Foreign files: must never be touched.
+        write("vector_index.hnsw");
+        write("not_a_segment.hnsw");
+
+        let _manager = SegmentManager::new(config, storage.clone()).unwrap();
+        assert!(storage.file_exists("segment_000000.hnsw"));
+        assert!(storage.file_exists("segment_000000.hnsw.f32"));
+        assert!(!storage.file_exists("segment_000042.hnsw"), "orphan swept");
+        assert!(!storage.file_exists("segment_000042.hnsw.f32"));
+        assert!(!storage.file_exists("segment_000042.delmap"));
+        assert!(!storage.file_exists("segment_000042.hnsw.tmp"));
+        assert!(storage.file_exists("vector_index.hnsw"), "foreign spared");
+        assert!(storage.file_exists("not_a_segment.hnsw"), "foreign spared");
+    }
+
+    /// #879: deleting a segment's files removes the rerank sidecar and the
+    /// deletion bitmap along with the index file.
+    #[test]
+    fn test_delete_segment_files_includes_sidecars() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let manager = SegmentManager::new(config, storage.clone()).unwrap();
+
+        for name in [
+            "segment_000001.hnsw",
+            "segment_000001.hnsw.f32",
+            "segment_000001.delmap",
+        ] {
+            let mut out = storage.create_output(name).unwrap();
+            std::io::Write::write_all(&mut out, b"x").unwrap();
+            out.close().unwrap();
+        }
+
+        manager.delete_segment_files("segment_000001").unwrap();
+        assert!(!storage.file_exists("segment_000001.hnsw"));
+        assert!(
+            !storage.file_exists("segment_000001.hnsw.f32"),
+            "sidecar GC"
+        );
+        assert!(!storage.file_exists("segment_000001.delmap"), "delmap GC");
+    }
+
+    /// #879: `add_segment` stamps a zero generation with max+1 and measures a
+    /// zero `size_bytes` from storage — the merge policy's inputs are real.
+    #[test]
+    fn test_add_segment_fills_metadata() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let manager = SegmentManager::new(config, storage.clone()).unwrap();
+
+        {
+            let mut out = storage.create_output("segment_000000.hnsw").unwrap();
+            std::io::Write::write_all(&mut out, &[0u8; 128]).unwrap();
+            out.close().unwrap();
+        }
+
+        manager
+            .add_segment(ManagedSegmentInfo::new(
+                "segment_000000".to_string(),
+                10,
+                0,
+                0,
+            ))
+            .unwrap();
+        manager
+            .add_segment(ManagedSegmentInfo::new(
+                "segment_000001".to_string(),
+                10,
+                10,
+                0,
+            ))
+            .unwrap();
+
+        let segments = manager.list_segments();
+        assert_eq!(segments[0].generation, 1, "zero generation stamped");
+        assert_eq!(segments[1].generation, 2, "monotonically increasing");
+        assert_eq!(
+            segments[0].size_bytes, 128,
+            "zero size_bytes measured from storage"
+        );
     }
 
     #[test]
