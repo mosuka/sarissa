@@ -440,6 +440,18 @@ pub struct HnswIndexConfig {
     #[serde(default)]
     pub default_ef_search: Option<usize>,
 
+    /// Whether this index uses the segment-per-commit layout (Issue #634).
+    ///
+    /// When `true`, each commit seals the newly added vectors as an
+    /// immutable per-segment `.hnsw` file registered in an atomic
+    /// `segments.json` manifest, instead of rewriting one monolithic file —
+    /// turning the per-commit cost from O(index) to O(new docs). Defaults to
+    /// `false` (the monolithic layout). Introduced dark in #881; the
+    /// production default flips in #882 together with the zero-copy legacy
+    /// migration.
+    #[serde(default)]
+    pub segmented: bool,
+
     /// Maximum number of vectors per segment.
     pub max_vectors_per_segment: u64,
 
@@ -513,6 +525,7 @@ impl Default for HnswIndexConfig {
             m: 16,
             ef_construction: 200,
             default_ef_search: None,
+            segmented: false,
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             quantization_method: quantization::QuantizationMethod::Scalar8Bit,
