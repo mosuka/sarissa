@@ -5,6 +5,7 @@ pub mod maintenance;
 pub mod reader;
 pub mod searcher;
 pub mod segment;
+pub mod segmented;
 pub mod writer;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -84,6 +84,17 @@ impl VectorIndexFactory {
                 Ok(Box::new(index))
             }
             VectorIndexTypeConfig::HNSW(hnsw_config) => {
+                if hnsw_config.segmented {
+                    // Segment-per-commit layout (#634 / #881), introduced
+                    // dark: `segmented` defaults to false.
+                    let index =
+                        crate::vector::index::hnsw::segmented::SegmentedHnswIndex::open_or_create(
+                            storage,
+                            name,
+                            hnsw_config,
+                        )?;
+                    return Ok(Box::new(index));
+                }
                 let index = HnswIndex::create(storage, name, hnsw_config)?;
                 Ok(Box::new(index))
             }
