@@ -531,39 +531,42 @@ fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
     let index = HnswIndex::create(storage.clone(), "pq_round_trip", config.clone())?;
     let mut writer = index.writer()?;
 
-    // Two widely-separated clusters with multiple points each. PQ trains a
-    // per-sub-vector k-means codebook; a tiny corpus (e.g. 5 points) makes
-    // the codebook degenerate, and platform-dependent f32 reduction order in
-    // k-means can then flip a near/far quantisation code, occasionally
-    // pulling a far-cluster doc into the top-k (issue #730 — flaked on
-    // x86_64). Using a denser corpus and a much larger cluster separation
-    // keeps the quantiser stable across platforms: the far cluster is so
-    // distant that no quantisation error can place it among the near
-    // neighbours.
+    // Two widely-separated clusters with 128 points each — 256 total,
+    // meeting the PQ min-train threshold (#880: segments with fewer vectors
+    // than the 256 k-means centroids are written as Scalar8Bit, so a
+    // smaller corpus would silently stop exercising the PQ path this test
+    // exists for). The large cluster separation keeps the quantiser stable
+    // across platforms (issue #730: platform-dependent f32 reduction order
+    // in k-means could otherwise flip a near/far quantisation code).
     //
-    // Near cluster (doc_ids 1..=8) sits around (10, 10, 20, 20); far cluster
-    // (doc_ids 9..=16) sits around (-100, -100, -200, -200).
-    let near_offsets = [
-        [0.0, 0.0, 0.0, 0.0],
-        [0.1, 0.1, 0.1, 0.1],
-        [-0.1, -0.1, -0.1, -0.1],
-        [0.2, -0.2, 0.2, -0.2],
-        [-0.2, 0.2, -0.2, 0.2],
-        [0.05, 0.05, -0.05, -0.05],
-        [-0.05, -0.05, 0.05, 0.05],
-        [0.15, -0.1, 0.1, -0.15],
-    ];
+    // Near cluster (doc_ids 1..=128) sits around (10, 10, 20, 20); far
+    // cluster (doc_ids 129..=256) sits around (-100, -100, -200, -200).
+    const POINTS_PER_CLUSTER: usize = 128;
+    let offset = |i: usize| -> [f32; 4] {
+        [
+            ((i % 8) as f32) * 0.04 - 0.14,
+            ((i / 8 % 8) as f32) * 0.04 - 0.14,
+            ((i / 64 % 8) as f32) * 0.04 - 0.14,
+            ((i % 16) as f32) * 0.04 - 0.32,
+        ]
+    };
     let near_base = [10.0_f32, 10.0, 20.0, 20.0];
     let far_base = [-100.0_f32, -100.0, -200.0, -200.0];
 
-    let mut vectors = Vec::with_capacity(16);
-    for (i, off) in near_offsets.iter().enumerate() {
-        let v: Vec<f32> = near_base.iter().zip(off).map(|(b, o)| b + o).collect();
+    let mut vectors = Vec::with_capacity(2 * POINTS_PER_CLUSTER);
+    for i in 0..POINTS_PER_CLUSTER {
+        let off = offset(i);
+        let v: Vec<f32> = near_base.iter().zip(&off).map(|(b, o)| b + o).collect();
         vectors.push(((i + 1) as u64, "embedding".to_string(), Vector::new(v)));
     }
-    for (i, off) in near_offsets.iter().enumerate() {
-        let v: Vec<f32> = far_base.iter().zip(off).map(|(b, o)| b + o).collect();
-        vectors.push(((i + 9) as u64, "embedding".to_string(), Vector::new(v)));
+    for i in 0..POINTS_PER_CLUSTER {
+        let off = offset(i);
+        let v: Vec<f32> = far_base.iter().zip(&off).map(|(b, o)| b + o).collect();
+        vectors.push((
+            (i + 1 + POINTS_PER_CLUSTER) as u64,
+            "embedding".to_string(),
+            Vector::new(v),
+        ));
     }
 
     writer.build(vectors.clone())?;
@@ -574,9 +577,9 @@ fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
     let searcher = HnswSearcher::new(reader)?;
 
     // Query at the near cluster centre — every top-3 result must come from
-    // the near cluster (doc_ids 1..=8), never the far cluster (9..=16).
-    // The exact ordering within the near cluster is not asserted because PQ
-    // is approximate; only cluster membership is guaranteed by the large
+    // the near cluster (doc_ids 1..=128), never the far cluster. The exact
+    // ordering within the near cluster is not asserted because PQ is
+    // approximate; only cluster membership is guaranteed by the large
     // separation.
     let query = Vector::new(vec![10.0, 10.0, 20.0, 20.0]);
     let request = VectorIndexQuery::new(query)
@@ -587,8 +590,8 @@ fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
     let ids: std::collections::HashSet<u64> = results.results.iter().map(|r| r.doc_id).collect();
     for id in &ids {
         assert!(
-            (1..=8).contains(id),
-            "top-3 must all be near-cluster doc_ids (1..=8); got {ids:?}",
+            (1..=POINTS_PER_CLUSTER as u64).contains(id),
+            "top-3 must all be near-cluster doc_ids (1..=128); got {ids:?}",
         );
     }
     Ok(())

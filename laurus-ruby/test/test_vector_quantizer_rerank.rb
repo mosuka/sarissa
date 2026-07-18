@@ -64,7 +64,16 @@ class TestVectorQuantizerRerank < Minitest::Test
       distance: "euclidean", quantizer: "product_quantization", subvector_count: 2
     )
     idx = Laurus::Index.new(schema: schema)
-    NEAR_OFFSETS.each_with_index do |off, i|
+    # 128 points per cluster (256 total) so the segment meets the PQ
+    # min-train threshold (#880: smaller PQ-configured segments are written
+    # as Scalar8Bit and would not exercise PQ training at all).
+    128.times do |i|
+      off = [
+        (i % 8) * 0.04 - 0.14,
+        ((i / 8) % 8) * 0.04 - 0.14,
+        ((i / 64) % 8) * 0.04 - 0.14,
+        (i % 16) * 0.04 - 0.32
+      ]
       idx.put_document("near#{i}", { "embedding" => NEAR_BASE.map.with_index { |b, j| b + off[j] } })
       idx.put_document("far#{i}", { "embedding" => FAR_BASE.map.with_index { |b, j| b + off[j] } })
     end

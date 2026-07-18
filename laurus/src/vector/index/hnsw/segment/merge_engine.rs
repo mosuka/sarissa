@@ -57,6 +57,12 @@ pub struct MergeStats {
     /// Number of deleted vectors removed.
     pub deletions_removed: u64,
 
+    /// Number of stale cross-segment duplicates removed — copies of a
+    /// `(doc_id, field)` key shadowed by a newer segment's copy
+    /// (Issue #880). Defaults to 0 when deserializing older stats.
+    #[serde(default)]
+    pub duplicates_removed: u64,
+
     /// Time taken for merge (in milliseconds).
     pub merge_time_ms: u64,
 
@@ -71,6 +77,7 @@ impl MergeStats {
             segments_merged: 0,
             vectors_merged: 0,
             deletions_removed: 0,
+            duplicates_removed: 0,
             merge_time_ms: 0,
             merged_size_bytes: 0,
         }
@@ -137,11 +144,13 @@ impl MergeEngine {
 
     /// Merge multiple segments into a single segment.
     ///
-    /// This is a simplified implementation. In a real system, this would:
-    /// - Read vectors from all source segments
-    /// - Filter out deleted vectors
-    /// - Write merged vectors to new segment
-    /// - Update segment metadata
+    /// Reads every live vector from the source segments (deletion-filtered
+    /// via the configured bitmap, losslessly sourced from the f32 rerank
+    /// sidecar when present — Issue #795), deduplicates cross-segment
+    /// duplicates of the same `(doc_id, field)` with **newest-generation
+    /// wins** semantics (Issue #880 — same-id upserts replayed from the WAL
+    /// land in newer segments and must shadow the stale copies), and writes
+    /// the survivors into a new segment.
     pub fn merge_segments(
         &self,
         segments: Vec<ManagedSegmentInfo>,
@@ -154,20 +163,27 @@ impl MergeEngine {
         #[allow(unused_assignments)]
         let mut vectors_merged = 0;
         let mut deletions_removed = 0;
+        let mut duplicates_removed = 0u64;
         #[allow(unused_assignments)]
         let mut total_size = segments.iter().map(|s| s.size_bytes).sum::<u64>();
 
         let mut all_vectors: Vec<(u64, String, Vector)> = Vec::new();
 
-        // 1. Read all vectors from source segments
-        for segment in &segments {
+        // Newest generation FIRST, so the first occurrence of a
+        // `(doc_id, field)` key is the authoritative (newest) copy and every
+        // later one is a stale duplicate (Issue #880).
+        let mut sources = segments.clone();
+        sources.sort_by_key(|s| std::cmp::Reverse(s.generation));
+        let mut seen: std::collections::HashSet<(u64, String)> = std::collections::HashSet::new();
+
+        // 1. Read all live vectors from source segments (newest first)
+        for segment in &sources {
             // Note: HnswIndexReader::load expects path without extension
             let reader = HnswIndexReader::load(
                 self.storage.clone(),
                 &segment.segment_id,
                 self.index_config.distance_metric,
             )?;
-            // vectors_merged += reader.vector_count() as u64;
 
             // Issue #795: prefer the source segment's original f32 rerank
             // sidecar (lossless) over the int8-dequantized iterator value,
@@ -184,6 +200,11 @@ impl MergeEngine {
                     && bitmap.is_deleted(doc_id)
                 {
                     deletions_removed += 1;
+                    continue;
+                }
+                if !seen.insert((doc_id, field.clone())) {
+                    // A newer segment already contributed this key.
+                    duplicates_removed += 1;
                     continue;
                 }
                 let vector = match rerank_pool
@@ -219,7 +240,15 @@ impl MergeEngine {
             segment_id: new_segment_id,
             vector_count: vectors_merged,
             vector_offset: 0,
-            generation: segments.iter().map(|s| s.generation).max().unwrap_or(0) + 1,
+            // The merged output represents data no newer than its newest
+            // source, so it inherits max(source generations) — NOT max+1
+            // (Issue #880): with +1 a merge over non-adjacent sources would
+            // out-rank untouched newer segments, laundering a stale copy
+            // from an old source above a genuinely newer one under the
+            // newest-generation-wins dedup. Generations are unique (stamped
+            // max+1 at flush) and the sources are removed with the merge, so
+            // inheriting the maximum cannot collide with a live segment.
+            generation: segments.iter().map(|s| s.generation).max().unwrap_or(0),
             has_deletions: false,
             size_bytes: total_size,
         };
@@ -228,6 +257,7 @@ impl MergeEngine {
             segments_merged,
             vectors_merged,
             deletions_removed,
+            duplicates_removed,
             merge_time_ms,
             merged_size_bytes: total_size,
         };
@@ -237,32 +267,6 @@ impl MergeEngine {
             stats,
             merged_segment_ids: segments.iter().map(|s| s.segment_id.clone()).collect(),
         })
-    }
-
-    /// Merge vectors from multiple sources.
-    ///
-    /// This helper method would be used during actual merge operations.
-    #[allow(dead_code)]
-    fn merge_vectors(
-        &self,
-        vectors: Vec<Vec<(u64, Vector)>>,
-        deleted_ids: &[u64],
-    ) -> Vec<(u64, Vector)> {
-        // Flatten all vectors (later segments = newer data)
-        let mut all_vectors: Vec<(u64, Vector)> = vectors.into_iter().flatten().collect();
-
-        // Filter out deleted vectors
-        all_vectors.retain(|(id, _)| !deleted_ids.contains(id));
-
-        // Reverse so that newer entries (from later segments) come first.
-        // Stable sort then preserves this order for equal keys.
-        all_vectors.reverse();
-        all_vectors.sort_by_key(|(id, _)| *id);
-
-        // dedup_by_key keeps the first of each group = newest vector
-        all_vectors.dedup_by_key(|(id, _)| *id);
-
-        all_vectors
     }
 
     /// Get storage reference.
@@ -319,6 +323,7 @@ mod tests {
             segments_merged: 3,
             vectors_merged: 1000,
             deletions_removed: 200,
+            duplicates_removed: 0,
             merge_time_ms: 100,
             merged_size_bytes: 102400,
         };

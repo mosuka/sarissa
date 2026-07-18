@@ -287,6 +287,38 @@ impl SegmentManager {
         let mut segments = self.segments.write();
         *segments = segments_info;
 
+        // Zero generations in a loaded manifest need stamping, or the
+        // newest-generation-wins dedup ordering is meaningless (Issue #880).
+        // Two populations exist:
+        // - Legacy all-zero manifests (pre-#879 nothing stamped): list
+        //   position is flush order, so stamp 1..N in list order.
+        // - MIXED manifests (stamped flush segments + a zero-generation
+        //   merged segment from the brief window where `apply_merge` did
+        //   not stamp): the zero entry's true age is unrecoverable, so
+        //   stamp it BELOW every stamped generation (shift the stamped ones
+        //   up). Treating it as oldest is the loss-minimizing direction —
+        //   stamping it newest would let a stale copy inside it claim the
+        //   `(doc_id, field)` key at the next merge and physically drop the
+        //   genuinely newer copy.
+        let zero_count = segments.iter().filter(|s| s.generation == 0).count() as u64;
+        if zero_count > 0 {
+            let all_zero = zero_count == segments.len() as u64;
+            if !all_zero {
+                for segment in segments.iter_mut() {
+                    if segment.generation != 0 {
+                        segment.generation += zero_count;
+                    }
+                }
+            }
+            let mut next = 0u64;
+            for segment in segments.iter_mut() {
+                if segment.generation == 0 {
+                    next += 1;
+                    segment.generation = next;
+                }
+            }
+        }
+
         // The persisted counter wins over the max-scan, but never goes
         // backwards: a merged-away highest segment must not cause ID reuse.
         let max_id = segments
@@ -449,6 +481,35 @@ impl SegmentManager {
         Ok(())
     }
 
+    /// Flag every registered segment as containing deletions (Issue #880).
+    ///
+    /// The vector-side [`ManagedSegmentInfo`] carries no per-segment doc-id
+    /// range, so a delete that may target a sealed segment cannot be
+    /// attributed to a specific one; flagging all of them is conservative
+    /// but correct — the flag only feeds the merge policy's prioritization,
+    /// while actual filtering always goes through the shared deletion
+    /// bitmap. Saves the manifest once (not per segment). No-op when every
+    /// segment is already flagged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if persisting the manifest fails.
+    pub fn mark_all_has_deletions(&self) -> Result<()> {
+        let mut segments = self.segments.write();
+        let mut changed = false;
+        for segment in segments.iter_mut() {
+            if !segment.has_deletions {
+                segment.has_deletions = true;
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_state_locked(&segments)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Update a segment info.
     pub fn update_segment(&self, info: ManagedSegmentInfo) -> Result<()> {
         let mut segments = self.segments.write();
@@ -506,8 +567,11 @@ impl SegmentManager {
     pub fn apply_merge(
         &self,
         candidate: MergeCandidate,
-        merged_segment: ManagedSegmentInfo,
+        mut merged_segment: ManagedSegmentInfo,
     ) -> Result<()> {
+        // Replace the engine's estimated size with the on-storage size of
+        // the merged segment file + sidecars (mirrors `add_segment`, #879).
+        merged_segment.size_bytes = self.measure_segment_size(&merged_segment.segment_id);
         let mut segments_lock = self.segments.write();
 
         // 1. Remove source segments
@@ -774,6 +838,72 @@ mod tests {
         assert!(
             SegmentManager::new(config, storage).is_err(),
             "a corrupted manifest must fail the open, not silently start empty"
+        );
+    }
+
+    /// #880: legacy manifests carry all-zero generations; the load stamps
+    /// them in list order (flush order = age) so newest-generation-wins
+    /// dedup has a meaningful ordering.
+    #[test]
+    fn test_legacy_zero_generations_are_stamped_in_list_order() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        // Hand-write the pre-#879 format with generation 0 everywhere.
+        let mut a = create_info("segment_000000", 100);
+        a.generation = 0;
+        let mut b = create_info("segment_000001", 100);
+        b.generation = 0;
+        let legacy = serde_json::to_vec_pretty(&vec![a, b]).unwrap();
+        {
+            let mut out = storage.create_output("segments.json").unwrap();
+            std::io::Write::write_all(&mut out, &legacy).unwrap();
+            out.close().unwrap();
+        }
+
+        let manager = SegmentManager::new(config, storage).unwrap();
+        let segments = manager.list_segments();
+        assert_eq!(segments[0].generation, 1, "stamped in list order");
+        assert_eq!(segments[1].generation, 2, "monotone with position");
+    }
+
+    /// #880: a MIXED manifest (stamped flush segments + a zero-generation
+    /// merged segment from the pre-#880 `apply_merge`) stamps the zero
+    /// entry as the OLDEST — its true age is unrecoverable, and treating it
+    /// as newest would let a stale copy inside it physically drop a newer
+    /// copy at the next merge.
+    #[test]
+    fn test_mixed_manifest_zero_generation_stamped_oldest() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        let mut flushed = create_info("segment_000002", 100);
+        flushed.generation = 5;
+        let mut merged = create_info("segment_000003", 100);
+        merged.generation = 0;
+        let legacy = serde_json::to_vec_pretty(&vec![flushed, merged]).unwrap();
+        {
+            let mut out = storage.create_output("segments.json").unwrap();
+            std::io::Write::write_all(&mut out, &legacy).unwrap();
+            out.close().unwrap();
+        }
+
+        let manager = SegmentManager::new(config, storage).unwrap();
+        let segments = manager.list_segments();
+        let gen_of = |id: &str| {
+            segments
+                .iter()
+                .find(|s| s.segment_id == id)
+                .unwrap()
+                .generation
+        };
+        assert!(
+            gen_of("segment_000003") < gen_of("segment_000002"),
+            "the zero-generation merged segment must be stamped OLDEST, got {:?}",
+            segments
+                .iter()
+                .map(|s| (s.segment_id.clone(), s.generation))
+                .collect::<Vec<_>>()
         );
     }
 
