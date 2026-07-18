@@ -469,6 +469,15 @@ trades on-disk compression for higher recall — Issue #481 Stage 3
 ships only the 8-bit (K = 256) variant; the on-disk format reserves
 a 4-bit (K = 16) slot for a future PR.
 
+**Minimum training size**: PQ trains `K = 256` k-means centroids per
+sub-quantizer, so a segment with fewer than 256 vectors cannot train a
+meaningful codebook. Such segments are written as **Scalar8Bit**
+instead (the `LVS1` header is self-describing, so readers dispatch on
+the stored kind transparently); once the segment grows — or is merged
+into a larger one — the next write trains PQ as configured. The
+`subvector_count`-divides-`dimension` validation still applies
+regardless of segment size.
+
 #### On-disk format
 
 PQ segments use the same `LVS1` header as Scalar8Bit (`quant_kind =

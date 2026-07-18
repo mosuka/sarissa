@@ -45,51 +45,29 @@ impl MergePolicy for SimpleMergePolicy {
             return None;
         }
 
-        // Strategy:
-        // 1. Sort segments by generation (oldest first)? Or just use existing order (usually chronological)?
-        //    ManagedSegmentInfo doesn't imply order, but SegmentManager keeps them in Vec.
-        // 2. Look for sequence of segments that are candidates.
-        // 3. Simple approach: Pick the smallest segments to merge.
-
-        // Let's try finding the "best" window of segments to merge.
-        // We want to merge `merge_factor` segments.
-
         let merge_factor = config.merge_factor as usize;
         if segments.len() < merge_factor {
             return None;
         }
 
-        // Find a window of `merge_factor` segments with the smallest total size?
-        // Or smallest vector count.
+        // Generation-CONTIGUOUS window selection (Issue #880): the merged
+        // segment inherits max(source generations), which is only correct
+        // when no non-source segment's generation lies inside the sources'
+        // generation range — a stale copy from an old source would otherwise
+        // be laundered above that segment under newest-generation-wins
+        // dedup. Picking the N globally-smallest segments (the previous
+        // strategy) routinely produced non-adjacent sets, forcing the
+        // caller's gap expansion to inflate a bounded merge into a
+        // near-total rewrite. Instead, slide a window of `merge_factor`
+        // generation-adjacent segments and pick the cheapest one.
+        let mut by_generation: Vec<&ManagedSegmentInfo> = segments.iter().collect();
+        by_generation.sort_by_key(|s| s.generation);
 
-        // We only look at contiguous segments to preserve some locality/generation order if implicitly there.
-        // Merging non-adjacent segments might change logical order if that matters (it might not for vectors).
-        // But assuming we want to keep older/newer distinct if possible.
-        // For simplicity, we assume vectors are unordered collection, so any segments can merge.
-        // BUT, usually we want to merge small -> medium -> large.
+        let best = by_generation
+            .windows(merge_factor)
+            .min_by_key(|w| w.iter().map(|s| s.vector_count).sum::<u64>())?;
 
-        // Let's pick N smallest segments regardless of position?
-        // If we pick arbitrary segments, we create a new segment.
-
-        // Let's stick to "Smallest First" regardless of adjacency for now,
-        // as vector Search is global across all segments.
-
-        let mut sorted_segments: Vec<(usize, &ManagedSegmentInfo)> =
-            segments.iter().enumerate().collect();
-        sorted_segments.sort_by_key(|(_, s)| s.vector_count);
-
-        // Take top `merge_factor` smallest segments
-        let candidates: Vec<String> = sorted_segments
-            .iter()
-            .take(merge_factor)
-            .map(|(_, s)| s.segment_id.clone())
-            .collect();
-
-        if candidates.is_empty() {
-            None
-        } else {
-            Some(candidates)
-        }
+        Some(best.iter().map(|s| s.segment_id.clone()).collect())
     }
 }
 

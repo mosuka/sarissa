@@ -658,20 +658,19 @@ class LaurusTest extends TestCase
         // test_hnsw_pq_search_returns_corpus_neighbour).
         $schema->addHnswField("embedding", 4, "euclidean", 16, 200, null, null, "product_quantization", 2, null);
         $idx = new Laurus\Index(null, $schema);
-        // Stable two-cluster corpus mirroring the core (issue #730).
-        $nearOffsets = [
-            [0.0, 0.0, 0.0, 0.0],
-            [0.1, 0.1, 0.1, 0.1],
-            [-0.1, -0.1, -0.1, -0.1],
-            [0.2, -0.2, 0.2, -0.2],
-            [-0.2, 0.2, -0.2, 0.2],
-            [0.05, 0.05, -0.05, -0.05],
-            [-0.05, -0.05, 0.05, 0.05],
-            [0.15, -0.1, 0.1, -0.15],
-        ];
+        // Stable two-cluster corpus mirroring the core (issue #730), sized
+        // to 128 points per cluster (256 total) so the segment meets the PQ
+        // min-train threshold (#880: smaller PQ-configured segments are
+        // written as Scalar8Bit and would not exercise PQ training at all).
         $nearBase = [10.0, 10.0, 20.0, 20.0];
         $farBase = [-100.0, -100.0, -200.0, -200.0];
-        foreach ($nearOffsets as $i => $off) {
+        for ($i = 0; $i < 128; $i++) {
+            $off = [
+                ($i % 8) * 0.04 - 0.14,
+                (intdiv($i, 8) % 8) * 0.04 - 0.14,
+                (intdiv($i, 64) % 8) * 0.04 - 0.14,
+                ($i % 16) * 0.04 - 0.32,
+            ];
             $near = [];
             $far = [];
             foreach ($nearBase as $j => $b) {

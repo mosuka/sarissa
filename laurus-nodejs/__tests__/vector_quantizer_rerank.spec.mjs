@@ -63,25 +63,25 @@ describe("HNSW quantizer / rerankStorage options (#797)", () => {
     );
     const index = await Index.create(null, schema);
     // Stable two-cluster corpus mirroring the core's
-    // `test_hnsw_pq_search_returns_corpus_neighbour` (issue #730).
-    const nearOffsets = [
-      [0.0, 0.0, 0.0, 0.0],
-      [0.1, 0.1, 0.1, 0.1],
-      [-0.1, -0.1, -0.1, -0.1],
-      [0.2, -0.2, 0.2, -0.2],
-      [-0.2, 0.2, -0.2, 0.2],
-      [0.05, 0.05, -0.05, -0.05],
-      [-0.05, -0.05, 0.05, 0.05],
-      [0.15, -0.1, 0.1, -0.15],
+    // `test_hnsw_pq_search_returns_corpus_neighbour` (issue #730), sized to
+    // 128 points per cluster (256 total) so the segment meets the PQ
+    // min-train threshold (#880: smaller PQ-configured segments are written
+    // as Scalar8Bit and would not exercise PQ training at all).
+    const offset = (i) => [
+      (i % 8) * 0.04 - 0.14,
+      (Math.floor(i / 8) % 8) * 0.04 - 0.14,
+      (Math.floor(i / 64) % 8) * 0.04 - 0.14,
+      (i % 16) * 0.04 - 0.32,
     ];
     const nearBase = [10.0, 10.0, 20.0, 20.0];
     const farBase = [-100.0, -100.0, -200.0, -200.0];
-    for (let i = 0; i < nearOffsets.length; i++) {
+    for (let i = 0; i < 128; i++) {
+      const off = offset(i);
       await index.putDocument(`near${i}`, {
-        embedding: nearBase.map((b, j) => b + nearOffsets[i][j]),
+        embedding: nearBase.map((b, j) => b + off[j]),
       });
       await index.putDocument(`far${i}`, {
-        embedding: farBase.map((b, j) => b + nearOffsets[i][j]),
+        embedding: farBase.map((b, j) => b + off[j]),
       });
     }
     await index.commit();

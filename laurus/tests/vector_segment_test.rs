@@ -183,30 +183,29 @@ async fn test_pq_quantizer_honored_through_engine_commit() {
 
     let engine = laurus::vector::VectorStore::new(storage.clone(), collection_config).unwrap();
 
-    // 2. Commit two widely-separated clusters of 8 points each. PQ trains a
-    //    per-sub-vector k-means codebook; a tiny corpus makes the codebook
-    //    degenerate, and platform-dependent f32 reduction order can flip a
-    //    quantization code (issue #730). A denser corpus with a large cluster
-    //    separation keeps the quantizer stable across platforms. (Only the
-    //    header's quant kind is asserted here, but the stable corpus avoids
-    //    any PQ-training edge case on the write path.)
-    let near_offsets = [
-        [0.0, 0.0, 0.0, 0.0],
-        [0.1, 0.1, 0.1, 0.1],
-        [-0.1, -0.1, -0.1, -0.1],
-        [0.2, -0.2, 0.2, -0.2],
-        [-0.2, 0.2, -0.2, 0.2],
-        [0.05, 0.05, -0.05, -0.05],
-        [-0.05, -0.05, 0.05, 0.05],
-        [0.15, -0.1, 0.1, -0.15],
-    ];
+    // 2. Commit two widely-separated clusters of 128 points each — 256 in
+    //    total, matching the PQ min-train threshold (#880: segments with
+    //    fewer vectors than the 256 k-means centroids are written as
+    //    Scalar8Bit instead of training a degenerate codebook, so this test
+    //    must supply a trainable corpus to see the PQ header). The large
+    //    cluster separation keeps the quantizer stable across platforms
+    //    (platform-dependent f32 reduction order could otherwise flip a
+    //    quantization code, issue #730).
+    const POINTS_PER_CLUSTER: usize = 128;
     let near_base = [10.0_f32, 10.0, 20.0, 20.0];
     let far_base = [-100.0_f32, -100.0, -200.0, -200.0];
 
     let mut internal_id = 1u64;
     for base in [near_base, far_base] {
-        for off in &near_offsets {
-            let v: Vec<f32> = base.iter().zip(off).map(|(b, o)| b + o).collect();
+        for i in 0..POINTS_PER_CLUSTER {
+            // Deterministic small offsets in [-0.32, 0.30] per component.
+            let off = [
+                ((i % 8) as f32) * 0.04 - 0.14,
+                ((i / 8 % 8) as f32) * 0.04 - 0.14,
+                ((i / 64 % 8) as f32) * 0.04 - 0.14,
+                ((i % 16) as f32) * 0.04 - 0.32,
+            ];
+            let v: Vec<f32> = base.iter().zip(&off).map(|(b, o)| b + o).collect();
             let doc = Document::builder()
                 .add_field("vector_field", DataValue::Vector(v))
                 .build();
@@ -240,8 +239,8 @@ async fn test_pq_quantizer_honored_through_engine_commit() {
     input.read_exact(&mut num_vectors_buf).unwrap();
     assert_eq!(
         u64::from_le_bytes(num_vectors_buf),
-        16,
-        "all 16 committed vectors should land in the segment"
+        2 * POINTS_PER_CLUSTER as u64,
+        "all committed vectors should land in the segment"
     );
     // Skip dimension / m / ef_construction (3 x u32) to reach the LVS1 header.
     input.seek(SeekFrom::Current(12)).unwrap();

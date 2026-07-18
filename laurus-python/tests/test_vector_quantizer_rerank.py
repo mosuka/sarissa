@@ -63,22 +63,22 @@ def test_product_quantization_builds_and_searches():
     )
     idx = laurus.Index(schema=schema)
     # Mirror the stable two-cluster corpus from the core's
-    # `test_hnsw_pq_search_returns_corpus_neighbour` (issue #730): a dense,
-    # widely-separated pair of clusters keeps the PQ codebook stable across
-    # platforms so the near cluster is never displaced by quantization error.
-    near_offsets = [
-        [0.0, 0.0, 0.0, 0.0],
-        [0.1, 0.1, 0.1, 0.1],
-        [-0.1, -0.1, -0.1, -0.1],
-        [0.2, -0.2, 0.2, -0.2],
-        [-0.2, 0.2, -0.2, 0.2],
-        [0.05, 0.05, -0.05, -0.05],
-        [-0.05, -0.05, 0.05, 0.05],
-        [0.15, -0.1, 0.1, -0.15],
-    ]
+    # `test_hnsw_pq_search_returns_corpus_neighbour` (issue #730), sized to
+    # 128 points per cluster (256 total) so the segment meets the PQ
+    # min-train threshold (#880: smaller PQ-configured segments are written
+    # as Scalar8Bit and would not exercise PQ training at all).
+    def offset(i):
+        return [
+            (i % 8) * 0.04 - 0.14,
+            (i // 8 % 8) * 0.04 - 0.14,
+            (i // 64 % 8) * 0.04 - 0.14,
+            (i % 16) * 0.04 - 0.32,
+        ]
+
     near_base = [10.0, 10.0, 20.0, 20.0]
     far_base = [-100.0, -100.0, -200.0, -200.0]
-    for i, off in enumerate(near_offsets):
+    for i in range(128):
+        off = offset(i)
         idx.put_document(f"near{i}", {"embedding": [b + o for b, o in zip(near_base, off)]})
         idx.put_document(f"far{i}", {"embedding": [b + o for b, o in zip(far_base, off)]})
     idx.commit()

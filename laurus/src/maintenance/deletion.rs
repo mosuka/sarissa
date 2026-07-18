@@ -137,6 +137,47 @@ impl DeletionBitmap {
         Ok(newly_deleted)
     }
 
+    /// Clear a document's deletion mark (Issue #880).
+    ///
+    /// Used by the segmented vector path's same-id upsert dance: the
+    /// delete-first step marks the id so sealed-segment copies stop matching,
+    /// and the following re-add clears the mark so the *new* copy is not
+    /// shadowed by its own delete once flushed. The revived old copies are
+    /// masked by newest-generation-wins deduplication at search and removed
+    /// physically at merge.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_id` - The document ID to unmark. Must be within the
+    ///   `[min_doc_id, max_doc_id]` range of this segment.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(true)` if the document had been marked deleted, or
+    /// `Ok(false)` if it was not marked (idempotent). Returns `Err` if the
+    /// document ID is outside this segment's range.
+    pub fn undelete_document(&self, doc_id: u64) -> Result<bool> {
+        // Range check
+        if doc_id < self.min_doc_id || doc_id > self.max_doc_id {
+            return Err(LaurusError::index(format!(
+                "Document ID {doc_id} is out of range [{}, {}] for segment {}",
+                self.min_doc_id, self.max_doc_id, self.segment_id
+            )));
+        }
+
+        let mut docs = self.deleted_docs.write().unwrap();
+        // `RoaringTreemap::remove` returns `true` when the id was present.
+        let was_deleted = docs.remove(doc_id);
+        if was_deleted {
+            self.deleted_count.fetch_sub(1, Ordering::SeqCst);
+            self.last_modified
+                .store(crate::util::time::now_secs(), Ordering::SeqCst);
+            self.version.fetch_add(1, Ordering::SeqCst);
+        }
+
+        Ok(was_deleted)
+    }
+
     /// Resize the bitmap to accommodate more documents.
     pub fn resize(&self, new_size: u64) {
         self.total_docs.store(new_size, Ordering::SeqCst);

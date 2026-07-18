@@ -38,6 +38,22 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 /// Lucene's `HnswGraphBuilder` builds with `DEFAULT_RAND_SEED = 42`.
 const LEVEL_RNG_SEED: u64 = 42;
 
+/// Minimum vector count for training a PQ codebook (Issue #880).
+///
+/// PQ k-means fits 256 centroids per sub-quantizer; training on fewer
+/// vectors than centroids yields a degenerate codebook. Segments below this
+/// threshold are written as Scalar8Bit instead — the LVS1 header is
+/// self-describing, so readers dispatch on the stored kind and a later
+/// (larger) merged segment picks PQ back up automatically.
+const PQ_MIN_TRAIN_VECTORS: usize = 256;
+
+/// Minimum vector count for training a PQ FastScan codebook (Issue #880).
+///
+/// FastScan trains K=16 centroids per sub-quantizer (4-bit codes), so its
+/// degenerate-training floor is 16 — far below the PQ-256 threshold.
+#[cfg(feature = "pq-fastscan")]
+const PQ_FASTSCAN_MIN_TRAIN_VECTORS: usize = 16;
+
 /// Abstract trait to allow reading from both HnswGraph (serial) and ConcurrentHnswGraph (parallel)
 trait GraphView {
     fn get_neighbors_view(&self, doc_id: u64, level: usize) -> Option<Vec<u64>>;
@@ -1522,6 +1538,23 @@ impl HnswIndexWriter {
         &self.vectors
     }
 
+    /// Whether a document is currently buffered in this writer (O(1)).
+    ///
+    /// Used by the segmented search path's newest-source-wins masking
+    /// (Issue #880) to decide whether the active buffer shadows a sealed
+    /// segment's copy of the same document.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_id` - The internal document ID to probe.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the buffer holds at least one vector for `doc_id`.
+    pub fn contains_doc(&self, doc_id: u64) -> bool {
+        self.doc_id_map.contains_key(&doc_id)
+    }
+
     /// Get HNSW parameters.
     pub fn hnsw_params(&self) -> (usize, usize) {
         (self.index_config.m, self.index_config.ef_construction)
@@ -1707,7 +1740,50 @@ impl VectorIndexWriter for HnswIndexWriter {
             .map(|(_, _, v)| (*v).clone())
             .collect();
 
-        match self.index_config.quantization_method {
+        // PQ min-train guard (Issue #880): PQ k-means trains 256 centroids
+        // per sub-quantizer (16 for FastScan) — training on fewer vectors
+        // than centroids produces a degenerate codebook with meaningless
+        // recall (a 1-doc auto-commit segment would "train" k-means on one
+        // point). Segments below the threshold are written as Scalar8Bit
+        // instead; the LVS1 header is self-describing, so readers dispatch
+        // on the stored quant kind regardless of the configured method, and
+        // a merged (large) segment picks PQ back up automatically. Empty
+        // segments keep the configured method's header for uniform
+        // dispatch.
+        let effective_quantization = {
+            use crate::vector::core::quantization::QuantizationMethod as Qm;
+            let n = f32_vectors.len();
+            match self.index_config.quantization_method {
+                Qm::ProductQuantization { subvector_count }
+                    if n > 0 && n < PQ_MIN_TRAIN_VECTORS =>
+                {
+                    // The fallback must not skip config validation: an
+                    // invalid PQ geometry (subvector_count not dividing the
+                    // dimension) is rejected here exactly as the training
+                    // path would, so acceptance never depends on corpus
+                    // size.
+                    crate::vector::core::quantization::PqParams::from_dim_and_m(
+                        self.index_config.dimension,
+                        subvector_count.max(1),
+                    )?;
+                    Qm::Scalar8Bit
+                }
+                #[cfg(feature = "pq-fastscan")]
+                Qm::ProductQuantizationFastScan { subvector_count }
+                    if n > 0 && n < PQ_FASTSCAN_MIN_TRAIN_VECTORS =>
+                {
+                    // Same geometry validation as the PQ arm above.
+                    crate::vector::core::quantization::PqParams::from_dim_and_m(
+                        self.index_config.dimension,
+                        subvector_count.max(1),
+                    )?;
+                    Qm::Scalar8Bit
+                }
+                method => method,
+            }
+        };
+
+        match effective_quantization {
             crate::vector::core::quantization::QuantizationMethod::Scalar8Bit => {
                 // Empty segments fall back to neutral params (0.0, 1.0)
                 // since there is nothing to train on; the LVS1 header

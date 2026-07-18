@@ -103,12 +103,14 @@ fn writer_reader_round_trip_preserves_pq_fastscan_codes() {
 
 #[test]
 fn writer_reader_round_trip_handles_partial_block() {
-    // n = 5 < BLOCK_SIZE (32) exercises the trailing-block zero-padding
+    // n = 21 < BLOCK_SIZE (32) exercises the trailing-block zero-padding
     // path that PqFastScanPool::build emits when fewer than 32 vectors
-    // are written.
+    // are written. The count sits above the FastScan min-train guard
+    // (#880: segments with fewer than the K=16 centroids are written as
+    // Scalar8Bit) while still leaving padded slots in the block.
     let dim = 4usize;
     let m = 2usize;
-    let n = 5usize;
+    let n = 21usize;
 
     let vectors: Vec<(u64, String, Vector)> = (0..n)
         .map(|i| {
@@ -150,7 +152,7 @@ fn writer_reader_round_trip_handles_partial_block() {
         ),
     };
     assert_eq!(pool.n_vectors, n);
-    assert_eq!(pool.block_count(), 1, "n=5 spans a single block");
+    assert_eq!(pool.block_count(), 1, "n=21 spans a single block");
     // Trailing padding positions (5..32) have all-zero codes — the
     // codebook lookups for those slots return centroid 0 of every
     // sub-quantiser, which is fine because the searcher masks them

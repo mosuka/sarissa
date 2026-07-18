@@ -48,7 +48,17 @@ pub struct SegmentedVectorField {
     /// Active segment for current writes.
     pub active_segment: Arc<RwLock<Option<(String, HnswIndexWriter)>>>,
 
-    /// Global deletion bitmap.
+    /// Deletion bitmap shared by this field's sealed-segment readers and
+    /// merge engine.
+    ///
+    /// **Must be scoped to this ONE field, never shared across fields**
+    /// (Issue #880): the bitmap is doc-granular while the upsert dance is
+    /// per-field — `delete_document` marks the id doc-wide and
+    /// `add_stored_vector` un-marks it, so a bitmap shared between fields
+    /// would let field A's re-add permanently revive field B's sealed copy
+    /// when an upsert drops field B (nothing newer ever shadows it). The
+    /// #634 PR-3 adapter must allocate one bitmap per field (a doc-level
+    /// delete then marks every field's bitmap).
     pub deletion_bitmap: Option<Arc<DeletionBitmap>>,
 
     /// Per-segment [`HnswIndexReader`] cache used by
@@ -152,7 +162,32 @@ impl SegmentedVectorField {
         &self,
         policy: &dyn crate::vector::index::hnsw::segment::merge_policy::MergePolicy,
     ) -> Result<()> {
-        if let Some(candidate) = self.segment_manager.check_merge(policy) {
+        if let Some(mut candidate) = self.segment_manager.check_merge(policy) {
+            // Close generation gaps in the candidate (Issue #880): the merged
+            // segment inherits max(source generations), which is only correct
+            // when no NON-source segment's generation falls strictly inside
+            // the candidate's generation range — otherwise a stale copy from
+            // an old source could be laundered above that segment under
+            // newest-generation-wins dedup. Policies are free to pick any
+            // set; this expansion restores the contiguity invariant.
+            {
+                let min_gen = candidate.segments.iter().map(|s| s.generation).min();
+                let max_gen = candidate.segments.iter().map(|s| s.generation).max();
+                if let (Some(min_gen), Some(max_gen)) = (min_gen, max_gen) {
+                    for info in self.segment_manager.list_segments() {
+                        let inside = info.generation > min_gen && info.generation < max_gen;
+                        let already = candidate
+                            .segments
+                            .iter()
+                            .any(|s| s.segment_id == info.segment_id);
+                        if inside && !already {
+                            candidate.total_vectors += info.vector_count;
+                            candidate.total_size += info.size_bytes;
+                            candidate.segments.push(info);
+                        }
+                    }
+                }
+            }
             let opt = match &self.config.vector {
                 Some(FieldOption::Hnsw(opt)) => opt,
                 _ => {
@@ -186,7 +221,13 @@ impl SegmentedVectorField {
             let result =
                 engine.merge_segments(candidate.segments.clone(), new_segment_id.clone())?;
 
-            let info = ManagedSegmentInfo::new(new_segment_id, result.stats.vectors_merged, 0, 0);
+            // Register the engine's own segment info (Issue #880): it carries
+            // the inherited max(source generations). The previous hand-built
+            // info hard-coded generation 0, which sorted the merged segment
+            // as the OLDEST source — inverting newest-wins dedup so untouched
+            // older segments shadowed the merged (newest) copies, and a
+            // subsequent merge could permanently drop them as "duplicates".
+            let info = result.merged_segment.clone();
 
             // Capture source segment ids before `apply_merge` consumes
             // `candidate`, so we can invalidate their cache entries below.
@@ -259,6 +300,24 @@ impl VectorFieldWriter for SegmentedVectorField {
                 "No active segment available".to_string(),
             ));
         }
+
+        // Same-id upsert completion (Issue #880): the delete-first step
+        // marked this id in the shared bitmap so sealed-segment copies stop
+        // matching; clear the mark now so the NEW copy is not shadowed by
+        // its own delete once this segment flushes. The revived old copies
+        // are masked by newest-source-wins containment at search and removed
+        // physically at merge.
+        //
+        // The bitmap flip happens while the `active_segment` write lock is
+        // still held (lock order: active_segment → bitmap, same as
+        // `delete_document`): releasing the lock first would let a racing
+        // pure delete interleave between the buffer insert and this
+        // undelete, whose mark this undelete would then erase — losing the
+        // delete and resurrecting the stale sealed copy.
+        if let Some(bitmap) = &self.deletion_bitmap {
+            let _ = bitmap.undelete_document(doc_id)?;
+        }
+        drop(active_opt);
         Ok(())
     }
 
@@ -283,8 +342,36 @@ impl VectorFieldWriter for SegmentedVectorField {
     }
 
     async fn delete_document(&self, doc_id: u64, _version: u64) -> Result<()> {
-        if let Some((_, writer)) = self.active_segment.write().as_mut() {
-            let _ = writer.delete_document(doc_id);
+        // The doc may live in an already-sealed segment, which the active
+        // writer cannot touch — previously this was a silent no-op (Issue
+        // #880). Mark the shared deletion bitmap: every managed-segment
+        // reader is constructed with the same bitmap
+        // (`search_managed_segments`), so the deletion is search-visible
+        // immediately, and the merge engine filters through it as well.
+        //
+        // Both steps run under the `active_segment` write lock (lock order:
+        // active_segment → bitmap, same as `add_stored_vector`) so a racing
+        // upsert cannot interleave between them, and the bitmap is marked
+        // BEFORE the buffered copy is removed — sealed-segment searches do
+        // not take this lock, so the reverse order would open a window where
+        // the active copy is gone but the stale sealed copy is not yet
+        // masked.
+        let mut newly_deleted = false;
+        {
+            let mut active_opt = self.active_segment.write();
+            if let Some(bitmap) = &self.deletion_bitmap {
+                newly_deleted = bitmap.delete_document(doc_id)?;
+            }
+            // Remove from the active (unflushed) buffer.
+            if let Some((_, writer)) = active_opt.as_mut() {
+                let _ = writer.delete_document(doc_id);
+            }
+        }
+
+        // Flag `has_deletions` so the merge policy prioritizes the affected
+        // segments (outside the active lock — it persists the manifest).
+        if newly_deleted && !self.segment_manager.list_segments().is_empty() {
+            self.segment_manager.mark_all_has_deletions()?;
         }
         Ok(())
     }
@@ -338,8 +425,13 @@ impl SegmentedVectorField {
     ///
     /// Up to `limit` hits ranked by similarity descending; empty when
     /// there is no active segment (or `limit == 0`).
+    /// The caller passes the active writer borrowed from an already-held
+    /// `active_segment` guard, so this helper takes no lock of its own —
+    /// `search` holds one read guard across the whole request, both for
+    /// scanning and for the newest-source containment probes (Issue #880).
     fn search_active_segment(
         &self,
+        writer: &HnswIndexWriter,
         query: &[f32],
         limit: usize,
         weight: f32,
@@ -347,11 +439,6 @@ impl SegmentedVectorField {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        let active_opt = self.active_segment.read();
-        let writer = match active_opt.as_ref() {
-            Some((_, w)) => w,
-            None => return Ok(Vec::new()),
-        };
 
         // Safe unwrap because verified in create()
         let distance_metric = match &self.config.vector {
@@ -392,14 +479,13 @@ impl SegmentedVectorField {
         Ok(hits)
     }
 
-    fn search_managed_segments(
-        &self,
-        query: &[f32],
-        limit: usize,
-        weight: f32,
-    ) -> Result<Vec<FieldHit>> {
-        let mut all_hits = Vec::new();
-        let segments = self.segment_manager.list_segments();
+    /// Load the readers of every sealed segment, newest generation first
+    /// (Issue #660 cache; entries invalidated on merge).
+    fn sealed_readers_newest_first(&self) -> Result<Vec<Arc<HnswIndexReader>>> {
+        let mut segments = self.segment_manager.list_segments();
+        // Newest generation first: earlier entries are authoritative for
+        // newest-source-wins masking.
+        segments.sort_by_key(|s| std::cmp::Reverse(s.generation));
 
         // Safe unwrap because verified in create()
         let distance_metric = match &self.config.vector {
@@ -407,25 +493,48 @@ impl SegmentedVectorField {
             _ => return Ok(Vec::new()),
         };
 
-        for info in segments {
-            // Issue #660: fetch the reader from the per-segment cache to
-            // avoid the per-query reload from disk. The first search for a
-            // given `segment_id` invokes the loader (paying the full
-            // `HnswIndexReader::load` cost); subsequent searches receive
-            // the cached `Arc<HnswIndexReader>` directly. Entries are
-            // invalidated by `perform_merge_with_policy` when the
-            // underlying segment is removed.
-            let storage = self.storage.clone();
-            let deletion_bitmap = self.deletion_bitmap.clone();
-            let segment_id = info.segment_id.clone();
-            let reader = self.reader_cache.get_or_load(&segment_id, || {
-                let mut r = HnswIndexReader::load(storage, &segment_id, distance_metric)?;
-                if let Some(bitmap) = deletion_bitmap {
-                    r.set_deletion_bitmap(bitmap);
-                }
-                Ok(r)
-            })?;
+        segments
+            .into_iter()
+            .map(|info| {
+                let storage = self.storage.clone();
+                let deletion_bitmap = self.deletion_bitmap.clone();
+                let segment_id = info.segment_id;
+                self.reader_cache.get_or_load(&segment_id, || {
+                    let mut r = HnswIndexReader::load(storage, &segment_id, distance_metric)?;
+                    if let Some(bitmap) = deletion_bitmap {
+                        r.set_deletion_bitmap(bitmap);
+                    }
+                    Ok(r)
+                })
+            })
+            .collect()
+    }
 
+    /// Search every sealed segment, masking each hit against every NEWER
+    /// source by **containment** (Issue #880).
+    ///
+    /// Same-id upserts replayed from the WAL leave stale copies in older
+    /// segments. Masking must be containment-based — "does any newer source
+    /// HOLD this doc?" — not based on which hits newer sources returned:
+    /// after an upsert, an old-embedding query rarely ranks the NEW copy
+    /// into its own segment's top-k, so a returned-hits mask would let the
+    /// stale exact-match copy through (and pre-#880 it was even scored once
+    /// per copy).
+    ///
+    /// `readers` must be ordered newest generation first (from
+    /// [`Self::sealed_readers_newest_first`]); `active_writer` is the
+    /// still-newer unflushed buffer, borrowed from the guard `search` holds.
+    fn search_managed_segments(
+        &self,
+        readers: &[Arc<HnswIndexReader>],
+        active_writer: Option<&HnswIndexWriter>,
+        query: &[f32],
+        limit: usize,
+        weight: f32,
+    ) -> Result<Vec<FieldHit>> {
+        let mut all_hits = Vec::new();
+
+        for (idx, reader) in readers.iter().enumerate() {
             // Issue #644: prefer the schema-level `default_ef_search` when
             // the user has configured one. Otherwise fall back to the legacy
             // segmented-field heuristic of `ef_construction.max(50) * 2`
@@ -437,10 +546,15 @@ impl SegmentedVectorField {
             } else {
                 50
             };
-            let searcher = HnswSearcher::with_default_ef_search(reader, Some(default_ef))?;
+            let searcher = HnswSearcher::with_default_ef_search(reader.clone(), Some(default_ef))?;
 
+            // Over-fetch per segment (Issue #880): containment masking
+            // discards shadowed hits AFTER the per-segment top-k selection,
+            // so stale copies would otherwise consume result slots and push
+            // live docs out. Doubling the fetch bounds the loss cheaply; a
+            // fully adaptive refill is left to the #634 PR-3 adapter.
             let params = VectorIndexQueryParams {
-                top_k: limit,
+                top_k: limit.saturating_mul(2),
                 ..Default::default()
             };
 
@@ -457,6 +571,16 @@ impl SegmentedVectorField {
 
             let results = searcher.search(&request)?;
             for res in results.results {
+                // Newest-source-wins: drop the hit when ANY newer source
+                // holds a copy of this doc — the active buffer, or a sealed
+                // segment with a higher generation.
+                let shadowed = active_writer.is_some_and(|w| w.contains_doc(res.doc_id))
+                    || readers[..idx]
+                        .iter()
+                        .any(|newer| newer.vectors().contains(res.doc_id, &self.name));
+                if shadowed {
+                    continue;
+                }
                 all_hits.push(FieldHit {
                     doc_id: res.doc_id,
                     field: self.name.clone(),
@@ -483,32 +607,59 @@ impl VectorFieldReader for SegmentedVectorField {
             return Ok(FieldSearchResults::default());
         }
 
+        // Sealed readers are resolved once, newest generation first —
+        // BEFORE taking the active guard: a cold load hits storage, and
+        // holding the read guard across that I/O would stall every writer
+        // (and, with parking_lot's writer priority, every later reader)
+        // behind a slow disk (Issue #880).
+        let readers = self.sealed_readers_newest_first()?;
+
+        // One read guard across the rest of the request: the active buffer
+        // is both scanned and used as the newest containment source, so it
+        // must not change between the two (Issue #880).
+        let active_guard = self.active_segment.read();
+
         let mut merged: HashMap<u64, FieldHit> = HashMap::new();
 
         for query in &request.query_vectors {
             let effective_weight = query.weight;
             let query_vec = &query.vector.data;
 
-            // 1. Search Active
-            let active_hits =
-                self.search_active_segment(query_vec, request.limit, effective_weight)?;
-            for hit in active_hits {
-                match merged.entry(hit.doc_id) {
-                    Entry::Vacant(e) => {
-                        e.insert(hit);
-                    }
-                    Entry::Occupied(mut e) => {
-                        let entry = e.get_mut();
-                        entry.score += hit.score;
-                        entry.distance = entry.distance.min(hit.distance);
-                    }
-                }
+            // Within ONE query, a doc id must be scored exactly once even
+            // when copies of it live in several sources (the active buffer
+            // plus K sealed segments — same-id WAL-replay upserts leave
+            // stale older copies behind). The newest source wins by
+            // CONTAINMENT (Issue #880): a sealed hit is dropped when any
+            // newer source holds the doc at all — not merely when a newer
+            // source happened to return it. Accumulation (`score +=`) is
+            // reserved for the multi-QUERY case below, which is intentional
+            // weighting.
+            let mut per_query: Vec<FieldHit> = Vec::new();
+
+            // 1. Search Active (the newest source — always wins)
+            if let Some((_, writer)) = active_guard.as_ref() {
+                per_query.extend(self.search_active_segment(
+                    writer,
+                    query_vec,
+                    request.limit,
+                    effective_weight,
+                )?);
             }
 
-            // 2. Search Managed
-            let managed_hits =
-                self.search_managed_segments(query_vec, request.limit, effective_weight)?;
-            for hit in managed_hits {
+            // 2. Search Managed (newest generation first, containment-masked
+            //    against the active buffer and every newer segment)
+            let managed_hits = self.search_managed_segments(
+                &readers,
+                active_guard.as_ref().map(|(_, w)| w),
+                query_vec,
+                request.limit,
+                effective_weight,
+            )?;
+            per_query.extend(managed_hits);
+
+            // 3. Fold this query's deduplicated hits into the multi-query
+            //    accumulator.
+            for hit in per_query {
                 match merged.entry(hit.doc_id) {
                     Entry::Vacant(e) => {
                         e.insert(hit);
@@ -550,5 +701,166 @@ impl VectorFieldReader for SegmentedVectorField {
             vector_count: active_count + managed_count as usize,
             dimension,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use crate::vector::core::field::HnswOption;
+    use crate::vector::index::hnsw::segment::manager::SegmentManagerConfig;
+    use crate::vector::store::request::QueryVector;
+
+    fn field_with_bitmap() -> (
+        SegmentedVectorField,
+        Arc<DeletionBitmap>,
+        Arc<SegmentManager>,
+    ) {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let manager = Arc::new(
+            SegmentManager::new(
+                SegmentManagerConfig {
+                    max_segments: 100,
+                    min_vectors_per_segment: 1,
+                    ..Default::default()
+                },
+                storage.clone(),
+            )
+            .unwrap(),
+        );
+        // Unbounded-range global bitmap, as the production wiring will use.
+        let bitmap = Arc::new(DeletionBitmap::new("global".to_string(), 0, u64::MAX - 1));
+        let config = VectorFieldConfig {
+            vector: Some(FieldOption::Hnsw(HnswOption {
+                dimension: 4,
+                distance: crate::vector::core::distance::DistanceMetric::Euclidean,
+                m: 16,
+                ef_construction: 200,
+                default_ef_search: None,
+                base_weight: 1.0,
+                quantizer: Default::default(),
+                rerank_storage: None,
+                embedder: None,
+            })),
+            lexical: None,
+        };
+        let field = SegmentedVectorField::create(
+            "embedding",
+            config,
+            manager.clone(),
+            storage,
+            Some(bitmap.clone()),
+        )
+        .unwrap();
+        (field, bitmap, manager)
+    }
+
+    fn query(vector: Vec<f32>, limit: usize) -> FieldSearchInput {
+        FieldSearchInput {
+            field: "embedding".to_string(),
+            query_vectors: vec![QueryVector {
+                vector: Vector::new(vector),
+                weight: 1.0,
+                fields: None,
+            }],
+            limit,
+            allowed_ids: None,
+        }
+    }
+
+    /// #880: deleting a doc that lives in a SEALED segment must make it
+    /// search-invisible (previously a silent no-op — only the active buffer
+    /// was touched) and flag `has_deletions` for the merge policy.
+    #[tokio::test]
+    async fn sealed_segment_delete_is_search_invisible_and_flagged() {
+        let (field, bitmap, manager) = field_with_bitmap();
+
+        field
+            .add_stored_vector(1, &StoredVector::new(vec![1.0, 0.0, 0.0, 0.0]), 0)
+            .await
+            .unwrap();
+        field
+            .add_stored_vector(2, &StoredVector::new(vec![0.0, 1.0, 0.0, 0.0]), 0)
+            .await
+            .unwrap();
+        field.flush().await.unwrap();
+
+        // Sanity: both docs are searchable from the sealed segment.
+        let results = field.search(query(vec![1.0, 0.0, 0.0, 0.0], 2)).unwrap();
+        assert_eq!(results.hits.len(), 2);
+
+        // Delete doc 1 — it lives ONLY in the sealed segment.
+        field.delete_document(1, 0).await.unwrap();
+
+        assert!(bitmap.is_deleted(1), "the shared bitmap must be marked");
+        let results = field.search(query(vec![1.0, 0.0, 0.0, 0.0], 2)).unwrap();
+        assert!(
+            results.hits.iter().all(|h| h.doc_id != 1),
+            "a sealed-segment doc must be search-invisible after delete \
+             (#880), got {:?}",
+            results.hits
+        );
+        assert!(
+            manager.list_segments().iter().all(|s| s.has_deletions),
+            "has_deletions must be flagged for the merge policy (#880)"
+        );
+
+        // The deletion also survives a force merge (the merge engine filters
+        // through the same bitmap).
+        field
+            .add_stored_vector(3, &StoredVector::new(vec![0.0, 0.0, 1.0, 0.0]), 0)
+            .await
+            .unwrap();
+        field.flush().await.unwrap();
+        VectorFieldWriter::optimize(&field).await.unwrap();
+        let results = field.search(query(vec![1.0, 0.0, 0.0, 0.0], 3)).unwrap();
+        assert!(
+            results.hits.iter().all(|h| h.doc_id != 1),
+            "the deletion must survive a merge (#880), got {:?}",
+            results.hits
+        );
+    }
+
+    /// #880: the same-id upsert dance — delete marks the bitmap (masking the
+    /// sealed old copy), the re-add clears the mark so the NEW copy is not
+    /// shadowed by its own delete once flushed. End-to-end: after flush, the
+    /// doc is searchable via its newest copy only.
+    #[tokio::test]
+    async fn same_id_upsert_readd_clears_bitmap_and_stays_searchable() {
+        let (field, bitmap, _manager) = field_with_bitmap();
+
+        field
+            .add_stored_vector(1, &StoredVector::new(vec![1.0, 0.0, 0.0, 0.0]), 0)
+            .await
+            .unwrap();
+        field.flush().await.unwrap();
+
+        // Upsert: delete-first masks the sealed copy...
+        field.delete_document(1, 0).await.unwrap();
+        assert!(bitmap.is_deleted(1));
+        // ...and the re-add clears the mark for the new copy.
+        field
+            .add_stored_vector(1, &StoredVector::new(vec![0.0, 0.0, 1.0, 0.0]), 0)
+            .await
+            .unwrap();
+        assert!(
+            !bitmap.is_deleted(1),
+            "the re-add must clear the delete mark so the new copy is not \
+             shadowed after flush (#880)"
+        );
+        field.flush().await.unwrap();
+
+        // The doc resolves via its NEWEST copy (newest-wins dedup masks the
+        // revived old copy).
+        let results = field.search(query(vec![0.0, 0.0, 1.0, 0.0], 1)).unwrap();
+        assert_eq!(results.hits[0].doc_id, 1);
+        assert!(results.hits[0].distance < 1e-3);
+        let results = field.search(query(vec![1.0, 0.0, 0.0, 0.0], 1)).unwrap();
+        assert!(
+            results.hits[0].doc_id != 1 || results.hits[0].distance > 1.0,
+            "the stale old copy must stay shadowed (#880), got {:?}",
+            results.hits
+        );
     }
 }
