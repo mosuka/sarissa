@@ -21,11 +21,13 @@
 //! bitmap is doc-scoped, which is consistent here because a document's
 //! fields always land in the same segment.
 //!
-//! Introduced dark: [`HnswIndexConfig::segmented`] defaults to `false` and
-//! the factory keeps dispatching to the monolithic index. The default flips
-//! in #882 together with the zero-copy legacy migration (an existing
-//! monolithic `.hnsw` becomes segment 0 of the manifest); until then,
-//! opening a legacy index with the flag on is rejected explicitly.
+//! Since #882 this is the DEFAULT HNSW layout ([`HnswIndexConfig::segmented`]
+//! defaults to `true`): a legacy monolithic index is migrated zero-copy on
+//! first open (its `.hnsw` becomes segment 0 of the manifest, no data
+//! movement), and the manifest's `last_wal_seq` is published with the
+//! durability ordering the engine's recovery relies on (data before
+//! checkpoint, checkpoint before WAL truncate). Set the flag to `false` to
+//! keep the monolithic layout.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -84,6 +86,12 @@ struct SegmentedShared {
     /// enough, because a concurrent build could repopulate it with
     /// bitmap-less readers after the clear.
     bitmap_epoch: std::sync::atomic::AtomicU64,
+
+    /// Highest WAL sequence number applied to this index but NOT yet
+    /// published to the manifest (#882). Published (and persisted) by
+    /// [`VectorIndex::persist_deletions`] at the end of the store's commit
+    /// ladder, once every covered mutation is durable.
+    pending_wal_seq: std::sync::atomic::AtomicU64,
 }
 
 impl SegmentedShared {
@@ -189,30 +197,76 @@ impl SegmentedHnswIndex {
     /// * `config` - HNSW configuration (with [`HnswIndexConfig::segmented`]
     ///   set).
     ///
+    /// A legacy monolithic index is migrated **zero-copy** (#882): the
+    /// existing `{name}.hnsw` is registered verbatim as the first segment —
+    /// its segment id is the index name, which every reader treats as a
+    /// plain path prefix — with a single atomic manifest write and no data
+    /// movement. A crash before the manifest save leaves the legacy layout
+    /// intact, so the migration simply re-runs on the next open. The
+    /// pre-existing `{name}.delmap` keeps its meaning: it is the index-level
+    /// deletion bitmap in both layouts (and `delete_segment_files` never
+    /// touches `.delmap` files for exactly this reason).
+    ///
     /// # Errors
     ///
     /// Returns an error when the manifest fails to load (corruption fails
-    /// loudly, #879), or when a legacy monolithic `{name}.hnsw` exists
-    /// without a manifest — the zero-copy migration lands in #882, so until
-    /// then the flag must not silently shadow existing data.
+    /// loudly, #879), or when reading the legacy file's header during
+    /// migration fails.
     pub fn open_or_create(
         storage: Arc<dyn Storage>,
         name: &str,
         config: HnswIndexConfig,
     ) -> Result<Self> {
-        let legacy_file = format!("{name}.hnsw");
-        if storage.file_exists(&legacy_file) && !storage.file_exists("segments.json") {
+        // The generated-segment namespace is reserved: an index named like
+        // a generated id would collide with sealed segments (same file
+        // names, orphan-sweep patterns, and merge GC) — reject it loudly
+        // (#882 review).
+        if let Some(ordinal) = name.strip_prefix("segment_")
+            && !ordinal.is_empty()
+            && ordinal.bytes().all(|b| b.is_ascii_digit())
+        {
             return Err(LaurusError::invalid_config(format!(
-                "index '{name}' has a monolithic {legacy_file} but no segment manifest; \
-                 the segmented layout cannot open it yet (migration lands with #882) — \
-                 disable `segmented` for this index"
+                "index name '{name}' collides with the reserved segment-id \
+                 namespace (segment_<digits>)"
             )));
         }
 
+        let legacy_file = format!("{name}.hnsw");
+        let migrate = storage.file_exists(&legacy_file) && !storage.file_exists("segments.json");
+
+        // The manager's orphan sweep only touches `segment_NNNNNN.*` names,
+        // so an unmigrated `{name}.hnsw` is never swept.
         let manager = Arc::new(SegmentManager::new(
             SegmentManagerConfig::default(),
             storage.clone(),
         )?);
+
+        if migrate {
+            // Read the committed vector count from the leading u64 of the
+            // legacy file (same header every reader loads).
+            let vector_count = {
+                use std::io::Read;
+                let mut input = storage.open_input(&legacy_file)?;
+                let mut buf = [0u8; 8];
+                input.read_exact(&mut buf)?;
+                u64::from_le_bytes(buf)
+            };
+            // `add_segment` stamps generation 1, measures the on-storage
+            // size, and saves the manifest atomically (#879) — the moment it
+            // returns, the index is segmented; before that, it is still a
+            // valid legacy index. A legacy delmap (same file in both
+            // layouts) means the segment carries deletions.
+            let mut info = ManagedSegmentInfo::new(name.to_string(), vector_count, 0, 0);
+            info.has_deletions = storage.file_exists(&format!("{name}.delmap"));
+            manager.add_segment(info)?;
+
+            // Drop the monolithic index's now-stale `metadata.json` so the
+            // factory's open/create routing can never again mistake this
+            // directory for a monolithic index (#882 review: a stale
+            // metadata.json flipped a migrated index back to the monolithic
+            // view, silently hiding every post-migration segment).
+            let _ = storage.delete_file("metadata.json");
+        }
 
         Ok(Self {
             shared: Arc::new(SegmentedShared {
@@ -222,6 +276,7 @@ impl SegmentedHnswIndex {
                 reader_cache: Arc::new(SegmentedReaderCache::new()),
                 deletion: RwLock::new(None),
                 bitmap_epoch: std::sync::atomic::AtomicU64::new(0),
+                pending_wal_seq: std::sync::atomic::AtomicU64::new(0),
             }),
             config,
             closed: AtomicBool::new(false),
@@ -242,6 +297,46 @@ impl SegmentedHnswIndex {
         self.config
             .default_ef_search
             .unwrap_or_else(|| self.config.ef_construction.max(50) * 2)
+    }
+
+    /// Merge one policy-selected window of segments (#882).
+    ///
+    /// Uses the generation-contiguous `SimpleMergePolicy` (#880) through
+    /// the deletion-filtering, duplicate-collapsing merge engine; source
+    /// readers are invalidated afterwards. A no-op when the policy finds no
+    /// candidate.
+    fn merge_once(&self) -> Result<()> {
+        use crate::vector::index::hnsw::segment::merge_policy::SimpleMergePolicy;
+
+        let Some(candidate) = self.shared.manager.check_merge(&SimpleMergePolicy::new()) else {
+            return Ok(());
+        };
+
+        let mut engine = MergeEngine::new(
+            MergeConfig::default(),
+            self.shared.storage.clone(),
+            self.config.clone(),
+            VectorIndexWriterConfig::default(),
+        );
+        if let Some(bitmap) = self.shared.load_or_get_bitmap(false)? {
+            engine.set_deletion_bitmap(bitmap);
+        }
+
+        let new_segment_id = self.shared.manager.generate_segment_id();
+        let result = engine.merge_segments(candidate.segments.clone(), new_segment_id)?;
+
+        let source_ids: Vec<String> = candidate
+            .segments
+            .iter()
+            .map(|s| s.segment_id.clone())
+            .collect();
+        self.shared
+            .manager
+            .apply_merge(candidate, result.merged_segment)?;
+        for id in &source_ids {
+            self.shared.reader_cache.invalidate(id);
+        }
+        Ok(())
     }
 
     /// Drop the deletion state after a compaction physically reclaimed the
@@ -403,13 +498,27 @@ impl VectorIndex for SegmentedHnswIndex {
         Arc::clone(&self.config.embedder)
     }
 
-    // `last_wal_seq` / `set_last_wal_seq` intentionally keep their trait
-    // defaults (0 / no-op): reporting a persisted checkpoint without the
-    // #882 ordering guarantees (manifest durable BEFORE the WAL truncate)
-    // would let recovery skip records whose effects never became durable.
-    // With the defaults, recovery replays the whole WAL idempotently — the
-    // monolithic index's behavior. #882 wires the manifest's `last_wal_seq`
-    // field together with the ordering.
+    fn last_wal_seq(&self) -> u64 {
+        // The PUBLISHED checkpoint: the value loaded from (or last saved to)
+        // the manifest — never the pending one, which may not be durable
+        // yet. Recovery skips WAL records at or below this seq, so it must
+        // only ever reflect state that is already on storage (#882).
+        self.shared.manager.last_wal_seq()
+    }
+
+    fn set_last_wal_seq(&self, seq: u64) -> Result<()> {
+        // Recorded as PENDING only. It is published into the manifest at the
+        // end of `persist_deletions` — the last vector step of the store's
+        // commit ladder — at which point the sealed segment files AND the
+        // deletion bitmap for every record up to `seq` are durable, and the
+        // engine has not yet truncated the WAL (#882 ordering; the #875
+        // lesson: a checkpoint must never outrun the durability of the state
+        // it covers).
+        self.shared
+            .pending_wal_seq
+            .fetch_max(seq, Ordering::Release);
+        Ok(())
+    }
 
     fn supports_soft_delete(&self) -> bool {
         true
@@ -453,10 +562,38 @@ impl VectorIndex for SegmentedHnswIndex {
                 self.shared.storage.delete_file(&file)?;
             }
         }
+        drop(guard);
+
+        // Publish the WAL checkpoint (#882). This is the last vector step of
+        // the store's commit ladder: the sealed segment files (fsynced +
+        // manifest-registered by `writer.commit()`) and the deletion bitmap
+        // (written above) are durable for every record up to the pending
+        // seq, and `Engine::commit` truncates the WAL only after all stores
+        // finish — so a crash on either side of this save is safe: before
+        // it, recovery replays idempotently from the old checkpoint; after
+        // it, everything skipped is already on storage.
+        let pending = self.shared.pending_wal_seq.load(Ordering::Acquire);
+        if pending > self.shared.manager.last_wal_seq() {
+            self.shared.manager.set_last_wal_seq(pending);
+            self.shared.manager.save_state()?;
+        }
         Ok(())
     }
 
     fn maybe_auto_compact(&self) -> Result<bool> {
+        // Segment-count bound (#882): pure-append workloads never take the
+        // deletion-ratio branch below, so without this the segment count —
+        // and with it every search fan-out and the manifest size — would
+        // grow unboundedly, one segment per commit. Merge one
+        // generation-contiguous window (#880 policy) when the manager's
+        // threshold is exceeded; the tiered policy lands with #883. Runs
+        // regardless of `auto_compaction`, which gates deletion
+        // *reclamation*, not the structural segment bound.
+        if self.shared.manager.needs_merge() {
+            self.merge_once()?;
+            return Ok(true);
+        }
+
         if !self.config.auto_compaction {
             return Ok(false);
         }
@@ -611,6 +748,13 @@ impl VectorIndexWriter for SegmentedHnswWriter {
     }
 
     fn rollback(&mut self) -> Result<()> {
+        // Rolled-back mutations are discarded, so the pending WAL
+        // checkpoint must not keep covering their sequence numbers (#882):
+        // roll it back to the published value; their WAL records then stay
+        // replayable.
+        self.shared
+            .pending_wal_seq
+            .store(self.shared.manager.last_wal_seq(), Ordering::Release);
         self.inner.rollback()
     }
 
@@ -631,6 +775,24 @@ impl VectorIndexWriter for SegmentedHnswWriter {
 
     fn build_reader(&self) -> Result<Arc<dyn VectorIndexReader>> {
         self.inner.build_reader()
+    }
+}
+
+impl Drop for SegmentedHnswWriter {
+    fn drop(&mut self) {
+        // Backstop (#882 review): dropping a writer whose buffered
+        // mutations were never sealed discards the only in-process copy,
+        // while the pending WAL checkpoint may already cover their
+        // sequence numbers — publishing it later would hide the loss from
+        // recovery. Roll the pending value back to the published
+        // checkpoint so those records stay replayable. The store never
+        // drops a dirty writer (its commit/optimize/add_field paths retain
+        // it on failure), so this fires only on direct API use.
+        if self.has_pending_changes() {
+            self.shared
+                .pending_wal_seq
+                .store(self.shared.manager.last_wal_seq(), Ordering::Release);
+        }
     }
 }
 

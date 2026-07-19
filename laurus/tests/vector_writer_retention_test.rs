@@ -544,7 +544,7 @@ async fn optimize_flushes_writer_emptied_by_deletions() {
 /// writer/disk agreement is unknown after a partial failure, so the next
 /// upsert must reload ground truth from storage.
 #[tokio::test(flavor = "multi_thread")]
-async fn failed_commit_drops_retained_writer() {
+async fn failed_commit_retains_writer_for_retry() {
     let counting = Arc::new(CountingStorage::new());
     let storage: Arc<dyn Storage> = counting.clone();
     let store = laurus::vector::VectorStore::new(storage, make_config(false, 0.5)).unwrap();
@@ -569,30 +569,27 @@ async fn failed_commit_drops_retained_writer() {
         .expect_err("the injected create_output failure must fail the commit");
     counting.set_fail_create_matching(None);
 
-    // The failed writer must be gone: the next upsert reloads the intact
-    // on-disk index (observable as a fresh .hnsw open) instead of reusing a
-    // writer in an unknown state.
-    let opens_before = counting.open_count(HNSW_FILE);
+    // #882 review (the #875 lesson): a FAILED flush keeps the writer — its
+    // buffered doc 5 is the only in-process copy, and the pending WAL
+    // checkpoint may already cover its sequence number; dropping it would
+    // let a later successful commit's checkpoint hide the loss from
+    // recovery. The sealed segments were never touched by the failed
+    // commit, so the retry from the retained writer is sound.
     store
         .upsert_document_by_internal_id(6, vec_doc(6))
         .await
         .unwrap();
-    assert!(
-        counting.open_count(HNSW_FILE) > opens_before,
-        "after a failed commit the cache must be empty, forcing a reload"
-    );
 
-    // And the store recovers fully: doc 5 was lost with the failed writer
-    // (it is WAL-replayable at engine level), docs 0-4 + 6 are intact.
+    // The retry commits BOTH the previously failed doc 5 and the new doc 6.
     store.commit().await.unwrap();
     let ids = hit_ids(&store, 10);
     assert!(
-        ids.contains(&6),
-        "post-recovery upsert must be live: {ids:?}"
+        ids.contains(&5) && ids.contains(&6),
+        "the retained writer must carry the failed doc through the retry: {ids:?}"
     );
     assert_eq!(
         store.stats().unwrap().document_count,
-        6,
-        "the intact on-disk docs (0-4) plus the post-recovery doc (6)"
+        7,
+        "docs 0-4 plus the retried doc 5 and the new doc 6"
     );
 }

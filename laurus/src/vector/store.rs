@@ -365,7 +365,20 @@ impl VectorStore {
             Some(writer) if writer.has_pending_changes() => writer.commit(),
             _ => Ok(()),
         };
-        let ladder_result = flush_result
+        // A FAILED flush must keep the writer cached (#882 review, the #875
+        // lesson): its buffered mutations are the only in-process copy, and
+        // the segmented index's pending WAL checkpoint may already cover
+        // their sequence numbers — dropping the writer while a later
+        // successful commit publishes that checkpoint would let recovery
+        // skip records whose effects were silently discarded. The seal is
+        // atomic (tmp+rename before manifest registration), so a retry from
+        // the retained writer is sound.
+        if let Err(e) = flush_result {
+            drop(writer_guard);
+            *self.searcher_cache.write() = None;
+            return Err(e);
+        }
+        let ladder_result = Ok(())
             // Persist any pending logical deletions (Issue #624) so the
             // deletion bitmap survives restarts. The WAL also records
             // deletions, so this is a durability optimization rather than the
@@ -432,11 +445,14 @@ impl VectorStore {
             Some(writer) if writer.has_pending_changes() => writer.commit(),
             _ => Ok(()),
         };
-        // Always drop the cache — optimize() rewrites the index through a
-        // fresh writer and clears the deletion bitmap — and drop it on the
-        // flush error path too, where the writer/disk agreement is unknown.
-        *writer_guard = None;
+        // A failed flush keeps the writer cached (#882 review / #875): its
+        // buffered mutations are the only in-process copy and their WAL
+        // records may already be inside the pending checkpoint's range.
         flush_result?;
+        // Drop the cache on success — optimize() rewrites the index through
+        // a fresh writer and clears the deletion bitmap, so a retained
+        // writer would resurrect reclaimed vectors (#864).
+        *writer_guard = None;
         self.index.optimize()?;
         drop(writer_guard);
         *self.searcher_cache.write() = None;
@@ -965,7 +981,24 @@ impl VectorStore {
         }
 
         // Invalidate caches so the next writer/searcher uses updated config.
-        *self.writer_cache.lock().await = None;
+        // Commit the cached writer first and KEEP it on failure (#882
+        // review / #875): its buffered mutations are the only in-process
+        // copy, and the segmented pending WAL checkpoint may already cover
+        // them — a bare drop would let a later successful commit's
+        // checkpoint hide the loss from recovery. This method cannot
+        // propagate the error (its signature returns `()`); leaving the
+        // writer cached makes the next `commit()` retry and surface it.
+        {
+            let mut writer_guard = self.writer_cache.lock().await;
+            if let Some(writer) = writer_guard.as_mut()
+                && writer.has_pending_changes()
+                && writer.commit().is_err()
+            {
+                *self.searcher_cache.write() = None;
+                return;
+            }
+            *writer_guard = None;
+        }
         *self.searcher_cache.write() = None;
     }
 
@@ -989,7 +1022,20 @@ impl VectorStore {
         }
 
         // Invalidate caches so the next writer/searcher uses updated config.
-        *self.writer_cache.lock().await = None;
+        // Same commit-then-drop-on-success guard as `add_field` (#882
+        // review): never rely on a bare drop while buffered mutations are
+        // the only in-process copy.
+        {
+            let mut writer_guard = self.writer_cache.lock().await;
+            if let Some(writer) = writer_guard.as_mut()
+                && writer.has_pending_changes()
+                && writer.commit().is_err()
+            {
+                *self.searcher_cache.write() = None;
+                return;
+            }
+            *writer_guard = None;
+        }
         *self.searcher_cache.write() = None;
     }
 }
