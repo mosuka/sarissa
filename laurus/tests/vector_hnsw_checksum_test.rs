@@ -29,8 +29,12 @@ use laurus::{LaurusError, Result};
 const DIM: usize = 16;
 const N: u64 = 50;
 const STEP: f32 = 0.01;
-const HNSW_FILE: &str = "vector_index.hnsw";
-const METADATA_FILE: &str = "metadata.json";
+/// First sealed segment of the (default, #882) segmented layout — the
+/// same LVS file format (and CRC footer semantics) as the monolithic file.
+const HNSW_FILE: &str = "segment_000000.hnsw";
+/// The segmented layout's commit pivot (#879): CRC-framed and
+/// atomically replaced, so corruption must fail the open loudly.
+const METADATA_FILE: &str = "segments.json";
 
 #[derive(Debug)]
 struct MockEmbedder {
@@ -204,17 +208,18 @@ async fn corrupted_metadata_is_rejected() {
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     build_committed(storage.clone()).await;
 
-    // Flip a byte in the CRC-framed metadata content.
+    // Flip a byte in the CRC-framed manifest content (#879): a corrupted
+    // segment registry must fail the open loudly, never silently start
+    // empty (which would orphan every live segment).
     let mut bytes = read_all(&storage, METADATA_FILE);
     let mid = bytes.len() / 2;
     bytes[mid] ^= 0xff;
     write_all(&storage, METADATA_FILE, &bytes);
 
-    // Opening the index reads (and now verifies) metadata.json.
     let result = laurus::vector::VectorStore::new(storage.clone(), make_config());
     assert!(
         result.is_err(),
-        "a corrupted metadata.json must be rejected on open"
+        "a corrupted segments.json must be rejected on open"
     );
 }
 

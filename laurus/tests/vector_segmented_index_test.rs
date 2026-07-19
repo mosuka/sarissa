@@ -128,10 +128,12 @@ fn config_off_keeps_monolithic_layout() {
     assert!(storage.file_exists("vector_index.hnsw"));
 }
 
-/// #881: opening a legacy monolithic index with the flag ON is rejected —
-/// the zero-copy migration lands with #882.
+/// #882: a legacy monolithic index is migrated ZERO-COPY on first segmented
+/// open — the existing `.hnsw` becomes segment 0 verbatim (no data
+/// movement), search results are identical, and later commits append new
+/// segments without ever touching the legacy file.
 #[test]
-fn flag_on_rejects_legacy_monolithic_index() {
+fn legacy_monolithic_index_migrates_zero_copy() {
     let storage = storage();
     {
         let index = HnswIndex::create(
@@ -140,17 +142,97 @@ fn flag_on_rejects_legacy_monolithic_index() {
             config(false),
         )
         .unwrap();
-        commit_batch(&index, 0..10);
+        commit_batch(&index, 0..100);
     }
-    let err = SegmentedHnswIndex::open_or_create(
+    let legacy_size = storage.file_size("vector_index.hnsw").unwrap();
+
+    let index = SegmentedHnswIndex::open_or_create(
+        storage.clone() as Arc<dyn Storage>,
+        "vector_index",
+        config(true),
+    )
+    .unwrap();
+
+    // Migration wrote only the manifest; the legacy file is untouched.
+    assert!(storage.file_exists("segments.json"), "manifest created");
+    assert_eq!(
+        storage.file_size("vector_index.hnsw").unwrap(),
+        legacy_size,
+        "zero-copy: the legacy file must not be rewritten (#882)"
+    );
+
+    // The migrated data is searchable...
+    let searcher = index.searcher().unwrap();
+    let results = searcher.search(&query(42, 1)).unwrap();
+    assert_eq!(results.results[0].doc_id, 42);
+
+    // ...and a later commit appends a NEW segment, still leaving the legacy
+    // file untouched.
+    commit_batch(&index, 100..101);
+    assert_eq!(storage.file_size("vector_index.hnsw").unwrap(), legacy_size);
+    let searcher = index.searcher().unwrap();
+    assert_eq!(
+        searcher.search(&query(100, 1)).unwrap().results[0].doc_id,
+        100
+    );
+    assert_eq!(
+        searcher.search(&query(42, 1)).unwrap().results[0].doc_id,
+        42
+    );
+
+    // Re-open: the migration must not re-run (idempotent — the manifest
+    // already exists) and everything stays searchable.
+    drop(index);
+    let index = SegmentedHnswIndex::open_or_create(
         storage as Arc<dyn Storage>,
         "vector_index",
         config(true),
+    )
+    .unwrap();
+    let searcher = index.searcher().unwrap();
+    assert_eq!(
+        searcher.search(&query(42, 1)).unwrap().results[0].doc_id,
+        42
     );
-    assert!(
-        err.is_err(),
-        "a legacy monolithic index must be rejected until the #882 migration"
+    assert_eq!(
+        searcher.search(&query(100, 1)).unwrap().results[0].doc_id,
+        100
     );
+}
+
+/// #882: the WAL checkpoint is published only by `persist_deletions` (the
+/// end of the store's commit ladder) — never by intermediate manifest saves
+/// — so recovery can only skip records whose effects are already durable.
+#[test]
+fn wal_checkpoint_publishes_only_after_persist_deletions() {
+    let storage = storage();
+    let index = SegmentedHnswIndex::open_or_create(
+        storage as Arc<dyn Storage>,
+        "vector_index",
+        config(true),
+    )
+    .unwrap();
+
+    index.set_last_wal_seq(7).unwrap();
+    assert_eq!(
+        index.last_wal_seq(),
+        0,
+        "a pending seq must not be visible before persist_deletions (#882)"
+    );
+
+    // Sealing a segment saves the manifest, but must NOT publish the
+    // pending checkpoint (the deletion bitmap for seq<=7 may not be
+    // durable yet).
+    commit_batch(&index, 0..5);
+    assert_eq!(
+        index.last_wal_seq(),
+        0,
+        "sealing must not publish the pending checkpoint (#882)"
+    );
+
+    // persist_deletions publishes and persists it.
+    index.persist_deletions().unwrap();
+    assert_eq!(index.last_wal_seq(), 7);
 }
 
 /// #881: self-recall@10 of a 5-segment index matches a monolithic build of
@@ -390,4 +472,172 @@ fn count_excludes_soft_deleted_docs() {
     let searcher = index.searcher().unwrap();
     let count = searcher.count(query(0, 1)).unwrap();
     assert_eq!(count, 9, "count must exclude soft-deleted docs (#881)");
+}
+
+/// #882 (CRITICAL review find): the migration must fire through the
+/// PRODUCTION factory path. A legacy index always has a `metadata.json`, so
+/// it always takes the factory's OPEN arm — which previously had no
+/// segmented dispatch, leaving every existing deployment monolithic forever
+/// and (worse) flipping an already-migrated directory back to a monolithic
+/// view that silently hid post-migration segments.
+#[test]
+fn factory_open_path_migrates_legacy_index_and_stays_segmented() {
+    use laurus::vector::index::config::VectorIndexTypeConfig;
+    use laurus::vector::index::factory::VectorIndexFactory;
+
+    let storage = storage();
+    {
+        let index = HnswIndex::create(
+            storage.clone() as Arc<dyn Storage>,
+            "vector_index",
+            config(false),
+        )
+        .unwrap();
+        commit_batch(&index, 0..50);
+    }
+    assert!(storage.file_exists("metadata.json"), "legacy precondition");
+
+    // The exact production call (VectorStore::with_index_type_config).
+    let index = VectorIndexFactory::open_or_create(
+        storage.clone() as Arc<dyn Storage>,
+        "vector_index",
+        VectorIndexTypeConfig::HNSW(config(true)),
+    )
+    .unwrap();
+    assert!(
+        storage.file_exists("segments.json"),
+        "the factory OPEN arm must migrate a legacy index (#882)"
+    );
+    assert!(
+        !storage.file_exists("metadata.json"),
+        "the stale monolithic metadata.json must be removed so factory \
+         routing can never regress to the monolithic view (#882)"
+    );
+
+    // Commit through the migrated index, then reopen through the factory
+    // again: the segmented view must persist and serve ALL data.
+    commit_batch(index.as_ref(), 50..51);
+    drop(index);
+    let index = VectorIndexFactory::open_or_create(
+        storage as Arc<dyn Storage>,
+        "vector_index",
+        VectorIndexTypeConfig::HNSW(config(true)),
+    )
+    .unwrap();
+    let searcher = index.searcher().unwrap();
+    assert_eq!(
+        searcher.search(&query(42, 1)).unwrap().results[0].doc_id,
+        42
+    );
+    assert_eq!(
+        searcher.search(&query(50, 1)).unwrap().results[0].doc_id,
+        50
+    );
+}
+
+/// #882: opening a segmented directory with `segmented: false` must be
+/// rejected loudly — the monolithic view would silently hide every sealed
+/// segment.
+#[test]
+fn factory_rejects_segmented_directory_with_flag_off() {
+    use laurus::vector::index::config::VectorIndexTypeConfig;
+    use laurus::vector::index::factory::VectorIndexFactory;
+
+    let storage = storage();
+    {
+        let index = SegmentedHnswIndex::open_or_create(
+            storage.clone() as Arc<dyn Storage>,
+            "vector_index",
+            config(true),
+        )
+        .unwrap();
+        commit_batch(&index, 0..10);
+    }
+
+    let result = VectorIndexFactory::open_or_create(
+        storage as Arc<dyn Storage>,
+        "vector_index",
+        VectorIndexTypeConfig::HNSW(config(false)),
+    );
+    assert!(
+        result.is_err(),
+        "a segmented directory must not open monolithically (#882)"
+    );
+}
+
+/// #882: pure-append workloads must not grow the segment count unboundedly
+/// — `maybe_auto_compact` merges a policy window once the manager's
+/// threshold is exceeded (tiered policy lands with #883).
+#[test]
+fn append_only_segment_count_is_bounded_by_auto_merge() {
+    let storage = storage();
+    let index = SegmentedHnswIndex::open_or_create(
+        storage.clone() as Arc<dyn Storage>,
+        "vector_index",
+        config(true),
+    )
+    .unwrap();
+
+    // 101 one-doc commits exceed the default max_segments (100).
+    for i in 0..101u64 {
+        commit_batch(&index, i..i + 1);
+    }
+    let before = storage
+        .list_files()
+        .unwrap()
+        .iter()
+        .filter(|f| f.ends_with(".hnsw"))
+        .count();
+    assert!(before > 100, "precondition: {before} segments");
+
+    let compacted = index.maybe_auto_compact().unwrap();
+    assert!(compacted, "the segment-count bound must trigger a merge");
+    let after = storage
+        .list_files()
+        .unwrap()
+        .iter()
+        .filter(|f| f.ends_with(".hnsw"))
+        .count();
+    assert!(
+        after < before,
+        "the merge must reduce the segment count ({before} -> {after})"
+    );
+
+    // Every doc is still searchable through the merged layout.
+    let searcher = index.searcher().unwrap();
+    for id in [0u64, 50, 100] {
+        assert_eq!(
+            searcher.search(&query(id, 1)).unwrap().results[0].doc_id,
+            id
+        );
+    }
+}
+
+/// #882: serde behavior of the flipped default — a config missing the field
+/// deserializes to `true`; an explicit `false` is preserved.
+#[test]
+fn segmented_flag_serde_default_and_explicit_false() {
+    // A pre-#882 config = today's config with the `segmented` key removed.
+    let mut value: serde_json::Value = serde_json::to_value(HnswIndexConfig::default()).unwrap();
+    value
+        .as_object_mut()
+        .unwrap()
+        .remove("segmented")
+        .expect("the flag must serialize");
+    let config: HnswIndexConfig = serde_json::from_value(value).unwrap();
+    assert!(
+        config.segmented,
+        "a config serialized before the field existed must open segmented (#882)"
+    );
+
+    let explicit_false = serde_json::to_string(&HnswIndexConfig {
+        segmented: false,
+        ..HnswIndexConfig::default()
+    })
+    .unwrap();
+    let config: HnswIndexConfig = serde_json::from_str(&explicit_false).unwrap();
+    assert!(
+        !config.segmented,
+        "an explicit `segmented: false` must be preserved (#882)"
+    );
 }

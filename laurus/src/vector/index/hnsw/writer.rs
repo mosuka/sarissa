@@ -1989,8 +1989,13 @@ impl VectorIndexWriter for HnswIndexWriter {
         let content_crc = output.checksum();
         output.write_all(&crate::vector::index::hnsw::HNSW_FOOTER_MAGIC.to_le_bytes())?;
         output.write_all(&content_crc.to_le_bytes())?;
-        output.flush()?;
-        drop(output);
+        // Close with an fsync BEFORE the rename (#882 review): the rename
+        // publishes the segment (and, in the segmented layout, a manifest
+        // whose WAL checkpoint covers it may follow) — a flush alone leaves
+        // the content in the page cache, so a power loss could surface a
+        // published-but-hollow segment file.
+        let mut inner = output.into_inner();
+        inner.close()?;
         storage.rename_file(&tmp_name, &file_name)?;
 
         // Stage 2 (Issue #481): emit the optional LRS1 rerank sidecar

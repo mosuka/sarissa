@@ -49,12 +49,14 @@ struct SegmentManifest {
     /// re-issues an ID even if the highest-numbered segment was merged away.
     next_segment_id: u64,
 
-    /// Last WAL sequence number applied to the segments in this manifest.
+    /// Last WAL sequence number whose effects are fully durable in this
+    /// manifest's segments and the index deletion bitmap (#882).
     ///
-    /// Reserved for the segment-per-commit recovery pivot (#634 PR-4): the
-    /// vector side persists no WAL checkpoint today, so this stays 0 until
-    /// the wiring lands. Persisting it here keeps the manifest format stable
-    /// across the campaign.
+    /// Published by the segmented index's `persist_deletions` — the last
+    /// vector step of the store's commit ladder, before the engine
+    /// truncates the WAL — so recovery can safely skip records at or below
+    /// it. Intermediate manifest saves (segment seals) carry the previous
+    /// value.
     last_wal_seq: u64,
 
     /// The registered segments.
@@ -447,12 +449,16 @@ impl SegmentManager {
         self.save_state_locked(&segments)
     }
 
-    /// Sum the on-storage sizes of a segment's file and sidecars.
+    /// Sum the on-storage sizes of a segment's file and rerank sidecar.
+    ///
+    /// `.delmap` is deliberately excluded (#882): per-segment deletion
+    /// bitmaps do not exist — the bitmap is index-level — and for a
+    /// legacy-migrated segment (whose id equals the index name) including
+    /// it would misattribute the index bitmap's size to the segment.
     fn measure_segment_size(&self, segment_id: &str) -> u64 {
         [
             format!("{segment_id}.hnsw"),
             format!("{segment_id}.hnsw.f32"),
-            format!("{segment_id}.delmap"),
         ]
         .iter()
         .filter_map(|name| self.storage.file_size(name).ok())
@@ -471,13 +477,19 @@ impl SegmentManager {
     }
 
     /// Delete physical files associated with a segment, including its
-    /// rerank sidecar (`.hnsw.f32`) and deletion bitmap (`.delmap`) —
-    /// leaving them behind orphans storage after every merge (#879).
+    /// rerank sidecar (`.hnsw.f32`) — leaving it behind orphans storage
+    /// after every merge (#879).
+    ///
+    /// Deliberately does NOT touch `{segment_id}.delmap` (#882): the
+    /// segmented index keeps ONE index-level deletion bitmap named
+    /// `{index_name}.delmap` — per-segment bitmaps do not exist — and a
+    /// legacy-migrated segment's id EQUALS the index name, so deleting the
+    /// segment's "delmap" here would destroy live deletion state when a
+    /// merge consumes that segment.
     pub fn delete_segment_files(&self, segment_id: &str) -> Result<()> {
         // Best effort deletion - ignore if a file doesn't exist
         let _ = self.storage.delete_file(&format!("{segment_id}.hnsw"));
         let _ = self.storage.delete_file(&format!("{segment_id}.hnsw.f32"));
-        let _ = self.storage.delete_file(&format!("{segment_id}.delmap"));
         Ok(())
     }
 
@@ -1018,8 +1030,11 @@ mod tests {
         assert!(storage.file_exists("not_a_segment.hnsw"), "foreign spared");
     }
 
-    /// #879: deleting a segment's files removes the rerank sidecar and the
-    /// deletion bitmap along with the index file.
+    /// #879/#882: deleting a segment's files removes the rerank sidecar
+    /// along with the index file — but never a `.delmap`: the deletion
+    /// bitmap is index-level, and a legacy-migrated segment shares the
+    /// index's name (#882), so touching it would destroy live deletion
+    /// state.
     #[test]
     fn test_delete_segment_files_includes_sidecars() {
         let config = SegmentManagerConfig::default();
@@ -1042,7 +1057,11 @@ mod tests {
             !storage.file_exists("segment_000001.hnsw.f32"),
             "sidecar GC"
         );
-        assert!(!storage.file_exists("segment_000001.delmap"), "delmap GC");
+        assert!(
+            storage.file_exists("segment_000001.delmap"),
+            "a .delmap must never be deleted with segment files — the \
+             deletion bitmap is index-level (#882)"
+        );
     }
 
     /// #879: `add_segment` stamps a zero generation with max+1 and measures a

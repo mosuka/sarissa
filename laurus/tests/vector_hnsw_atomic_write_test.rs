@@ -1,11 +1,13 @@
 //! Integration tests for crash-safe atomic writes of the production HNSW
-//! index files (issue #784).
+//! index files (issue #784; segmented layout since #882).
 //!
-//! `HnswIndexWriter::write` / `HnswIndex::write_metadata` /
-//! `HnswIndex::persist_deletions` now write to a `.tmp` file and atomically
-//! `rename_file` it into place. A crash between writing the temp file and the
-//! rename therefore leaves the previously committed file intact, and a
-//! successful commit leaves no temp file behind.
+//! Every on-disk artifact — per-segment `.hnsw` files (written by
+//! `HnswIndexWriter::write`), the `segments.json` manifest (#879), and the
+//! deletion bitmap — is written to a `.tmp` file and atomically
+//! `rename_file`d into place. A crash between writing a temp file and the
+//! rename therefore leaves the previously committed state intact (the
+//! orphaned temp is ignored and swept on reopen), and a successful commit
+//! leaves no temp file behind.
 
 use async_trait::async_trait;
 use std::any::Any;
@@ -32,8 +34,10 @@ use laurus::{LaurusError, Result};
 const DIM: usize = 16;
 const N: u64 = 50;
 const STEP: f32 = 0.01;
-const HNSW_FILE: &str = "vector_index.hnsw";
-const HNSW_TMP: &str = "vector_index.hnsw.tmp";
+/// First sealed segment of the (default, #882) segmented layout.
+const HNSW_FILE: &str = "segment_000000.hnsw";
+/// An orphaned staging file from a simulated crashed segment write.
+const HNSW_TMP: &str = "segment_000001.hnsw.tmp";
 
 #[derive(Debug)]
 struct MockEmbedder {
@@ -148,12 +152,19 @@ async fn commit_leaves_no_temp_file() {
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     let store = build_committed(storage.clone()).await;
 
-    // After a successful commit the segment is in place and the temp file has
-    // been renamed away.
-    assert!(storage.file_exists(HNSW_FILE), "committed .hnsw must exist");
+    // After a successful commit the sealed segment and the manifest are in
+    // place, and every temp file has been renamed away.
+    assert!(storage.file_exists(HNSW_FILE), "sealed segment must exist");
+    assert!(storage.file_exists("segments.json"), "manifest must exist");
+    let temps: Vec<String> = storage
+        .list_files()
+        .unwrap()
+        .into_iter()
+        .filter(|f| f.ends_with(".tmp"))
+        .collect();
     assert!(
-        !storage.file_exists(HNSW_TMP),
-        "a successful commit must not leave a .hnsw.tmp behind"
+        temps.is_empty(),
+        "a successful commit must not leave any .tmp behind, got {temps:?}"
     );
     assert_eq!(hit_ids(&store.search(request()).unwrap()).len(), 10);
 }
@@ -166,8 +177,9 @@ async fn orphaned_temp_from_crashed_write_is_ignored() {
     assert_eq!(before.len(), 10);
     drop(store);
 
-    // Simulate a crash *during* a later write: the temp file was created but
-    // the atomic rename never happened. The committed `.hnsw` must be untouched.
+    // Simulate a crash *during* a later segment write: the temp file was
+    // created but the atomic rename never happened. The committed segment
+    // must be untouched.
     {
         let mut out = storage.create_output(HNSW_TMP).unwrap();
         out.write_all(b"partially-written-garbage-from-a-crashed-commit")
@@ -176,15 +188,19 @@ async fn orphaned_temp_from_crashed_write_is_ignored() {
     }
     assert!(
         storage.file_exists(HNSW_FILE),
-        "committed .hnsw still present"
+        "committed segment still present"
     );
 
-    // Reopening reads the valid committed segment and ignores the orphaned
-    // temp file — same results as before the simulated crash.
+    // Reopening reads the valid committed segment, ignores the orphaned
+    // temp (the #879 sweep removes it), and returns the same results.
     let reopened = laurus::vector::VectorStore::new(storage.clone(), make_config()).unwrap();
     let after = hit_ids(&reopened.search(request()).unwrap());
     assert_eq!(
         after, before,
         "the committed index must survive an orphaned temp file from a crashed write"
+    );
+    assert!(
+        !storage.file_exists(HNSW_TMP),
+        "the orphaned staging file must be swept on reopen (#879)"
     );
 }

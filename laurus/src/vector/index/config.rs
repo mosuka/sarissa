@@ -398,6 +398,12 @@ impl std::fmt::Debug for FlatIndexConfig {
     }
 }
 
+/// Serde default for [`HnswIndexConfig::segmented`] — `true` since #882
+/// (configs serialized before the field existed open in the segmented
+/// layout and are migrated zero-copy).
+fn default_segmented() -> bool {
+    true
+}
 /// Configuration specific to HNSW index.
 ///
 /// These settings control the behavior of the HNSW (Hierarchical Navigable Small World)
@@ -442,14 +448,14 @@ pub struct HnswIndexConfig {
 
     /// Whether this index uses the segment-per-commit layout (Issue #634).
     ///
-    /// When `true`, each commit seals the newly added vectors as an
-    /// immutable per-segment `.hnsw` file registered in an atomic
-    /// `segments.json` manifest, instead of rewriting one monolithic file —
-    /// turning the per-commit cost from O(index) to O(new docs). Defaults to
-    /// `false` (the monolithic layout). Introduced dark in #881; the
-    /// production default flips in #882 together with the zero-copy legacy
-    /// migration.
-    #[serde(default)]
+    /// When `true` (the default since #882), each commit seals the newly
+    /// added vectors as an immutable per-segment `.hnsw` file registered in
+    /// an atomic `segments.json` manifest, instead of rewriting one
+    /// monolithic file — turning the per-commit cost from O(index) to
+    /// O(new docs). An existing monolithic index is migrated zero-copy on
+    /// first open (its `.hnsw` becomes segment 0 of the manifest). Set to
+    /// `false` to keep the monolithic layout.
+    #[serde(default = "default_segmented")]
     pub segmented: bool,
 
     /// Maximum number of vectors per segment.
@@ -525,7 +531,7 @@ impl Default for HnswIndexConfig {
             m: 16,
             ef_construction: 200,
             default_ef_search: None,
-            segmented: false,
+            segmented: true,
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             quantization_method: quantization::QuantizationMethod::Scalar8Bit,

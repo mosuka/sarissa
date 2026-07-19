@@ -84,25 +84,55 @@ impl VectorIndexFactory {
                 Ok(Box::new(index))
             }
             VectorIndexTypeConfig::HNSW(hnsw_config) => {
-                if hnsw_config.segmented {
-                    // Segment-per-commit layout (#634 / #881), introduced
-                    // dark: `segmented` defaults to false.
-                    let index =
-                        crate::vector::index::hnsw::segmented::SegmentedHnswIndex::open_or_create(
-                            storage,
-                            name,
-                            hnsw_config,
-                        )?;
-                    return Ok(Box::new(index));
-                }
-                let index = HnswIndex::create(storage, name, hnsw_config)?;
-                Ok(Box::new(index))
+                Self::dispatch_hnsw(storage, name, hnsw_config, false)
             }
             VectorIndexTypeConfig::IVF(ivf_config) => {
                 let index = IvfIndex::create(storage, name, ivf_config)?;
                 Ok(Box::new(index))
             }
         }
+    }
+
+    /// Dispatch an HNSW config to the segmented or monolithic implementation
+    /// (#634 / #882).
+    ///
+    /// The `segmented` flag (the default since #882) routes to
+    /// [`SegmentedHnswIndex::open_or_create`], which handles create, open,
+    /// AND the zero-copy migration of a legacy monolithic index — so BOTH
+    /// factory arms must come through here: a legacy index always has a
+    /// `metadata.json` and therefore always takes the *open* arm, which is
+    /// exactly where the migration must fire (#882 review).
+    ///
+    /// With the flag off, opening a directory that contains a segment
+    /// manifest is rejected: the monolithic index would silently serve only
+    /// the migrated segment-0 data and hide every later segment.
+    fn dispatch_hnsw(
+        storage: Arc<dyn Storage>,
+        name: &str,
+        hnsw_config: crate::vector::index::config::HnswIndexConfig,
+        open_only: bool,
+    ) -> Result<Box<dyn VectorIndex>> {
+        use crate::vector::index::hnsw::segmented::SegmentedHnswIndex;
+
+        if hnsw_config.segmented {
+            let index = SegmentedHnswIndex::open_or_create(storage, name, hnsw_config)?;
+            return Ok(Box::new(index));
+        }
+        // Reverse guard (#882 review): a segmented directory must not be
+        // opened monolithically — the single-file view would silently hide
+        // every segment sealed after the migration.
+        if storage.file_exists("segments.json") {
+            return Err(crate::error::LaurusError::invalid_config(format!(
+                "index '{name}' uses the segmented layout (segments.json exists) but \
+                 `segmented` is disabled; enable it to open this index"
+            )));
+        }
+        let index = if open_only {
+            HnswIndex::open(storage, name, hnsw_config)?
+        } else {
+            HnswIndex::create(storage, name, hnsw_config)?
+        };
+        Ok(Box::new(index))
     }
 
     /// Open an existing index or create a new one if it doesn't exist.
@@ -168,8 +198,11 @@ impl VectorIndexFactory {
                 Ok(Box::new(index))
             }
             VectorIndexTypeConfig::HNSW(hnsw_config) => {
-                let index = HnswIndex::open(storage, name, hnsw_config)?;
-                Ok(Box::new(index))
+                // Same dispatch as `create` (#882): the segmented path's
+                // `open_or_create` opens existing manifests and migrates
+                // legacy monolithic indexes; the flag-off path is
+                // reverse-guarded against segmented directories.
+                Self::dispatch_hnsw(storage, name, hnsw_config, true)
             }
             VectorIndexTypeConfig::IVF(ivf_config) => {
                 let index = IvfIndex::open(storage, name, ivf_config)?;

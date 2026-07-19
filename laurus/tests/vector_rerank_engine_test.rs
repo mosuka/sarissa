@@ -27,9 +27,10 @@ use laurus::{FieldOption, QueryVector, Schema, VectorSearchQuery};
 use std::sync::Arc;
 
 /// Sidecar name as seen by the engine's outer storage: the vector
-/// store works behind `PrefixedStorage("vector", ..)`, and the HNSW
-/// index file is `vector_index.hnsw`.
-const SIDECAR_NAME: &str = "vector/vector_index.hnsw.f32";
+/// store works behind `PrefixedStorage("vector", ..)`, and the first
+/// sealed segment of the (default, #882) segmented layout is
+/// `segment_000000.hnsw`.
+const SIDECAR_NAME: &str = "vector/segment_000000.hnsw.f32";
 
 /// Build a search request for `query`, optionally asking for Stage-2
 /// rerank with the given factor.
@@ -96,15 +97,18 @@ async fn engine_search_with_rerank_factor_succeeds_on_stage2_field() -> laurus::
 
     // Stronger, deterministic guard: reopen the committed segment the
     // way the vector store does (behind `PrefixedStorage("vector", ..)`,
-    // index file `vector_index`) and assert the sidecar actually loads
-    // into the rerank pool. A fresh `PrefixedStorage` reports Eager
-    // loading (the trait default), so the pool is populated on load —
-    // this proves "the f32 pool exists and is populated", independent
-    // of the score comparison below.
+    // first sealed segment `segment_000000`, #882) and assert the sidecar
+    // actually loads into the rerank pool. A fresh `PrefixedStorage`
+    // reports Eager loading (the trait default), so the pool is populated
+    // on load — this proves "the f32 pool exists and is populated",
+    // independent of the score comparison below.
     let vector_storage: Arc<dyn Storage> =
         Arc::new(PrefixedStorage::new("vector", storage.clone()));
-    let reader =
-        HnswIndexReader::load(vector_storage, "vector_index", VectorDistanceMetric::Cosine)?;
+    let reader = HnswIndexReader::load(
+        vector_storage,
+        "segment_000000",
+        VectorDistanceMetric::Cosine,
+    )?;
     let pool = reader
         .rerank_storage()
         .expect("the committed Stage-2 segment must load its rerank pool");
