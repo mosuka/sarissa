@@ -88,7 +88,21 @@ pub async fn run(
         bail!("--batch-size must be greater than 0");
     }
 
-    let engine = context::open_index(index_dir).await?;
+    // Hand the commit cadence to the engine's auto-commit policy (Issue #890):
+    // `--commit-every n` opens the engine with `CommitPolicy::EveryDocs(n)`, so
+    // the engine commits every n documents (including within a single
+    // `put_documents` call) instead of the client committing in this loop.
+    // `--commit-every 0` (the default) keeps manual control: only the final
+    // commit below runs.
+    let engine = if commit_every > 0 {
+        context::open_index_with_commit_policy(
+            index_dir,
+            laurus::CommitPolicy::EveryDocs(commit_every),
+        )
+        .await?
+    } else {
+        context::open_index(index_dir).await?
+    };
     let reader = std::io::BufReader::new(
         std::fs::File::open(file)
             .with_context(|| format!("failed to open JSONL file '{}'", file.display()))?,
@@ -98,7 +112,6 @@ pub async fn run(
     // 1-based input line number of each entry in `batch`, for error reports.
     let mut batch_lines: Vec<usize> = Vec::with_capacity(batch_size);
     let mut applied: usize = 0;
-    let mut since_commit: usize = 0;
 
     let flush = async |batch: Vec<(String, Document)>,
                        lines: Vec<usize>,
@@ -150,15 +163,17 @@ pub async fn run(
             let lines = std::mem::take(&mut batch_lines);
             let flushed = flush(docs, lines, applied).await?;
             applied += flushed;
-            since_commit += flushed;
-            if commit_every > 0 && since_commit >= commit_every {
-                engine.commit().await?;
-                since_commit = 0;
-                println!("... {applied} documents applied (committed)");
+            // The engine auto-commits every `commit_every` docs when set; report
+            // ingest progress per batch.
+            if commit_every > 0 {
+                println!("... {applied} documents applied");
             }
         }
     }
     applied += flush(batch, batch_lines, applied).await?;
+    // Final commit flushes the trailing remainder (the last < commit_every docs
+    // that did not reach an auto-commit boundary, or the whole run when
+    // --commit-every is 0).
     engine.commit().await?;
 
     let verb = match mode {

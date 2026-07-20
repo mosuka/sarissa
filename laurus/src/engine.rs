@@ -7,6 +7,7 @@ pub mod type_inference;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::RwLock;
 
@@ -27,6 +28,54 @@ use crate::vector::store::VectorStore;
 use crate::vector::store::config::VectorIndexConfig;
 
 use self::schema::Schema;
+
+/// Policy controlling when the engine automatically runs the commit ladder
+/// during ingestion (Issue #890).
+///
+/// The commit ladder ([`Engine::commit`]) materializes and fsyncs the lexical,
+/// vector, and document stores and truncates the WAL. By default it runs only
+/// when the caller invokes [`Engine::commit`] explicitly; a non-`Manual` policy
+/// makes the engine run it automatically at an ingestion-driven cadence, one
+/// full ladder per auto-commit (group-commit semantics are preserved).
+///
+/// This is orthogonal to [`WalSyncPolicy`]: that governs *WAL fsync
+/// durability*, while `CommitPolicy` governs *when the stores materialize*. An
+/// auto-commit works under any `WalSyncPolicy` because [`Engine::commit`] always
+/// begins with a WAL flush.
+///
+/// The enum is `#[non_exhaustive]`: a time-based `Interval` variant is planned
+/// (it needs a background commit timer) and will be added without breaking
+/// exhaustive matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum CommitPolicy {
+    /// Never auto-commit; the caller drives every commit explicitly. This is
+    /// the default and preserves the historical behavior.
+    #[default]
+    Manual,
+    /// Auto-commit after every `n` applied documents, across the singular
+    /// ([`Engine::put_document`] / [`Engine::add_document`]) and batch
+    /// ([`Engine::put_documents`] / [`Engine::add_documents`]) APIs. Within a
+    /// batch the commit fires every `n` documents (chunked), so a large batch
+    /// materializes incrementally rather than in one final ladder.
+    ///
+    /// The exact cadence, and the usual "acknowledged write is durable"
+    /// guarantee, hold for **single-writer ingestion** (the model the engine's
+    /// write path is built around — the CLI and language bindings drive a
+    /// single ingest task). Under **concurrent writers on a shared engine**,
+    /// auto-commit is best-effort: the commit ladder is not atomic with respect
+    /// to another thread's in-flight write, so a write acknowledged while a
+    /// concurrent auto-commit is running may only become durable at the
+    /// following commit, and the cadence may drift. This is a property of
+    /// commit-vs-concurrent-write in general (a concurrent manual `commit()`
+    /// races the same way); auto-commit merely triggers it from inside the
+    /// ingest path. Use explicit commits, or a single ingest task, when you
+    /// need these guarantees under concurrency.
+    ///
+    /// `EveryDocs(0)` disables auto-commit (equivalent to
+    /// [`CommitPolicy::Manual`]).
+    EveryDocs(usize),
+}
 
 /// Combined statistics from both the lexical and vector stores.
 #[derive(Debug, Clone, Default)]
@@ -132,6 +181,16 @@ pub struct Engine {
     /// built in [`Self::unified_query_parser`], so both the direct
     /// `Payloads` path and the DSL path hit the same cache.
     embedding_cache: Option<Arc<EmbeddingCache>>,
+    /// Auto-commit policy (Issue #890). `Manual` by default; a non-`Manual`
+    /// policy runs the commit ladder automatically during ingestion.
+    commit_policy: CommitPolicy,
+    /// Documents applied since the last commit, tracking progress toward the
+    /// [`CommitPolicy::EveryDocs`] threshold. Incremented once per applied
+    /// document in [`Self::index_internal`] and reset to `0` by
+    /// [`Self::commit`], so both manual and auto commits keep the count
+    /// consistent. Lock-free (mirrors [`DocumentLog`]'s counters); exact for
+    /// serial ingestion, best-effort under concurrent writers.
+    docs_since_commit: AtomicU64,
     /// Background WAL flush timer for a [`WalSyncPolicy::Group`] configured with
     /// a `max_interval`. `None` when no interval is set. Held only to keep the
     /// timer thread alive for the engine's lifetime; dropping the engine stops
@@ -304,6 +363,8 @@ impl Engine {
         // sync-deferral scope, which would otherwise leave this acknowledged
         // write unsynced. A no-op when the append already self-synced.
         self.log.ensure_per_record_durability()?;
+        // Auto-commit if the CommitPolicy threshold was reached (#890).
+        self.maybe_auto_commit().await?;
         Ok(())
     }
 
@@ -334,6 +395,8 @@ impl Engine {
         // sync-deferral scope, which would otherwise leave this acknowledged
         // write unsynced. A no-op when the append already self-synced.
         self.log.ensure_per_record_durability()?;
+        // Auto-commit if the CommitPolicy threshold was reached (#890).
+        self.maybe_auto_commit().await?;
         Ok(())
     }
 
@@ -445,6 +508,17 @@ impl Engine {
                     source: Box::new(e),
                 });
             }
+            // Auto-commit every `n` documents *within* the batch (#890). The
+            // commit's own `flush_wal` is deferral-independent, so each chunk
+            // becomes durable in one fsync + one ladder (group-commit per
+            // chunk), leaving the sync-deferral scope intact for the rest of
+            // the loop. A commit failure is distinct from a per-document
+            // failure: surface it directly (the applied prefix stays in the
+            // WAL and replays on recovery) rather than as a `BatchIngest`.
+            if let Err(e) = self.maybe_auto_commit().await {
+                drop(deferral);
+                return Err(e);
+            }
         }
         drop(deferral);
         self.log.flush_wal()
@@ -499,7 +573,36 @@ impl Engine {
         self.lexical.set_last_wal_seq(seq)?;
         self.vector.set_last_wal_seq(seq);
 
+        // 7. Count the applied document toward the auto-commit threshold. The
+        // trigger itself lives at the API boundary (see `maybe_auto_commit`),
+        // not here, so this method's `Ok` keeps meaning "document applied" —
+        // a commit failure never masquerades as a per-document index failure.
+        self.docs_since_commit.fetch_add(1, Ordering::AcqRel);
+
         Ok(doc_id)
+    }
+
+    /// Run the commit ladder if the [`CommitPolicy`] threshold has been reached.
+    ///
+    /// A no-op under [`CommitPolicy::Manual`] and [`CommitPolicy::EveryDocs`]
+    /// with a zero count. Under `EveryDocs(n)` with `n > 0` it commits once the
+    /// documents applied since the last commit reach `n`; [`Self::commit`]
+    /// resets the counter. Called at ingestion API boundaries (after each
+    /// singular put/add, and after each document inside a batch), never inside
+    /// [`Self::index_internal`], so its error is reported as a commit error
+    /// rather than a document-index failure.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any error from [`Self::commit`].
+    async fn maybe_auto_commit(&self) -> Result<()> {
+        let CommitPolicy::EveryDocs(n) = self.commit_policy else {
+            return Ok(());
+        };
+        if n > 0 && self.docs_since_commit.load(Ordering::Acquire) >= n as u64 {
+            self.commit().await?;
+        }
+        Ok(())
     }
 
     /// Apply the schema's [`DynamicFieldPolicy`](schema::DynamicFieldPolicy)
@@ -755,6 +858,9 @@ impl Engine {
         self.log.commit_documents()?;
         // After successful commit to all stores, truncate the log
         self.log.truncate()?;
+        // Reset the auto-commit counter so a manual commit and an
+        // `EveryDocs` auto-commit keep the same cadence going forward (#890).
+        self.docs_since_commit.store(0, Ordering::Release);
         Ok(())
     }
 
@@ -1942,6 +2048,7 @@ pub struct EngineBuilder {
     runtime_analyzers: HashMap<String, Arc<dyn Analyzer>>,
     embedding_cache_capacity: Option<usize>,
     wal_sync_policy: WalSyncPolicy,
+    commit_policy: CommitPolicy,
 }
 
 impl EngineBuilder {
@@ -1955,6 +2062,7 @@ impl EngineBuilder {
             runtime_analyzers: HashMap::new(),
             embedding_cache_capacity: None,
             wal_sync_policy: WalSyncPolicy::default(),
+            commit_policy: CommitPolicy::default(),
         }
     }
 
@@ -2041,6 +2149,25 @@ impl EngineBuilder {
         self
     }
 
+    /// Set the auto-commit policy (Issue #890).
+    ///
+    /// Defaults to [`CommitPolicy::Manual`] — the engine commits only when the
+    /// caller invokes [`Engine::commit`]. Use [`CommitPolicy::EveryDocs`] to
+    /// run the commit ladder automatically every `n` applied documents (across
+    /// the singular and batch ingest APIs, and every `n` documents *within* a
+    /// batch). Orthogonal to [`Self::wal_sync_policy`]: an auto-commit works
+    /// under any WAL sync policy because [`Engine::commit`] always begins with
+    /// a WAL flush.
+    ///
+    /// # Arguments
+    ///
+    /// * `policy` - The auto-commit policy. `EveryDocs(0)` disables auto-commit
+    ///   (equivalent to `Manual`).
+    pub fn commit_policy(mut self, policy: CommitPolicy) -> Self {
+        self.commit_policy = policy;
+        self
+    }
+
     /// Build the [`Engine`].
     ///
     /// Creates the lexical store, vector store, and document log (WAL),
@@ -2095,6 +2222,8 @@ impl EngineBuilder {
             log,
             runtime_analyzers: self.runtime_analyzers,
             embedding_cache,
+            commit_policy: self.commit_policy,
+            docs_since_commit: AtomicU64::new(0),
             #[cfg(not(target_arch = "wasm32"))]
             _wal_flush_timer: wal_flush_timer,
         };
@@ -3509,6 +3638,182 @@ mod tests {
              got {} (regression: either #480 fanout BKD or #400 \
              per-segment deletion filter)",
             hits.len()
+        );
+    }
+
+    // ---- #890 CommitPolicy (auto-commit) gates ----
+
+    /// Build a `title`-only engine with the given auto-commit policy, returning
+    /// the engine plus a handle to the root storage so tests can observe the
+    /// WAL file directly. The WAL lives at `engine.wal` on the root storage;
+    /// the commit ladder truncates it to zero bytes, so [`wal_bytes`] is a
+    /// side-effect-free "are there uncommitted records?" probe.
+    async fn commit_policy_engine(policy: CommitPolicy) -> (Engine, Arc<dyn Storage>) {
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::TextOption;
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .build();
+        let engine = Engine::builder(storage.clone(), schema)
+            .commit_policy(policy)
+            .build()
+            .await
+            .unwrap();
+        (engine, storage)
+    }
+
+    /// Bytes in the WAL file: `0` right after a commit (the ladder truncates
+    /// the WAL) or before the first append; `> 0` while uncommitted records are
+    /// buffered.
+    fn wal_bytes(storage: &Arc<dyn Storage>) -> u64 {
+        storage.file_size("engine.wal").unwrap_or(0)
+    }
+
+    fn title_doc(title: &str) -> Document {
+        Document::builder().add_text("title", title).build()
+    }
+
+    /// #890: `EveryDocs(n)` auto-commits after exactly every n-th applied
+    /// document — the WAL is truncated right after each n-th put and non-empty
+    /// in between (a deterministic commit-boundary counter).
+    #[tokio::test]
+    async fn every_docs_commits_at_exact_multiples() {
+        let (engine, storage) = commit_policy_engine(CommitPolicy::EveryDocs(3)).await;
+        for i in 1..=7u64 {
+            engine
+                .put_document(&format!("d{i}"), title_doc("x"))
+                .await
+                .unwrap();
+            if i % 3 == 0 {
+                assert_eq!(
+                    wal_bytes(&storage),
+                    0,
+                    "an auto-commit must truncate the WAL at doc {i}"
+                );
+            } else {
+                assert!(
+                    wal_bytes(&storage) > 0,
+                    "docs between commit points stay uncommitted (doc {i})"
+                );
+            }
+        }
+    }
+
+    /// #890: within a batch the auto-commit fires every n documents *inside*
+    /// the call (chunked), not once at the end. `EveryDocs(3)` over 7 docs
+    /// commits at docs 3 and 6, leaving exactly the 1-document remainder
+    /// uncommitted — a single end-of-batch commit would empty the WAL entirely.
+    #[tokio::test]
+    async fn every_docs_commits_within_batch() {
+        let (engine, storage) = commit_policy_engine(CommitPolicy::EveryDocs(3)).await;
+        let docs: Vec<_> = (1..=7u64)
+            .map(|i| batch_entry(&format!("d{i}"), "x"))
+            .collect();
+        engine.put_documents(docs).await.unwrap();
+        assert!(
+            wal_bytes(&storage) > 0,
+            "chunked auto-commit must leave the 1-doc remainder uncommitted; \
+             an empty WAL would mean a single end-of-batch commit instead"
+        );
+
+        // A clean multiple leaves nothing uncommitted (both chunks committed).
+        let (engine2, storage2) = commit_policy_engine(CommitPolicy::EveryDocs(3)).await;
+        let docs2: Vec<_> = (1..=6u64)
+            .map(|i| batch_entry(&format!("d{i}"), "x"))
+            .collect();
+        engine2.put_documents(docs2).await.unwrap();
+        assert_eq!(
+            wal_bytes(&storage2),
+            0,
+            "6 docs at EveryDocs(3) commits both chunks, leaving an empty WAL"
+        );
+    }
+
+    /// #890: `EveryDocs(0)` disables auto-commit (equivalent to `Manual`).
+    #[tokio::test]
+    async fn every_docs_zero_is_manual() {
+        let (engine, storage) = commit_policy_engine(CommitPolicy::EveryDocs(0)).await;
+        for i in 1..=5u64 {
+            engine
+                .put_document(&format!("d{i}"), title_doc("x"))
+                .await
+                .unwrap();
+        }
+        assert!(wal_bytes(&storage) > 0, "EveryDocs(0) must not auto-commit");
+        engine.commit().await.unwrap();
+        assert_eq!(
+            wal_bytes(&storage),
+            0,
+            "an explicit commit still truncates the WAL"
+        );
+    }
+
+    /// #890: the default policy is `Manual` — no auto-commit until the caller
+    /// commits explicitly.
+    #[tokio::test]
+    async fn manual_default_no_autocommit() {
+        assert_eq!(CommitPolicy::default(), CommitPolicy::Manual);
+        let (engine, storage) = commit_policy_engine(CommitPolicy::Manual).await;
+        for i in 1..=5u64 {
+            engine
+                .put_document(&format!("d{i}"), title_doc("x"))
+                .await
+                .unwrap();
+        }
+        assert!(wal_bytes(&storage) > 0, "Manual must never auto-commit");
+    }
+
+    /// #890: a manual commit between auto-commits resets the counter, so the
+    /// next auto-commit lands n documents after the reset — not at a stale
+    /// offset carried over from before the manual commit.
+    #[tokio::test]
+    async fn commit_resets_autocommit_counter() {
+        let (engine, storage) = commit_policy_engine(CommitPolicy::EveryDocs(3)).await;
+        // 2 docs, then a manual commit resets the counter to 0.
+        for i in 1..=2u64 {
+            engine
+                .put_document(&format!("d{i}"), title_doc("x"))
+                .await
+                .unwrap();
+        }
+        engine.commit().await.unwrap();
+        assert_eq!(wal_bytes(&storage), 0);
+
+        // The next auto-commit must be 3 docs after the reset (at d5), not 1
+        // (which would happen if the counter still held its pre-commit value 2).
+        engine.put_document("d3", title_doc("x")).await.unwrap();
+        assert!(
+            wal_bytes(&storage) > 0,
+            "1 doc after a manual commit must not auto-commit (counter was reset)"
+        );
+        engine.put_document("d4", title_doc("x")).await.unwrap();
+        assert!(wal_bytes(&storage) > 0);
+        engine.put_document("d5", title_doc("x")).await.unwrap();
+        assert_eq!(
+            wal_bytes(&storage),
+            0,
+            "auto-commit lands exactly 3 docs after the manual-commit reset"
+        );
+    }
+
+    /// #890: an auto-committed document is durably searchable without any
+    /// explicit commit from the caller (end-to-end wiring through the ladder).
+    #[tokio::test]
+    async fn every_docs_autocommit_is_searchable_without_explicit_commit() {
+        let (engine, _storage) = commit_policy_engine(CommitPolicy::EveryDocs(2)).await;
+        engine.put_document("a", title_doc("alpha")).await.unwrap();
+        engine.put_document("b", title_doc("bravo")).await.unwrap();
+        // No explicit commit — the 2nd put reached the threshold and committed.
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:alpha"))
+            .limit(10)
+            .build();
+        assert_eq!(
+            engine.search(request).await.unwrap().len(),
+            1,
+            "an auto-committed doc must be searchable without an explicit commit"
         );
     }
 }

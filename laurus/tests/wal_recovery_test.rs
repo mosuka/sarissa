@@ -6,8 +6,8 @@ use laurus::lexical::TextOption;
 use laurus::storage::file::FileStorageConfig;
 use laurus::storage::{StorageConfig, StorageFactory};
 use laurus::vector::FlatOption;
+use laurus::{CommitPolicy, FieldOption, LexicalSearchQuery, Schema, WalSyncPolicy};
 use laurus::{DataValue, Document};
-use laurus::{FieldOption, LexicalSearchQuery, Schema, WalSyncPolicy};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_wal_recovery_uncommitted() -> laurus::Result<()> {
@@ -119,6 +119,63 @@ async fn test_wal_recovery_group_commit_flush_wal() -> laurus::Result<()> {
             search_results.len(),
             1,
             "flush_wal'd group-commit record should recover from WAL"
+        );
+    }
+
+    Ok(())
+}
+
+/// #890: an engine with `CommitPolicy::EveryDocs` must keep the exact same
+/// crash/recovery semantics as manual commits. Ingesting a number of documents
+/// that is not a multiple of the threshold leaves an uncommitted tail in the
+/// WAL; a crash (drop without an explicit final commit) followed by a reopen
+/// must recover every document — the auto-committed prefix from the stores and
+/// the uncommitted tail from WAL replay — with no loss or duplication.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_commit_policy_every_docs_crash_recovery() -> laurus::Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let storage_config = StorageConfig::File(FileStorageConfig::new(temp_dir.path()));
+    let storage = StorageFactory::create(storage_config)?;
+
+    let config = Schema::builder()
+        .add_field("title", FieldOption::Text(TextOption::default()))
+        .add_field("embedding", FieldOption::Flat(FlatOption::default()))
+        .build();
+
+    // Round 1: ingest 5 docs under EveryDocs(3). Doc 3 auto-commits (docs 1-3
+    // durable in the stores); docs 4-5 remain uncommitted in the WAL. Drop the
+    // engine WITHOUT an explicit final commit — the crash.
+    {
+        let engine = Engine::builder(storage.clone(), config.clone())
+            .commit_policy(CommitPolicy::EveryDocs(3))
+            .build()
+            .await?;
+
+        for i in 0..5 {
+            let doc = Document::builder()
+                .add_field("title", DataValue::Text(format!("rust doc {i}")))
+                .add_field("embedding", DataValue::Vector(vec![0.1; 128]))
+                .build();
+            engine.put_document(&format!("doc{i}"), doc).await?;
+        }
+        // Drop without commit — docs 4-5 are only in the WAL.
+    }
+
+    // Round 2: reopen on the same storage. Recovery replays the uncommitted
+    // tail; all 5 documents must be present.
+    {
+        let engine = Engine::new(storage.clone(), config.clone()).await?;
+        let query = Box::new(TermQuery::new("title", "rust"));
+        let search_request = laurus::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::Obj(query))
+            .limit(10)
+            .build();
+        let results = engine.search(search_request).await?;
+        assert_eq!(
+            results.len(),
+            5,
+            "all 5 docs must survive a crash under EveryDocs: the auto-committed \
+             prefix from the stores plus the uncommitted tail from WAL replay"
         );
     }
 
