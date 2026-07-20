@@ -799,4 +799,39 @@ class LaurusTest extends TestCase
         $idx->commit();
         $this->assertCount(1, $idx->getDocuments("doc1"));
     }
+
+    // ── Auto-commit / CommitPolicy (#893) ─────────────────────────────────
+
+    public function testCommitPolicyFactoriesAccepted(): void
+    {
+        // Both factories build a value object that the Index constructor
+        // accepts as the 4th argument. everyDocs(0) is valid (== manual).
+        $manual = Laurus\CommitPolicy::manual();
+        $this->assertNotNull($manual);
+
+        $auto = Laurus\CommitPolicy::everyDocs(100);
+        $this->assertNotNull($auto);
+
+        $this->assertNotNull(Laurus\CommitPolicy::everyDocs(0));
+
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+
+        $idx1 = new Laurus\Index(null, $schema, null, $manual);
+        $this->assertNotNull($idx1);
+
+        $idx2 = new Laurus\Index(null, $schema, null, $auto);
+        $this->assertNotNull($idx2);
+    }
+
+    public function testEveryDocsAutoCommitEndToEnd(): void
+    {
+        // An index built with everyDocs(1) is wired end-to-end: a document is
+        // retrievable with no explicit commit() from the caller.
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+        $idx = new Laurus\Index(null, $schema, null, Laurus\CommitPolicy::everyDocs(1));
+        $idx->putDocument("d1", ["title" => "Auto"]);
+        $this->assertCount(1, $idx->getDocuments("d1"));
+    }
 }

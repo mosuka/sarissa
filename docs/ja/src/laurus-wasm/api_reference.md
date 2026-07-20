@@ -6,7 +6,7 @@
 
 ### 静的メソッド
 
-#### `Index.create(schema?, walSyncPolicy?)`
+#### `Index.create(schema?, walSyncPolicy?, commitPolicy?)`
 
 新しいインメモリ（一時）インデックスを作成します。
 
@@ -15,9 +15,12 @@
   - `walSyncPolicy` (WalSyncPolicy, 省略可) -- WAL の永続性ポリシー。省略すると
     デフォルトのレコードごとの同期を使用します。
     [WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照してください。
+  - `commitPolicy` (CommitPolicy, 省略可) -- 自動コミットポリシー。省略すると
+    デフォルト（manual: 呼び出し側がコミットを駆動）を使用します。
+    [コミットポリシー / 自動コミット](#コミットポリシー--自動コミット)を参照してください。
 - **戻り値:** `Promise<Index>`
 
-#### `Index.open(name, schema?, walSyncPolicy?)`
+#### `Index.open(name, schema?, walSyncPolicy?, commitPolicy?)`
 
 OPFS で永続化されたインデックスを開くか、新規作成します。
 
@@ -27,6 +30,9 @@ OPFS で永続化されたインデックスを開くか、新規作成します
   - `walSyncPolicy` (WalSyncPolicy, 省略可) -- WAL の永続性ポリシー。省略すると
     デフォルトのレコードごとの同期を使用します。
     [WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照してください。
+  - `commitPolicy` (CommitPolicy, 省略可) -- 自動コミットポリシー。省略すると
+    デフォルト（manual: 呼び出し側がコミットを駆動）を使用します。
+    [コミットポリシー / 自動コミット](#コミットポリシー--自動コミット)を参照してください。
 - **戻り値:** `Promise<Index>`
 
 ### インスタンスメソッド
@@ -244,6 +250,63 @@ for (let i = 0; i < 10000; i++) {
 
 await index.flushWal(); // エンジン WAL をフラッシュ（OPFS ではない）
 await index.commit();   // 変更を検索可能にし、かつ OPFS に永続化する
+```
+
+## コミットポリシー / 自動コミット
+
+コミットはバッファされた書き込みを検索可能なストアに反映します。
+`Index.create` と `Index.open` はオプションの `commitPolicy` を受け付け、
+エンジンが代わりにコミットするかどうかを制御します。デフォルト（引数を省略）は
+manual で、すべての `commit()` を自分で駆動します。
+
+```typescript
+class CommitPolicy {
+  static manual(): CommitPolicy;
+  static everyDocs(n: number): CommitPolicy;
+}
+```
+
+| コンストラクタ | 説明 |
+| :--- | :--- |
+| `CommitPolicy.manual()` | デフォルト。自動コミットなし。呼び出し側がすべての `commit()` を駆動します。 |
+| `CommitPolicy.everyDocs(n)` | `n` 件のドキュメントを適用するたびに自動コミットします。 |
+
+`everyDocs(n)` では、エンジンは `n` 件のドキュメントを適用するたびに 1 回
+コミットします。カウンタは単発とバッチの両方の取り込みにまたがり、バッチの
+**内部**でも発火します — `n` より大きい `putDocuments` 呼び出しはバッチの
+途中で 1 回以上のコミットを引き起こします。`everyDocs(0)` は有効で、自動
+コミットを無効化します。これは `CommitPolicy.manual()` と等価です。
+
+`commitPolicy` は `walSyncPolicy` と**直交**します: `walSyncPolicy` は永続性の
+ために WAL をどの頻度で fsync するかを制御し、`commitPolicy` はバッファされた
+書き込みをいつ検索可能な状態へ反映するかを制御します。両者は独立して設定
+できます。
+
+### WASM の注意点
+
+`walSyncPolicy` の `maxIntervalMs` バックグラウンドタイマー（wasm では no-op）
+とは異なり、`everyDocs` はバックグラウンドスレッドを**必要としません** —
+ドキュメントカウンタは取り込み中にインラインでチェックされます — そのため
+自動コミットは WebAssembly 上でも完全に動作します。
+
+```javascript
+import { Index, Schema, CommitPolicy } from "./pkg/laurus_wasm.js";
+
+const schema = new Schema();
+schema.addTextField("title");
+
+// 1000 件のドキュメントを適用するたびに自動コミット。
+const index = await Index.open(
+  "my-index",
+  schema,
+  undefined,
+  CommitPolicy.everyDocs(1000),
+);
+
+for (let i = 0; i < 10000; i++) {
+  await index.putDocument(`doc${i}`, { title: `Document ${i}` });
+}
+// エンジンは 10 回自動コミット済み。明示的な commit() は不要。
 ```
 
 ## Schema

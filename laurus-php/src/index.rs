@@ -7,7 +7,7 @@ use ext_php_rs::convert::FromZval;
 use ext_php_rs::prelude::*;
 use ext_php_rs::types::{ZendHashTable, Zval};
 use laurus::{
-    DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Engine, EngineStats, Storage,
+    CommitPolicy, DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Engine, EngineStats, Storage,
     StorageConfig, StorageFactory, WalSyncPolicy,
 };
 
@@ -137,6 +137,87 @@ impl PhpWalSyncPolicy {
 }
 
 // ---------------------------------------------------------------------------
+// CommitPolicy
+// ---------------------------------------------------------------------------
+
+/// Auto-commit policy controlling when the engine automatically runs the commit
+/// ladder during ingestion.
+///
+/// By default the engine commits only when `commit()` is called explicitly; a
+/// non-`manual` policy makes it commit automatically at an ingestion-driven
+/// cadence. This is orthogonal to [`PhpWalSyncPolicy`].
+///
+/// ```php
+/// use Laurus\CommitPolicy;
+/// use Laurus\Index;
+///
+/// // Manual (the default): the caller drives every commit().
+/// $policy = CommitPolicy::manual();
+///
+/// // Auto-commit after every 1000 applied documents.
+/// $policy = CommitPolicy::everyDocs(1000);
+///
+/// $index = new Index(null, null, null, $policy);
+/// ```
+#[php_class]
+#[php(name = "Laurus\\CommitPolicy")]
+#[derive(Clone, Copy)]
+pub struct PhpCommitPolicy {
+    /// The wrapped Rust auto-commit policy passed to the engine builder.
+    pub inner: CommitPolicy,
+}
+
+#[php_impl]
+impl PhpCommitPolicy {
+    /// Create a manual (no auto-commit) policy.
+    ///
+    /// The engine commits only when `commit()` is called explicitly. This is
+    /// the engine default when no `commit_policy` is supplied to
+    /// [`PhpIndex::__construct`].
+    ///
+    /// # Returns
+    ///
+    /// A `CommitPolicy` wrapping [`CommitPolicy::Manual`].
+    pub fn manual() -> Self {
+        Self {
+            inner: CommitPolicy::Manual,
+        }
+    }
+
+    /// Create an auto-commit-every-`n`-documents policy.
+    ///
+    /// The engine runs the commit ladder after every `n` applied documents,
+    /// across the singular and batch ingest APIs (and every `n` documents
+    /// within a single batch). `everyDocs(0)` disables auto-commit, which is
+    /// equivalent to [`PhpCommitPolicy::manual`].
+    ///
+    /// # Arguments
+    ///
+    /// * `n` - Commit after this many applied documents. `0` disables
+    ///   auto-commit.
+    ///
+    /// # Returns
+    ///
+    /// A `CommitPolicy` wrapping [`CommitPolicy::EveryDocs`].
+    pub fn every_docs(n: i64) -> Self {
+        Self {
+            inner: CommitPolicy::EveryDocs(n.max(0) as usize),
+        }
+    }
+
+    /// Return a string representation.
+    pub fn __to_string(&self) -> String {
+        match self.inner {
+            CommitPolicy::Manual => "CommitPolicy.manual()".to_string(),
+            CommitPolicy::EveryDocs(n) => format!("CommitPolicy.everyDocs({n})"),
+            // `CommitPolicy` is #[non_exhaustive]; render a future variant
+            // generically rather than failing to compile.
+            _ => "CommitPolicy(<unknown>)".to_string(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Index
 // ---------------------------------------------------------------------------
 
@@ -184,10 +265,15 @@ impl PhpIndex {
     ///   write-ahead log is forced durable. Defaults to per-record durability
     ///   ([`WalSyncPolicy::PerRecord`]) when null. Use
     ///   [`PhpWalSyncPolicy::group`] for higher-throughput group commit.
+    /// * `commit_policy` - Optional [`PhpCommitPolicy`] controlling automatic
+    ///   commits during ingestion. Defaults to manual (caller-driven commits)
+    ///   when null. Use [`PhpCommitPolicy::every_docs`] to auto-commit every
+    ///   `n` documents.
     pub fn __construct(
         path: Option<String>,
         schema: Option<&PhpSchema>,
         wal_sync_policy: Option<&PhpWalSyncPolicy>,
+        commit_policy: Option<&PhpCommitPolicy>,
     ) -> PhpResult<Self> {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| ext_php_rs::exception::PhpException::default(e.to_string()))?;
@@ -202,6 +288,9 @@ impl PhpIndex {
         let mut builder = Engine::builder(storage, schema_val);
         if let Some(policy) = wal_sync_policy {
             builder = builder.wal_sync_policy(policy.inner);
+        }
+        if let Some(policy) = commit_policy {
+            builder = builder.commit_policy(policy.inner);
         }
 
         let engine = rt.block_on(builder.build()).map_err(laurus_err)?;

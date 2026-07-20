@@ -71,6 +71,27 @@ class TestIndex < Minitest::Test
     assert_equal 1, docs.length
   end
 
+  def test_commit_policy_constructors
+    # Both constructors build accepted value objects.
+    refute_nil Laurus::CommitPolicy.manual
+    refute_nil Laurus::CommitPolicy.every_docs(100)
+    # every_docs(0) is valid — it disables auto-commit (equivalent to manual).
+    refute_nil Laurus::CommitPolicy.every_docs(0)
+
+    # Every variant, and the default (omitted kwarg), is accepted by Index.new.
+    refute_nil Laurus::Index.new(commit_policy: Laurus::CommitPolicy.manual)
+    refute_nil Laurus::Index.new(commit_policy: Laurus::CommitPolicy.every_docs(100))
+    refute_nil Laurus::Index.new(commit_policy: Laurus::CommitPolicy.every_docs(0))
+  end
+
+  def test_index_with_every_docs_auto_commit
+    idx = Laurus::Index.new(commit_policy: Laurus::CommitPolicy.every_docs(1))
+    idx.put_document("d1", { "title" => "Auto" })
+    # No explicit commit — the binding path is wired end-to-end.
+    docs = idx.get_documents("d1")
+    assert_equal 1, docs.length
+  end
+
   # ---------------------------------------------------------------------------
   # Document CRUD
   # ---------------------------------------------------------------------------

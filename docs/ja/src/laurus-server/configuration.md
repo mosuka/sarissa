@@ -46,6 +46,10 @@ sync_policy = "group"          # "per_record"（デフォルト） | "group"
 group_max_records = 1024       # オプション; デフォルト 1024
 group_max_bytes = 1048576      # オプション; デフォルト 1 MiB
 group_max_interval_ms = 1000   # オプション; 未設定時は background timer なし（native のみ）
+
+[index.commit]
+policy = "every_docs"          # "manual"（デフォルト） | "every_docs"
+every_docs = 1000              # オプション; N 件ごとに commit（0/未設定で無効）
 ```
 
 ログの詳細度は設定ファイルではなく、`RUST_LOG` 環境変数で制御します（デフォルト: `info`）。
@@ -87,6 +91,25 @@ WAL は **per-record** fsync を使用します（各書き込みは返る前に
 無条件で flush します。クラッシュ時には未 sync の最終バッチまで失う可能性があります
 （SQLite `synchronous = NORMAL` に相当）。途中で切れた末尾レコードはリカバリ時に
 破棄されるため、復旧後のログにはギャップが生じません。
+
+#### `[index.commit]` セクション
+
+自動コミットポリシーを制御します。セクション全体を省略した場合、エンジンは
+**manual** — サーバーがインデックスを materialize するときのみ commit します
+（インジェスト中の自動コミットはありません）。このポリシーは、起動時に開かれる
+インデックスと、後から `CreateIndex` で作成されるインデックスの両方に適用されます。
+セマンティクスは
+[永続化と WAL → 自動コミットポリシー](../laurus/persistence.md#自動コミットポリシーauto-commit-policy)
+を参照してください。
+
+| フィールド | 型 | デフォルト | 説明 |
+| :--- | :--- | :--- | :--- |
+| `policy` | String | `"manual"` | 自動コミットポリシー: `"manual"`（呼び出し側が commit を駆動）または `"every_docs"`（`every_docs` 件ごとに commit） |
+| `every_docs` | Integer | -- | `every_docs` ポリシーのみ。適用ドキュメント数がこの値に達するごとに commit。未設定（または `0`）で自動コミット無効（`"manual"` と同等） |
+
+`CommitPolicy` は `[index.wal]` と直交します。WAL セクションは *append がいつ fsync
+されるか* を、このセクションは *ストアがいつ materialize するか* を制御します。commit は
+必ず WAL flush から始まるため、自動コミットは任意の WAL ポリシー下で機能します。
 
 ## 環境変数
 

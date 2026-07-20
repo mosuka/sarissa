@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
-use laurus::{Engine, WalSyncPolicy};
+use laurus::{CommitPolicy, Engine, WalSyncPolicy};
 
 use crate::context;
 use crate::convert::{error, schema as schema_convert};
@@ -29,6 +29,8 @@ pub struct IndexService {
     pub data_dir: PathBuf,
     /// WAL durability policy applied to indices created via this service.
     pub wal_policy: WalSyncPolicy,
+    /// Auto-commit policy applied to indices created via this service.
+    pub commit_policy: CommitPolicy,
 }
 
 #[tonic::async_trait]
@@ -50,9 +52,10 @@ impl IndexServiceTrait for IndexService {
             return Err(Status::already_exists("Index already exists"));
         }
 
-        let engine = context::create_index(&self.data_dir, &schema, self.wal_policy)
-            .await
-            .map_err(error::anyhow_to_status)?;
+        let engine =
+            context::create_index(&self.data_dir, &schema, self.wal_policy, self.commit_policy)
+                .await
+                .map_err(error::anyhow_to_status)?;
         *guard = Some(engine);
 
         tracing::info!("Index created at {}", self.data_dir.display());

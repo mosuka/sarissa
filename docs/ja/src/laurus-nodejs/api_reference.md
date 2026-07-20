@@ -10,6 +10,7 @@ class Index {
     path?: string | null,
     schema?: Schema,
     walSyncPolicy?: WalSyncPolicy,
+    commitPolicy?: CommitPolicy,
   ): Promise<Index>;
 }
 ```
@@ -21,6 +22,7 @@ class Index {
 | `path` | `string \| null` | `null` | 永続化ストレージのディレクトリ。`null` でインメモリ。 |
 | `schema` | `Schema` | 空 | スキーマ定義。 |
 | `walSyncPolicy` | `WalSyncPolicy` | レコードごと | WAL の永続性ポリシー。省略するとデフォルトのレコードごとの `fsync` を使用します。[WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照。 |
+| `commitPolicy` | `CommitPolicy` | 手動 | 自動コミットポリシー。省略するとデフォルトの手動ポリシー（呼び出し側がすべての `commit()` を駆動）を使用します。[コミットポリシー / 自動コミット](#コミットポリシー--自動コミット)を参照。 |
 
 ### メソッド
 
@@ -117,6 +119,55 @@ await index.commit(); // WAL もフラッシュされます
 
 `walSyncPolicy` を省略する（または `WalSyncPolicy.perRecord()` を渡す）と、
 デフォルトの完全に永続的な動作が維持されます。
+
+### コミットポリシー / 自動コミット
+
+デフォルトでは呼び出し側がすべての `commit()` を駆動するため、保留中の変更は
+明示的に呼び出したときにのみ検索可能になります。`Index.create` はオプションの
+`commitPolicy` を受け付け、代わりに取り込み駆動のタイミングでエンジンに自動
+コミットさせることができます。これにより明示的な `commit()` なしで書き込みが
+実体化されます。
+
+```typescript
+class CommitPolicy {
+  static manual(): CommitPolicy;
+  static everyDocs(n: number): CommitPolicy;
+}
+```
+
+| コンストラクタ | 説明 |
+| :--- | :--- |
+| `CommitPolicy.manual()` | デフォルト。自動コミットなし。呼び出し側がすべての `commit()` を駆動します。 |
+| `CommitPolicy.everyDocs(n)` | 適用されたドキュメント `n` 件ごとに自動コミットします。 |
+
+`everyDocs(n)` では、エンジンは適用されたドキュメント `n` 件ごとにコミットし、
+その件数は単発・バッチ両方の取り込みにまたがって数えられます — 1 つのバッチ
+**内部**でもドキュメント `n` 件ごとにコミットされます。`everyDocs(0)` は有効で
+自動コミットを無効化し、`CommitPolicy.manual()` と等価です。
+
+`commitPolicy` は `walSyncPolicy` と直交します。`walSyncPolicy` は WAL の
+`fsync` 永続性を制御するのに対し、`commitPolicy` は保留中の変更を検索可能な
+コミットへ**いつ**実体化するかを制御します。両者は自由に組み合わせられます。
+
+```javascript
+import { Index, CommitPolicy } from "laurus-nodejs";
+
+// 適用されたドキュメント 1000 件ごとに自動コミットします。
+const index = await Index.create(
+  null,
+  schema,
+  undefined,
+  CommitPolicy.everyDocs(1000),
+);
+
+for (let i = 0; i < 10000; i++) {
+  await index.putDocument(`doc${i}`, { title: `Document ${i}` });
+}
+// エンジンはすでに 10 回コミット済みです。明示的な commit() は不要です。
+```
+
+`commitPolicy` を省略する（または `CommitPolicy.manual()` を渡す）と、
+デフォルトの呼び出し側駆動のコミット動作が維持されます。
 
 ---
 

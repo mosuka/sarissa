@@ -11,6 +11,7 @@ class Index:
         path: str | None = None,
         schema: Schema | None = None,
         wal_sync_policy: WalSyncPolicy | None = None,
+        commit_policy: CommitPolicy | None = None,
     ) -> None: ...
 ```
 
@@ -21,6 +22,7 @@ class Index:
 | `path` | `str \| None` | `None` | Directory path for persistent storage. `None` creates an in-memory index. |
 | `schema` | `Schema \| None` | `None` | Schema definition. An empty schema is used when omitted. |
 | `wal_sync_policy` | `WalSyncPolicy \| None` | `None` | WAL durability policy. `None` keeps the default per-record `fsync`. See [WAL sync policy / durability](#wal-sync-policy--durability). |
+| `commit_policy` | `CommitPolicy \| None` | `None` | Auto-commit policy. `None` keeps the default manual commit (no auto-commit). See [Commit policy / auto-commit](#commit-policy--auto-commit). |
 
 ### Methods
 
@@ -110,6 +112,55 @@ index.commit()  # also flushes the WAL
 
 Omit `wal_sync_policy` (or pass `WalSyncPolicy.per_record()`) to keep the
 default, fully durable behaviour.
+
+### Commit policy / auto-commit
+
+A commit materializes buffered writes into the stores and makes all pending
+changes searchable. By default an `Index` never auto-commits, so the caller
+drives every `commit()` explicitly. The constructor accepts an optional
+`commit_policy` to instead let the engine auto-commit after a fixed number of
+applied documents.
+
+```python
+class CommitPolicy:
+    @staticmethod
+    def manual() -> CommitPolicy: ...
+    @staticmethod
+    def every_docs(n: int) -> CommitPolicy: ...
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `CommitPolicy.manual()` | Default. No auto-commit; the caller drives every `commit()`. |
+| `CommitPolicy.every_docs(n)` | Auto-commit after every `n` applied documents. |
+
+`every_docs(n)` counts applied documents across both singular (`put_document`,
+`add_document`) and batch (`put_documents`, `add_documents`) ingest, and
+auto-commits after every `n` documents — including *within* a single batch.
+`every_docs(0)` is valid and disables auto-commit, making it equivalent to
+`manual()`.
+
+`commit_policy` is orthogonal to `wal_sync_policy`: `wal_sync_policy` governs
+WAL `fsync` durability, whereas `commit_policy` governs when the stores
+materialize pending changes into searchable state. Setting one does not affect
+the other.
+
+```python
+import laurus
+
+# Auto-commit after every 100 applied documents.
+index = laurus.Index(
+    path="./myindex",
+    commit_policy=laurus.CommitPolicy.every_docs(100),
+)
+
+for i in range(1_000):
+    index.put_document(f"doc{i}", {"title": f"Document {i}"})
+# The engine has already committed 10 times (once per 100 documents).
+```
+
+Omit `commit_policy` (or pass `CommitPolicy.manual()`) to keep the default,
+manual-commit behaviour.
 
 ---
 

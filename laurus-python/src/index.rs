@@ -8,7 +8,7 @@ use crate::errors::laurus_err;
 use crate::schema::PySchema;
 use crate::search::{PySearchResult, build_request_from_py, to_py_search_result};
 use laurus::{
-    DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Engine, EngineStats, Storage,
+    CommitPolicy, DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Engine, EngineStats, Storage,
     StorageConfig, StorageFactory, WalSyncPolicy,
 };
 use pyo3::exceptions::PyRuntimeError;
@@ -133,6 +133,86 @@ impl PyWalSyncPolicy {
 }
 
 // ---------------------------------------------------------------------------
+// CommitPolicy
+// ---------------------------------------------------------------------------
+
+/// Auto-commit policy that controls when the engine automatically runs the
+/// commit ladder during ingestion.
+///
+/// This is a value object wrapping the Rust [`laurus::CommitPolicy`]. It is
+/// passed to [`Index`] at construction time via the `commit_policy` keyword
+/// argument. By default the engine commits only when [`Index.commit`] is
+/// called explicitly; a non-`manual` policy makes it commit automatically at
+/// an ingestion-driven cadence. This is orthogonal to `wal_sync_policy`.
+///
+/// ## Constructing a policy
+///
+/// ```python
+/// import laurus
+///
+/// # Manual (the default): the caller drives every commit().
+/// policy = laurus.CommitPolicy.manual()
+///
+/// # Auto-commit after every 1000 applied documents.
+/// policy = laurus.CommitPolicy.every_docs(1000)
+///
+/// index = laurus.Index(commit_policy=policy)
+/// ```
+#[pyclass(name = "CommitPolicy", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyCommitPolicy {
+    /// The wrapped Rust auto-commit policy.
+    pub inner: CommitPolicy,
+}
+
+#[pymethods]
+impl PyCommitPolicy {
+    /// Create a manual (no auto-commit) policy.
+    ///
+    /// The engine commits only when [`Index.commit`] is called explicitly.
+    /// This is the default when no `commit_policy` is supplied to [`Index`].
+    ///
+    /// Returns:
+    ///     A `CommitPolicy` wrapping `CommitPolicy::Manual`.
+    #[staticmethod]
+    pub fn manual() -> Self {
+        Self {
+            inner: CommitPolicy::Manual,
+        }
+    }
+
+    /// Create an auto-commit-every-`n`-documents policy.
+    ///
+    /// The engine runs the commit ladder after every `n` applied documents,
+    /// across the singular and batch ingest APIs (and every `n` documents
+    /// within a single batch). `every_docs(0)` disables auto-commit, which is
+    /// equivalent to [`CommitPolicy.manual`].
+    ///
+    /// Args:
+    ///     n: Commit after this many applied documents. `0` disables
+    ///         auto-commit.
+    ///
+    /// Returns:
+    ///     A `CommitPolicy` wrapping `CommitPolicy::EveryDocs(n)`.
+    #[staticmethod]
+    pub fn every_docs(n: usize) -> Self {
+        Self {
+            inner: CommitPolicy::EveryDocs(n),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        match self.inner {
+            CommitPolicy::Manual => "CommitPolicy.manual()".to_string(),
+            CommitPolicy::EveryDocs(n) => format!("CommitPolicy.every_docs({n})"),
+            // `CommitPolicy` is #[non_exhaustive]; a future variant renders
+            // generically rather than failing to compile.
+            _ => "CommitPolicy(<unknown>)".to_string(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Index
 // ---------------------------------------------------------------------------
 
@@ -200,12 +280,16 @@ impl PyIndex {
     ///           appends are fsync'd. When `None` (the default), laurus uses
     ///           per-record durability (every append is fsync'd before it
     ///           returns).
+    ///     commit_policy: Optional [`CommitPolicy`] controlling automatic
+    ///           commits during ingestion. When `None` (the default), the
+    ///           engine is manual — the caller drives every `commit()`.
     #[new]
-    #[pyo3(signature = (path=None, schema=None, wal_sync_policy=None))]
+    #[pyo3(signature = (path=None, schema=None, wal_sync_policy=None, commit_policy=None))]
     pub fn new(
         path: Option<String>,
         schema: Option<&PySchema>,
         wal_sync_policy: Option<&PyWalSyncPolicy>,
+        commit_policy: Option<&PyCommitPolicy>,
     ) -> PyResult<Self> {
         let rt =
             tokio::runtime::Runtime::new().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
@@ -216,6 +300,9 @@ impl PyIndex {
         let mut builder = Engine::builder(storage, schema);
         if let Some(p) = wal_sync_policy {
             builder = builder.wal_sync_policy(p.inner);
+        }
+        if let Some(p) = commit_policy {
+            builder = builder.commit_policy(p.inner);
         }
 
         let engine = rt.block_on(builder.build()).map_err(laurus_err)?;

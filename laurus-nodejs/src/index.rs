@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::commit::JsCommitPolicy;
 use crate::convert::{data_value_to_json, json_to_document};
 use crate::errors::laurus_err;
 use crate::query::{JsQuery, JsTermQuery, JsVectorQuery, JsVectorQueryInner, JsVectorTextQuery};
@@ -78,6 +79,9 @@ impl JsIndex {
     /// * `wal_sync_policy` - Optional WAL durability policy (see
     ///     `WalSyncPolicy`). When omitted, the default per-record policy is
     ///     used, where every append is fsync'd before it returns.
+    /// * `commit_policy` - Optional auto-commit policy (see `CommitPolicy`).
+    ///     When omitted, the engine is manual — the caller drives every
+    ///     `commit()`.
     ///
     /// # Returns
     ///
@@ -87,6 +91,7 @@ impl JsIndex {
         path: Option<String>,
         schema: Option<&JsSchema>,
         wal_sync_policy: Option<&JsWalSyncPolicy>,
+        commit_policy: Option<&JsCommitPolicy>,
     ) -> Result<Self> {
         let storage = create_storage(path.as_deref())?;
         let schema = schema.map(|s| s.inner.clone()).unwrap_or_default();
@@ -94,6 +99,9 @@ impl JsIndex {
         let mut builder = Engine::builder(storage, schema);
         if let Some(policy) = wal_sync_policy {
             builder = builder.wal_sync_policy(policy.inner);
+        }
+        if let Some(policy) = commit_policy {
+            builder = builder.commit_policy(policy.inner);
         }
         let engine = builder.build().await.map_err(laurus_err)?;
 

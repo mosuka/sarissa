@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 use laurus::storage::file::FileStorageConfig;
-use laurus::{Engine, Schema, StorageConfig, StorageFactory, WalSyncPolicy};
+use laurus::{CommitPolicy, Engine, Schema, StorageConfig, StorageFactory, WalSyncPolicy};
 
 /// Filename used to persist the index schema inside the data directory.
 const SCHEMA_FILE: &str = "schema.toml";
@@ -27,6 +27,7 @@ const STORE_DIR: &str = "store";
 /// * `data_dir`  - Root directory where the index files will be stored.
 /// * `schema`    - The schema definition describing the index fields.
 /// * `wal_policy` - WAL durability policy threaded into the engine builder.
+/// * `commit_policy` - Auto-commit policy threaded into the engine builder.
 ///
 /// # Returns
 ///
@@ -40,6 +41,7 @@ pub async fn create_index(
     data_dir: &Path,
     schema: &Schema,
     wal_policy: WalSyncPolicy,
+    commit_policy: CommitPolicy,
 ) -> anyhow::Result<Engine> {
     let schema_path = data_dir.join(SCHEMA_FILE);
     if schema_path.exists() {
@@ -64,6 +66,7 @@ pub async fn create_index(
     let storage = StorageFactory::create(storage_config)?;
     let engine = Engine::builder(storage, schema.clone())
         .wal_sync_policy(wal_policy)
+        .commit_policy(commit_policy)
         .build()
         .await?;
 
@@ -79,6 +82,7 @@ pub async fn create_index(
 ///
 /// * `data_dir`  - Root directory of an existing index.
 /// * `wal_policy` - WAL durability policy threaded into the engine builder.
+/// * `commit_policy` - Auto-commit policy threaded into the engine builder.
 ///
 /// # Returns
 ///
@@ -89,7 +93,11 @@ pub async fn create_index(
 /// Returns an error if no index exists at `data_dir` (i.e. `schema.toml` is
 /// missing), if the schema file cannot be read or parsed, or if the engine
 /// fails to initialise.
-pub async fn open_index(data_dir: &Path, wal_policy: WalSyncPolicy) -> anyhow::Result<Engine> {
+pub async fn open_index(
+    data_dir: &Path,
+    wal_policy: WalSyncPolicy,
+    commit_policy: CommitPolicy,
+) -> anyhow::Result<Engine> {
     let schema_path = data_dir.join(SCHEMA_FILE);
     if !schema_path.exists() {
         bail!(
@@ -107,6 +115,7 @@ pub async fn open_index(data_dir: &Path, wal_policy: WalSyncPolicy) -> anyhow::R
     let storage = StorageFactory::open(storage_config)?;
     let engine = Engine::builder(storage, schema)
         .wal_sync_policy(wal_policy)
+        .commit_policy(commit_policy)
         .build()
         .await?;
 

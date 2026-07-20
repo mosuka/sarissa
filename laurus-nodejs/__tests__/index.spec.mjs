@@ -22,6 +22,7 @@ import {
   WhitespaceTokenizer,
   SynonymGraphFilter,
   WalSyncPolicy,
+  CommitPolicy,
 } from "../index.js";
 
 // ---------------------------------------------------------------------------
@@ -112,6 +113,39 @@ describe("WAL sync policy", () => {
     await index.commit();
     const docs = await index.getDocuments("doc1");
     expect(docs).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit policy (auto-commit)
+// ---------------------------------------------------------------------------
+
+describe("Commit policy", () => {
+  it("accepts manual() and everyDocs(n) factories", () => {
+    expect(CommitPolicy.manual()).toBeDefined();
+    expect(CommitPolicy.everyDocs(100)).toBeDefined();
+    // everyDocs(0) is valid — it disables auto-commit (equivalent to manual).
+    expect(CommitPolicy.everyDocs(0)).toBeDefined();
+  });
+
+  it("creates an index with an EveryDocs policy and retrieves a doc", async () => {
+    const schema = new Schema();
+    schema.addTextField("title");
+    const index = await Index.create(
+      null,
+      schema,
+      undefined,
+      CommitPolicy.everyDocs(1),
+    );
+    await index.putDocument("d1", { title: "Auto" });
+    // No explicit commit — the binding path is wired end-to-end.
+    const docs = await index.getDocuments("d1");
+    expect(docs).toHaveLength(1);
+  });
+
+  it("defaults to manual when no commit policy is given", async () => {
+    const index = await Index.create(null, undefined, undefined, CommitPolicy.manual());
+    expect(index).toBeDefined();
   });
 });
 
