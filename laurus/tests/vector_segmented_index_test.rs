@@ -641,3 +641,277 @@ fn segmented_flag_serde_default_and_explicit_false() {
         "an explicit `segmented: false` must be preserved (#882)"
     );
 }
+
+/// #883: under sustained ingest with the store-ladder cadence (compact after
+/// every commit), the tiered policy keeps the segment count logarithmically
+/// bounded instead of one-segment-per-commit.
+#[test]
+fn sustained_ingest_keeps_segment_count_tiered() {
+    let storage = storage();
+    let index = SegmentedHnswIndex::open_or_create(
+        storage.clone() as Arc<dyn Storage>,
+        "vector_index",
+        config(true),
+    )
+    .unwrap();
+
+    for i in 0..100u64 {
+        commit_batch(&index, i * 5..(i + 1) * 5);
+        // The store's commit ladder calls maybe_auto_compact every commit.
+        index.maybe_auto_compact().unwrap();
+    }
+
+    let segments = storage
+        .list_files()
+        .unwrap()
+        .iter()
+        .filter(|f| f.ends_with(".hnsw"))
+        .count();
+    assert!(
+        segments <= 30,
+        "tiered merging must keep the segment count bounded under \
+         sustained ingest, got {segments} after 100 commits (#883)"
+    );
+
+    // Every doc remains searchable through the merged layout (top-5, since
+    // the corpus is a tight curve where adjacent ids are near-duplicates
+    // and approximate top-1 can legitimately flip between neighbours).
+    let searcher = index.searcher().unwrap();
+    for id in [0u64, 250, 499] {
+        let results = searcher.search(&query(id, 5)).unwrap();
+        assert!(
+            results.results.iter().any(|r| r.doc_id == id),
+            "doc {id} must stay searchable after tiered merging"
+        );
+    }
+}
+
+/// #883: adaptive refill — a live doc ranked *below a deep band of stale
+/// upsert copies inside the same segment* must still surface. This is a
+/// red/green gate for the whole refill feature: the stale band (30 copies) is
+/// deeper than the first pass's 2x over-fetch AND deeper than any fixed
+/// multiplier (the earlier one-shot 8x refill missed it), so the query
+/// returns the wrong far doc unless the budget expands geometrically until
+/// the live hit is reached.
+#[test]
+fn adaptive_refill_recovers_live_doc_behind_stale_band() {
+    let storage = storage();
+    let index = SegmentedHnswIndex::open_or_create(
+        storage.clone() as Arc<dyn Storage>,
+        "vector_index",
+        config(true),
+    )
+    .unwrap();
+
+    // Segment A (older): the stale band (docs 1..=30, tightly clustered
+    // around doc_vec(0)) AND the LIVE doc 100 (doc_vec(31), just past the
+    // band) are committed together, so doc 100 sits at rank 31 *within the
+    // same segment* — behind all 30 copies. This is the construction the
+    // refill must handle; committing doc 100 separately would let it surface
+    // unmasked from its own segment and never exercise the refill.
+    {
+        let mut writer = index.writer().unwrap();
+        let mut batch: Vec<_> = (1..=30u64)
+            .map(|i| (i, "v".to_string(), doc_vec(i)))
+            .collect();
+        batch.push((100, "v".to_string(), doc_vec(31)));
+        writer.add_vectors(batch).unwrap();
+        writer.commit().unwrap();
+    }
+
+    // Segment C (newest): upserted copies of docs 1..=30, far away from the
+    // query — the old copies in segment A become a pure stale band that
+    // masking must skip over to reach doc 100.
+    {
+        let mut writer = index.writer().unwrap();
+        for id in 1..=30u64 {
+            writer.delete_document(id).unwrap();
+            writer
+                .add_vectors(vec![(id, "v".to_string(), doc_vec(9000 + id))])
+                .unwrap();
+        }
+        writer.commit().unwrap();
+    }
+
+    // Query at the old cluster centre with top_k=1: the 30 hits ranked above
+    // doc 100 in segment A are all masked stale copies. A fixed 2x (or 8x)
+    // over-fetch never reaches rank 31; only the expanding refill does.
+    let searcher = index.searcher().unwrap();
+    let results = searcher.search(&query(0, 1)).unwrap();
+    assert_eq!(
+        results.results.first().map(|r| r.doc_id),
+        Some(100),
+        "the live doc behind the deep stale band must surface via the \
+         expanding adaptive refill (#883), got {:?}",
+        results.results
+    );
+}
+
+/// Storage decorator counting every byte written through `create_output`
+/// (including rewrites — file sizes alone cannot see them).
+mod byte_counting {
+    use std::io::Write;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use laurus::storage::{Storage, StorageInput, StorageOutput};
+
+    #[derive(Debug)]
+    pub struct ByteCountingStorage {
+        inner: Arc<dyn Storage>,
+        pub written: Arc<AtomicU64>,
+    }
+
+    impl ByteCountingStorage {
+        pub fn new(inner: Arc<dyn Storage>) -> Self {
+            Self {
+                inner,
+                written: Arc::new(AtomicU64::new(0)),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct CountingOutput {
+        inner: Box<dyn StorageOutput>,
+        written: Arc<AtomicU64>,
+    }
+
+    impl Write for CountingOutput {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let n = self.inner.write(buf)?;
+            self.written.fetch_add(n as u64, Ordering::Relaxed);
+            Ok(n)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.inner.flush()
+        }
+    }
+
+    impl std::io::Seek for CountingOutput {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    impl StorageOutput for CountingOutput {
+        fn flush_and_sync(&mut self) -> laurus::Result<()> {
+            self.inner.flush_and_sync()
+        }
+        fn position(&self) -> laurus::Result<u64> {
+            self.inner.position()
+        }
+        fn close(&mut self) -> laurus::Result<()> {
+            self.inner.close()
+        }
+    }
+
+    impl Storage for ByteCountingStorage {
+        fn open_input(&self, name: &str) -> laurus::Result<Box<dyn StorageInput>> {
+            self.inner.open_input(name)
+        }
+        fn create_output(&self, name: &str) -> laurus::Result<Box<dyn StorageOutput>> {
+            Ok(Box::new(CountingOutput {
+                inner: self.inner.create_output(name)?,
+                written: self.written.clone(),
+            }))
+        }
+        fn create_output_append(&self, name: &str) -> laurus::Result<Box<dyn StorageOutput>> {
+            Ok(Box::new(CountingOutput {
+                inner: self.inner.create_output_append(name)?,
+                written: self.written.clone(),
+            }))
+        }
+        fn delete_file(&self, name: &str) -> laurus::Result<()> {
+            self.inner.delete_file(name)
+        }
+        fn file_exists(&self, name: &str) -> bool {
+            self.inner.file_exists(name)
+        }
+        fn list_files(&self) -> laurus::Result<Vec<String>> {
+            self.inner.list_files()
+        }
+        fn file_size(&self, name: &str) -> laurus::Result<u64> {
+            self.inner.file_size(name)
+        }
+        fn rename_file(&self, from: &str, to: &str) -> laurus::Result<()> {
+            self.inner.rename_file(from, to)
+        }
+        fn metadata(&self, name: &str) -> laurus::Result<laurus::storage::FileMetadata> {
+            self.inner.metadata(name)
+        }
+        fn create_temp_output(
+            &self,
+            prefix: &str,
+        ) -> laurus::Result<(String, Box<dyn StorageOutput>)> {
+            let (name, output) = self.inner.create_temp_output(prefix)?;
+            Ok((
+                name,
+                Box::new(CountingOutput {
+                    inner: output,
+                    written: self.written.clone(),
+                }),
+            ))
+        }
+        fn sync(&self) -> laurus::Result<()> {
+            self.inner.sync()
+        }
+        fn close(&mut self) -> laurus::Result<()> {
+            Ok(())
+        }
+    }
+}
+
+/// #883: the campaign's headline number as a permanent deterministic gate —
+/// the auto-commit ingest scenario writes an order of magnitude fewer
+/// cumulative bytes under the segmented layout than under the monolithic
+/// one (each monolithic commit rewrites and re-quantizes the whole index).
+#[test]
+fn auto_commit_cumulative_bytes_are_bounded() {
+    use byte_counting::ByteCountingStorage;
+
+    let run = |segmented: bool| -> u64 {
+        let counting = Arc::new(ByteCountingStorage::new(Arc::new(MemoryStorage::new(
+            MemoryStorageConfig::default(),
+        ))));
+        let written = counting.written.clone();
+        let index: Box<dyn VectorIndex> = if segmented {
+            Box::new(
+                SegmentedHnswIndex::open_or_create(
+                    counting.clone() as Arc<dyn Storage>,
+                    "vector_index",
+                    config(true),
+                )
+                .unwrap(),
+            )
+        } else {
+            Box::new(
+                HnswIndex::create(
+                    counting.clone() as Arc<dyn Storage>,
+                    "vector_index",
+                    config(false),
+                )
+                .unwrap(),
+            )
+        };
+        // 40 commits of 50 docs each = 2000 docs, the auto-commit cadence.
+        for i in 0..40u64 {
+            commit_batch(index.as_ref(), i * 50..(i + 1) * 50);
+            index.maybe_auto_compact().unwrap();
+        }
+        written.load(std::sync::atomic::Ordering::Relaxed)
+    };
+
+    let monolithic = run(false);
+    let segmented = run(true);
+    eprintln!(
+        "auto-commit cumulative bytes: monolithic={monolithic} segmented={segmented} \
+         ratio={:.1}x",
+        monolithic as f64 / segmented as f64
+    );
+    assert!(
+        segmented * 5 < monolithic,
+        "the segmented layout must write at least 5x fewer cumulative bytes \
+         under auto-commit ingest, got monolithic={monolithic} vs segmented={segmented} (#883)"
+    );
+}

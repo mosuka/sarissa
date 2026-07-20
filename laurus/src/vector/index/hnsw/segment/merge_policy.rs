@@ -71,6 +71,92 @@ impl MergePolicy for SimpleMergePolicy {
     }
 }
 
+/// Tiered, metadata-driven merge policy (#883).
+///
+/// The classic Lucene/tantivy shape adapted to the newest-wins constraint
+/// (#880): candidates must be **generation-contiguous**, so the policy
+/// slides windows over the generation-sorted segment list and picks the
+/// cheapest window whose members are *size-similar* — all within
+/// [`Self::tier_ratio`] of the window's smallest member. Merging similar
+/// sizes keeps the total write amplification logarithmic (each vector is
+/// rewritten O(log N) times over its lifetime); merging a tiny segment into
+/// a huge one repeatedly would be quadratic.
+///
+/// Triggers:
+/// - **Tier full** — some window of `merge_factor` generation-adjacent,
+///   size-similar segments exists (steady-state ingest: the newest tier
+///   fills up every `merge_factor` commits and collapses upward).
+/// - **Hard bound** — the segment count exceeds
+///   [`SegmentManagerConfig::max_segments`]; falls back to the cheapest
+///   contiguous window regardless of similarity, so growth stays bounded
+///   even under adversarial size distributions.
+///
+/// Windows whose merged size would exceed
+/// [`SegmentManagerConfig::max_vectors_per_segment`] are skipped (except
+/// under the hard bound, where boundedness wins).
+#[derive(Debug)]
+pub struct TieredMergePolicy {
+    /// Maximum allowed ratio between the largest and smallest member of a
+    /// candidate window. Defaults to 8.0.
+    pub tier_ratio: f64,
+}
+
+impl TieredMergePolicy {
+    /// Create a tiered policy with the default tier ratio.
+    pub fn new() -> Self {
+        Self { tier_ratio: 8.0 }
+    }
+}
+
+impl Default for TieredMergePolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MergePolicy for TieredMergePolicy {
+    fn candidates(
+        &self,
+        segments: &[ManagedSegmentInfo],
+        config: &SegmentManagerConfig,
+    ) -> Option<Vec<String>> {
+        let merge_factor = (config.merge_factor as usize).max(2);
+        if segments.len() < merge_factor {
+            return None;
+        }
+
+        let mut by_generation: Vec<&ManagedSegmentInfo> = segments.iter().collect();
+        by_generation.sort_by_key(|s| s.generation);
+
+        // Preferred: the cheapest size-similar window (a "full tier").
+        let similar = by_generation
+            .windows(merge_factor)
+            .filter(|w| {
+                let min = w.iter().map(|s| s.vector_count.max(1)).min().unwrap_or(1);
+                let max = w.iter().map(|s| s.vector_count.max(1)).max().unwrap_or(1);
+                max as f64 <= min as f64 * self.tier_ratio
+            })
+            .filter(|w| {
+                w.iter().map(|s| s.vector_count).sum::<u64>() <= config.max_vectors_per_segment
+            })
+            .min_by_key(|w| w.iter().map(|s| s.vector_count).sum::<u64>());
+        if let Some(window) = similar {
+            return Some(window.iter().map(|s| s.segment_id.clone()).collect());
+        }
+
+        // Hard bound: over the segment cap, merge the cheapest contiguous
+        // window regardless of similarity so the count stays bounded.
+        if segments.len() > config.max_segments as usize {
+            let best = by_generation
+                .windows(merge_factor)
+                .min_by_key(|w| w.iter().map(|s| s.vector_count).sum::<u64>())?;
+            return Some(best.iter().map(|s| s.segment_id.clone()).collect());
+        }
+
+        None
+    }
+}
+
 /// Policy that forces validation/merging of all segments.
 #[derive(Debug, Default)]
 pub struct ForceMergePolicy;

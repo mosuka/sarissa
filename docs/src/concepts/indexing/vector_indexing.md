@@ -521,17 +521,49 @@ search budget) and / or a 4-bit PQ variant to close the gap.
 
 ## Segment Files
 
-Each vector index type stores its data in a single segment file:
-
 | Index Type | File Extension | Contents |
 | :--- | :--- | :--- |
 | HNSW | `.hnsw` | Graph structure, vectors, and metadata |
 | Flat | `.flat` | Raw vectors and metadata |
 | IVF | `.ivf` | Cluster centroids, assigned vectors, and metadata |
 
-### Writer retention across commits
+Flat and IVF store their data in a single file that is rewritten on every
+commit. HNSW uses the **segment-per-commit** layout by default (see below);
+the monolithic single-file layout remains available via
+`HnswIndexConfig { segmented: false, .. }` for direct index users.
 
-For HNSW, the store keeps its writer cached **across commits** (Issue #864):
+### Segment-per-commit layout (HNSW, default)
+
+Since [#634](https://github.com/mosuka/laurus/issues/634), each HNSW commit
+seals only the **newly added vectors** as an immutable
+`segment_NNNNNN.hnsw` file and registers it in an atomic, checksummed
+`segments.json` manifest — the per-commit cost drops from O(index) to
+O(new documents), with no re-quantization of the existing corpus:
+
+- **Search** fans out over the sealed segments (newest generation first)
+  and deduplicates same-document copies with newest-wins masking, so a
+  re-indexed document always resolves to its latest embedding. An adaptive
+  over-fetch — expanding the per-segment budget geometrically until enough
+  live hits survive masking — keeps result quality stable even when a deep
+  band of stale copies awaits a merge.
+- **Merging**: a tiered, generation-contiguous merge policy collapses
+  size-similar segment runs as ingest proceeds (each vector is rewritten
+  O(log N) times over its lifetime), and `optimize()` force-merges
+  everything into one segment.
+- **Deletions** are logical: an index-level bitmap (`{name}.delmap`) is
+  consulted by every segment reader and physically reclaimed by merges.
+- **Migration** is zero-copy: an existing monolithic `.hnsw` is registered
+  verbatim as the first segment on first open — one manifest write, no
+  data movement.
+- **Durability**: segment files and the manifest are written via
+  temp-file + fsync + atomic rename, and the manifest carries the WAL
+  checkpoint published only after all covered state is durable — see
+  [Persistence](../../laurus/persistence.md).
+
+### Writer retention across commits (monolithic layout)
+
+For the monolithic HNSW layout, the store keeps its writer cached **across
+commits** (Issue #864):
 after a commit the writer's in-memory state is equivalent to the file it just
 wrote, so the first upsert after a commit extends it in place instead of
 reloading (and dequantizing) the whole `.hnsw` from storage — under
