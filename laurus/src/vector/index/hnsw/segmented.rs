@@ -301,15 +301,15 @@ impl SegmentedHnswIndex {
 
     /// Merge one policy-selected window of segments (#882).
     ///
-    /// Uses the generation-contiguous `SimpleMergePolicy` (#880) through
-    /// the deletion-filtering, duplicate-collapsing merge engine; source
-    /// readers are invalidated afterwards. A no-op when the policy finds no
-    /// candidate.
-    fn merge_once(&self) -> Result<()> {
-        use crate::vector::index::hnsw::segment::merge_policy::SimpleMergePolicy;
+    /// Uses the generation-contiguous, size-similar `TieredMergePolicy`
+    /// (#883) through the deletion-filtering, duplicate-collapsing merge
+    /// engine; source readers are invalidated afterwards. Returns whether a
+    /// merge actually ran.
+    fn merge_once(&self) -> Result<bool> {
+        use crate::vector::index::hnsw::segment::merge_policy::TieredMergePolicy;
 
-        let Some(candidate) = self.shared.manager.check_merge(&SimpleMergePolicy::new()) else {
-            return Ok(());
+        let Some(candidate) = self.shared.manager.check_merge(&TieredMergePolicy::new()) else {
+            return Ok(false);
         };
 
         let mut engine = MergeEngine::new(
@@ -336,7 +336,7 @@ impl SegmentedHnswIndex {
         for id in &source_ids {
             self.shared.reader_cache.invalidate(id);
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Drop the deletion state after a compaction physically reclaimed the
@@ -581,16 +581,14 @@ impl VectorIndex for SegmentedHnswIndex {
     }
 
     fn maybe_auto_compact(&self) -> Result<bool> {
-        // Segment-count bound (#882): pure-append workloads never take the
-        // deletion-ratio branch below, so without this the segment count —
-        // and with it every search fan-out and the manifest size — would
-        // grow unboundedly, one segment per commit. Merge one
-        // generation-contiguous window (#880 policy) when the manager's
-        // threshold is exceeded; the tiered policy lands with #883. Runs
-        // regardless of `auto_compaction`, which gates deletion
-        // *reclamation*, not the structural segment bound.
-        if self.shared.manager.needs_merge() {
-            self.merge_once()?;
+        // Tiered auto-merge (#883): the policy itself is the trigger — it
+        // returns a candidate when a generation-contiguous, size-similar
+        // window fills up (steady-state: every `merge_factor` commits the
+        // newest tier collapses upward, giving each vector O(log N)
+        // rewrites over its lifetime) or when the hard segment-count bound
+        // is exceeded. Runs regardless of `auto_compaction`, which gates
+        // deletion *reclamation*, not the structural segment bound.
+        if self.merge_once()? {
             return Ok(true);
         }
 
@@ -829,23 +827,47 @@ impl VectorIndexSearcher for SegmentedHnswSearcher {
 
         // Over-fetch per segment: containment masking drops shadowed hits
         // AFTER the per-segment top-k, so stale copies would otherwise
-        // consume result slots (#880). The 2x factor bounds the loss while
-        // stale copies stay under half of a segment's local top list;
-        // adaptive refill is planned with the merge-policy work (#883).
-        let mut sub = request.clone();
-        sub.params.top_k = limit.saturating_mul(2);
-
+        // consume result slots (#880). Start at 2x for the common case; if
+        // masking dropped this segment below the requested limit AND the pass
+        // was truncated at the budget (i.e. live hits may sit below the cut
+        // behind a band of masked stale copies), EXPAND the budget
+        // geometrically and re-query until enough live hits survive or the
+        // segment is exhausted (#883). A fixed multiplier cannot bound recall
+        // against an arbitrarily deep stale band — the true nearest neighbour
+        // could sit below any constant cut — so the budget doubles each round;
+        // `effective_ef >= top_k` (searcher.rs) means the graph walk widens
+        // with it. Bounded: top_k reaches the segment size in O(log n)
+        // queries, and the common (no-pollution) case stops after one pass.
         for (idx, reader) in self.readers.iter().enumerate() {
             let searcher =
                 HnswSearcher::with_default_ef_search(reader.clone(), Some(self.default_ef))?;
-            let results = searcher.search(&sub)?;
-            merged.candidates_examined += results.candidates_examined;
-            for hit in results.results {
-                if self.shadowed(idx, hit.doc_id, &hit.field_name) {
-                    continue;
+
+            let mut probe = request.clone();
+            probe.params.top_k = limit.saturating_mul(2);
+            let mut kept: Vec<crate::vector::search::searcher::VectorIndexQueryResult>;
+            loop {
+                let results = searcher.search(&probe)?;
+                merged.candidates_examined += results.candidates_examined;
+                let returned = results.results.len();
+                kept = results
+                    .results
+                    .into_iter()
+                    .filter(|hit| !self.shadowed(idx, hit.doc_id, &hit.field_name))
+                    .collect();
+
+                // Enough live hits survived masking, or the segment returned
+                // fewer than requested (nothing deeper to fetch) — done.
+                if kept.len() >= limit || returned < probe.params.top_k {
+                    break;
                 }
-                merged.results.push(hit);
+                let next = probe.params.top_k.saturating_mul(2);
+                if next == probe.params.top_k {
+                    break; // budget saturated (overflow guard)
+                }
+                probe.params.top_k = next;
             }
+
+            merged.results.append(&mut kept);
         }
 
         merged
