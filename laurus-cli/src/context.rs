@@ -8,7 +8,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use laurus::storage::file::FileStorageConfig;
-use laurus::{Engine, Schema, StorageConfig, StorageFactory};
+use laurus::{CommitPolicy, Engine, Schema, StorageConfig, StorageFactory};
 
 /// File name used to persist the schema inside the index directory.
 const SCHEMA_FILE: &str = "schema.toml";
@@ -160,6 +160,31 @@ async fn init_index(index_dir: &Path, schema: Schema) -> Result<()> {
 /// - The storage backend cannot be opened (or created) or the engine cannot
 ///   be initialised.
 pub async fn open_index(index_dir: &Path) -> Result<Engine> {
+    open_index_with_commit_policy(index_dir, CommitPolicy::Manual).await
+}
+
+/// Open an existing index with an explicit auto-commit policy (Issue #890).
+///
+/// Identical to [`open_index`] but builds the engine with the given
+/// [`CommitPolicy`], so a bulk ingest can hand commit cadence to the engine
+/// (e.g. `EveryDocs(n)`) instead of committing client-side.
+///
+/// # Arguments
+///
+/// * `index_dir` - Path to the index directory that contains an existing index.
+/// * `commit_policy` - The engine auto-commit policy.
+///
+/// # Returns
+///
+/// Returns the opened [`Engine`] on success.
+///
+/// # Errors
+///
+/// Same as [`open_index`].
+pub async fn open_index_with_commit_policy(
+    index_dir: &Path,
+    commit_policy: CommitPolicy,
+) -> Result<Engine> {
     let schema_path = index_dir.join(SCHEMA_FILE);
     if !schema_path.exists() {
         bail!(
@@ -181,7 +206,10 @@ pub async fn open_index(index_dir: &Path) -> Result<Engine> {
     } else {
         StorageFactory::create(storage_config)?
     };
-    let engine = Engine::new(storage, schema).await?;
+    let engine = Engine::builder(storage, schema)
+        .commit_policy(commit_policy)
+        .build()
+        .await?;
 
     Ok(engine)
 }

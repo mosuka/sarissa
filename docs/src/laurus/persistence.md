@@ -110,6 +110,37 @@ engine.add_document("doc-3", doc3).await?;
 
 > **Tip:** Commits are relatively expensive because they flush segments to storage. For bulk indexing, batch many documents before calling `commit()`.
 
+### Auto-commit Policy
+
+Instead of calling `commit()` yourself, you can let the engine run the commit ladder automatically at an ingestion-driven cadence via `CommitPolicy`, configured on the builder:
+
+```rust
+use laurus::CommitPolicy;
+
+let engine = Engine::builder(storage, schema)
+    // Commit automatically after every 1,000 applied documents.
+    .commit_policy(CommitPolicy::EveryDocs(1000))
+    .build()
+    .await?;
+
+// No explicit commit() needed — every 1,000th document triggers one.
+engine.put_documents(one_thousand_docs).await?;
+```
+
+| Policy | Behavior |
+| :--- | :--- |
+| `Manual` (default) | Never auto-commits; you drive every `commit()`. Identical to the historical behavior. |
+| `EveryDocs(n)` | Runs the commit ladder after every `n` applied documents, across the singular and batch APIs. `EveryDocs(0)` disables auto-commit (same as `Manual`). |
+
+Key semantics:
+
+- **Group-commit preserved.** Each auto-commit is one WAL flush plus one materialization ladder — never one commit per document. Within a single `put_documents` / `add_documents` call the auto-commit fires **every `n` documents** (chunked), so a large batch materializes incrementally rather than in one final ladder; the trailing `< n` remainder stays WAL-durable until the next boundary or an explicit `commit()`.
+- **Orthogonal to `WalSyncPolicy`.** `CommitPolicy` decides *when the stores materialize*; `WalSyncPolicy` decides *WAL fsync durability*. Auto-commit works under any WAL policy because `commit()` always begins with a WAL flush.
+- **Crash semantics unchanged.** An auto-commit is a normal commit; a crash replays the uncommitted tail exactly as it would under manual commits.
+- **Concurrency.** The exact cadence and the usual "acknowledged write is durable" guarantee hold for **single-writer ingestion** (the model the engine's write path — and the CLI/bindings — are built around). Under concurrent writers on a shared engine, auto-commit is best-effort: because the commit ladder is not atomic with respect to another thread's in-flight write, a write acknowledged while a concurrent auto-commit runs may only become durable at the following commit, and the cadence may drift. (A concurrent manual `commit()` races the same way — auto-commit merely triggers it from the ingest path.) Use explicit commits, or a single ingest task, if you need these guarantees under concurrency.
+
+> **Note:** A time-based `Interval` policy (commit every *T* seconds) is planned; it needs a background commit timer and will be added without breaking existing code.
+
 ## Batch Ingestion
 
 `put_documents` / `add_documents` are the batched forms of `put_document` / `add_document`. They apply their `(id, doc)` pairs **sequentially, in input order**, and under the default `PerRecord` policy they make the whole batch durable with a **single WAL fsync at batch end** instead of one per record:

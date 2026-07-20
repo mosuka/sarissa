@@ -52,6 +52,8 @@ let engine = Engine::builder(storage, schema)
 | `analyzer()` | `Arc<dyn Analyzer>` | `StandardAnalyzer` | Text analysis pipeline for lexical fields |
 | `embedder()` | `Arc<dyn Embedder>` | None | Embedding model for vector fields |
 | `embedding_cache_capacity()` | `usize` | None (disabled) | Enable an LRU cache of up to N query embeddings |
+| `wal_sync_policy()` | `WalSyncPolicy` | `PerRecord` | WAL fsync durability (per-record vs group commit) |
+| `commit_policy()` | `CommitPolicy` | `Manual` | Auto-commit cadence — e.g. `EveryDocs(n)` commits every `n` documents |
 | `build()` | -- | -- | Create the Engine (async) |
 
 ### Query embedding cache

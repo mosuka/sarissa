@@ -52,6 +52,8 @@ let engine = Engine::builder(storage, schema)
 | `analyzer()` | `Arc<dyn Analyzer>` | `StandardAnalyzer` | Lexicalフィールド用のテキスト解析パイプライン |
 | `embedder()` | `Arc<dyn Embedder>` | None | Vectorフィールド用のEmbeddingモデル |
 | `embedding_cache_capacity()` | `usize` | None（無効） | 最大 N 件のクエリEmbeddingをLRUキャッシュする |
+| `wal_sync_policy()` | `WalSyncPolicy` | `PerRecord` | WAL fsync の耐久性（per-record か group commit か） |
+| `commit_policy()` | `CommitPolicy` | `Manual` | 自動コミットのタイミング — 例: `EveryDocs(n)` は `n` 件ごとにコミット |
 | `build()` | -- | -- | Engineを構築（非同期） |
 
 ### クエリEmbeddingキャッシュ
