@@ -5,7 +5,7 @@
 Laurus 検索エンジンをラップするメインクラスです。
 
 ```php
-new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $wal_sync_policy = null)
+new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $wal_sync_policy = null, ?CommitPolicy $commit_policy = null)
 ```
 
 ### コンストラクタ
@@ -15,6 +15,7 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $
 | `$path` | `string\|null` | `null` | 永続ストレージのディレクトリパス。`null` の場合はインメモリインデックスを作成します。 |
 | `$schema` | `Schema\|null` | `null` | スキーマ定義。省略時は空のスキーマが使用されます。 |
 | `$wal_sync_policy` | `WalSyncPolicy\|null` | `null` | 先行書き込みログ（WAL）の耐久性ポリシー。`null` の場合はデフォルトのレコードごと fsync を維持します。[WAL 同期ポリシーと耐久性](#wal-同期ポリシーと耐久性) を参照。 |
+| `$commit_policy` | `CommitPolicy\|null` | `null` | 自動コミットポリシー。`null` の場合はデフォルトの manual ポリシー（呼び出し側がすべての `commit()` を駆動）を維持します。[コミットポリシーと自動コミット](#コミットポリシーと自動コミット) を参照。 |
 
 ### メソッド
 
@@ -92,6 +93,51 @@ $index = new \Laurus\Index("./myindex", null, $policy);
 
 $index->putDocument("doc1", ["title" => "Hello"]);
 $index->flushWal(); // group バッチが満杯でなくてもレコードが永続化される
+```
+
+### コミットポリシーと自動コミット
+
+コミットは、バッファリングされた書き込みを Lexical ストアと Vector ストアに
+実体化（materialise）し、保留中の変更を検索可能にします。デフォルトでは
+Laurus が自動でコミットすることはなく、呼び出し側がすべての `commit()` を
+駆動します。代わりに、適用したドキュメント数が一定に達するたびにエンジンに
+**自動コミット（auto-commit）**させることもできます。
+
+#### CommitPolicy
+
+`Laurus\CommitPolicy` はエンジンがいつコミットするかを記述するイミュータブルな
+値オブジェクトです。`Index` コンストラクタの `$commit_policy` 引数に渡します。
+
+```php
+// デフォルト: 自動コミットなし — 呼び出し側がすべての commit() を駆動。
+\Laurus\CommitPolicy::manual(): CommitPolicy
+
+// 適用したドキュメント N 件ごとに自動コミット。
+\Laurus\CommitPolicy::everyDocs(
+    int $n,   // このドキュメント数を適用するたびにコミット
+): CommitPolicy
+```
+
+| コンストラクタ | 説明 |
+| :--- | :--- |
+| `CommitPolicy::manual()` | デフォルト。エンジンは自動でコミットせず、呼び出し側がすべての `commit()` を駆動します。 |
+| `CommitPolicy::everyDocs($n)` | 適用したドキュメント `$n` 件ごとに自動コミットします。カウントは単一 ingest とバッチ ingest の両方にまたがり、バッチ **内** でも `$n` 件ごとにトリガーされます。 |
+
+`CommitPolicy::everyDocs(0)` は有効で、自動コミットを無効化します。
+`CommitPolicy::manual()` と等価です。
+
+コミットポリシーは WAL 同期ポリシーと**直交（orthogonal）**しています。
+`WalSyncPolicy` は耐久性のために WAL をいつ `fsync` するかを制御するのに対し、
+`CommitPolicy` はストアをいつ実体化し、保留中の変更をいつ検索可能にするかを
+制御します。両者は独立して設定します。
+
+```php
+// 適用したドキュメント 1000 件ごとに自動コミットし、WAL ポリシーはデフォルトを維持。
+$index = new \Laurus\Index(null, $schema, null, \Laurus\CommitPolicy::everyDocs(1000));
+
+foreach ($docs as $id => $doc) {
+    $index->putDocument($id, $doc); // エンジンが 1000 件ごとに自動でコミットする
+}
 ```
 
 ---

@@ -5,7 +5,7 @@
 The primary entry point. Wraps the Laurus search engine.
 
 ```php
-new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $wal_sync_policy = null)
+new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $wal_sync_policy = null, ?CommitPolicy $commit_policy = null)
 ```
 
 ### Constructor
@@ -15,6 +15,7 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $
 | `$path` | `string\|null` | `null` | Directory path for persistent storage. `null` creates an in-memory index. |
 | `$schema` | `Schema\|null` | `null` | Schema definition. An empty schema is used when omitted. |
 | `$wal_sync_policy` | `WalSyncPolicy\|null` | `null` | Write-ahead log (WAL) durability policy. `null` keeps the default per-record fsync. See [WAL sync policy & durability](#wal-sync-policy--durability). |
+| `$commit_policy` | `CommitPolicy\|null` | `null` | Auto-commit policy. `null` keeps the default manual policy (the caller drives every `commit()`). See [Commit policy & auto-commit](#commit-policy--auto-commit). |
 
 ### Methods
 
@@ -91,6 +92,50 @@ $index = new \Laurus\Index("./myindex", null, $policy);
 
 $index->putDocument("doc1", ["title" => "Hello"]);
 $index->flushWal(); // records persisted even though the group batch is not full
+```
+
+### Commit policy & auto-commit
+
+A commit materialises buffered writes into the lexical and vector stores and
+makes pending changes searchable. By default Laurus never commits on your
+behalf — the caller drives every `commit()`. You can instead let the engine
+**auto-commit** after a fixed number of applied documents.
+
+#### CommitPolicy
+
+`Laurus\CommitPolicy` is an immutable value object describing when the engine
+commits. Pass it to the `Index` constructor's `$commit_policy` argument.
+
+```php
+// Default: no auto-commit — the caller drives every commit().
+\Laurus\CommitPolicy::manual(): CommitPolicy
+
+// Auto-commit after every N applied documents.
+\Laurus\CommitPolicy::everyDocs(
+    int $n,   // commit after this many applied documents
+): CommitPolicy
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `CommitPolicy::manual()` | Default. The engine never commits on its own; the caller drives every `commit()`. |
+| `CommitPolicy::everyDocs($n)` | Auto-commit after every `$n` applied documents. Counting spans both singular and batch ingest, and triggers every `$n` documents **within** a batch. |
+
+`CommitPolicy::everyDocs(0)` is valid and disables auto-commit — it is
+equivalent to `CommitPolicy::manual()`.
+
+The commit policy is **orthogonal** to the WAL sync policy: `WalSyncPolicy`
+governs when the WAL is `fsync`ed for durability, whereas `CommitPolicy`
+governs when the stores materialise and pending changes become searchable. The
+two are configured independently.
+
+```php
+// Auto-commit every 1000 applied documents; keep the default WAL policy.
+$index = new \Laurus\Index(null, $schema, null, \Laurus\CommitPolicy::everyDocs(1000));
+
+foreach ($docs as $id => $doc) {
+    $index->putDocument($id, $doc); // engine commits automatically every 1000 docs
+}
 ```
 
 ---

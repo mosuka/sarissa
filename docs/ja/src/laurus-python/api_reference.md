@@ -11,6 +11,7 @@ class Index:
         path: str | None = None,
         schema: Schema | None = None,
         wal_sync_policy: WalSyncPolicy | None = None,
+        commit_policy: CommitPolicy | None = None,
     ) -> None: ...
 ```
 
@@ -21,6 +22,7 @@ class Index:
 | `path` | `str \| None` | `None` | 永続ストレージのディレクトリパス。`None` の場合はインメモリインデックスを作成します。 |
 | `schema` | `Schema \| None` | `None` | スキーマ定義。省略時は空のスキーマが使用されます。 |
 | `wal_sync_policy` | `WalSyncPolicy \| None` | `None` | WAL の永続性ポリシー。`None` の場合はデフォルトのレコードごとの `fsync` を使用します。[WAL 同期ポリシー / 永続性](#wal-同期ポリシー--永続性)を参照してください。 |
+| `commit_policy` | `CommitPolicy \| None` | `None` | 自動コミットポリシー。`None` の場合はデフォルトの手動コミット（自動コミットなし）を使用します。[コミットポリシー / 自動コミット](#コミットポリシー--自動コミット)を参照してください。 |
 
 ### メソッド
 
@@ -112,6 +114,55 @@ index.commit()  # WAL もフラッシュされます
 
 `wal_sync_policy` を省略する（または `WalSyncPolicy.per_record()` を渡す）と、
 デフォルトの完全に永続的な動作が維持されます。
+
+### コミットポリシー / 自動コミット
+
+コミットはバッファリングされた書き込みをストアへ materialize し、すべての
+保留中の変更を検索可能にします。デフォルトでは `Index` は自動コミットを
+行わないため、呼び出し側がすべての `commit()` を明示的に実行します。
+コンストラクタはオプションの `commit_policy` を受け付け、一定件数の
+ドキュメントを適用するごとにエンジンが自動的にコミットするようにできます。
+
+```python
+class CommitPolicy:
+    @staticmethod
+    def manual() -> CommitPolicy: ...
+    @staticmethod
+    def every_docs(n: int) -> CommitPolicy: ...
+```
+
+| コンストラクタ | 説明 |
+| :--- | :--- |
+| `CommitPolicy.manual()` | デフォルト。自動コミットなし。呼び出し側がすべての `commit()` を実行します。 |
+| `CommitPolicy.every_docs(n)` | `n` 件のドキュメントを適用するごとに自動コミットします。 |
+
+`every_docs(n)` は、単体（`put_document`、`add_document`）とバッチ
+（`put_documents`、`add_documents`）の両方の取り込みにまたがって適用済み
+ドキュメントを数え、`n` 件ごとに自動コミットします — 1 つのバッチの
+**内部**でも同様です。`every_docs(0)` も有効で、自動コミットを無効化するため
+`manual()` と等価になります。
+
+`commit_policy` は `wal_sync_policy` と直交します。`wal_sync_policy` は WAL の
+`fsync` 永続性を制御するのに対し、`commit_policy` はストアが保留中の変更を
+検索可能な状態へ materialize するタイミングを制御します。一方を設定しても
+他方には影響しません。
+
+```python
+import laurus
+
+# 100 件のドキュメントを適用するごとに自動コミットします。
+index = laurus.Index(
+    path="./myindex",
+    commit_policy=laurus.CommitPolicy.every_docs(100),
+)
+
+for i in range(1_000):
+    index.put_document(f"doc{i}", {"title": f"Document {i}"})
+# エンジンはすでに 10 回コミットしています（100 件ごとに 1 回）。
+```
+
+`commit_policy` を省略する（または `CommitPolicy.manual()` を渡す）と、
+デフォルトの手動コミットの動作が維持されます。
 
 ---
 

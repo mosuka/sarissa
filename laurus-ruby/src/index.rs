@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::commit_policy::RbCommitPolicy;
 use crate::convert::{document_to_hash, hash_to_document};
 use crate::errors::laurus_err;
 use crate::schema::RbSchema;
@@ -59,6 +60,10 @@ impl RbIndex {
     ///     Defaults to per-record fsync (highest durability). Pass
     ///     `Laurus::WalSyncPolicy.group(...)` to enable group commit for higher
     ///     write throughput; use `flush_wal` to force durability on demand.
+    ///   - `commit_policy:` (CommitPolicy, optional): auto-commit policy.
+    ///     Defaults to manual (the caller drives every commit). Pass
+    ///     `Laurus::CommitPolicy.every_docs(n)` to auto-commit every `n`
+    ///     applied documents.
     fn new(args: &[Value]) -> Result<Self, Error> {
         let ruby = Ruby::get().expect("called from Ruby thread");
         let args = scan_args::<(), (), (), (), RHash, ()>(args)?;
@@ -69,13 +74,19 @@ impl RbIndex {
                 Option<Option<String>>,
                 Option<Option<&RbSchema>>,
                 Option<Option<&RbWalSyncPolicy>>,
+                Option<Option<&RbCommitPolicy>>,
             ),
             (),
-        >(args.keywords, &[], &["path", "schema", "wal_sync_policy"])?;
-        let (path, schema, wal_sync_policy) = kwargs.optional;
+        >(
+            args.keywords,
+            &[],
+            &["path", "schema", "wal_sync_policy", "commit_policy"],
+        )?;
+        let (path, schema, wal_sync_policy, commit_policy) = kwargs.optional;
         let path = path.flatten();
         let schema_ref = schema.flatten();
         let wal_sync_policy = wal_sync_policy.flatten();
+        let commit_policy = commit_policy.flatten();
 
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
@@ -88,6 +99,9 @@ impl RbIndex {
         let mut builder = Engine::builder(storage, schema);
         if let Some(policy) = wal_sync_policy {
             builder = builder.wal_sync_policy(policy.inner);
+        }
+        if let Some(policy) = commit_policy {
+            builder = builder.commit_policy(policy.inner);
         }
 
         let engine = rt.block_on(builder.build()).map_err(laurus_err)?;

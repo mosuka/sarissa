@@ -46,6 +46,10 @@ sync_policy = "group"          # "per_record" (default) | "group"
 group_max_records = 1024       # optional; default 1024
 group_max_bytes = 1048576      # optional; default 1 MiB
 group_max_interval_ms = 1000   # optional; no background timer when unset (native only)
+
+[index.commit]
+policy = "every_docs"          # "manual" (default) | "every_docs"
+every_docs = 1000              # optional; commit every N docs (0/unset disables)
 ```
 
 Log verbosity is controlled by the `RUST_LOG` environment variable (default: `info`), not through the config file.
@@ -87,6 +91,25 @@ records **or** `group_max_bytes` bytes have accumulated since the last sync
 (whichever comes first), and unconditionally on commit. A crash can lose up to
 the last unsynced batch (comparable to SQLite `synchronous = NORMAL`); a torn
 trailing record is dropped on recovery, so the recovered log is gap-free.
+
+#### `[index.commit]` Section
+
+Controls the auto-commit policy. When the whole section is omitted, the engine
+is **manual** — it commits only when the server materializes an index (there is
+no automatic commit during ingestion). The policy applies to both an index
+opened at boot and any index created later through `CreateIndex`. See
+[Persistence & WAL → Auto-commit Policy](../laurus/persistence.md#auto-commit-policy)
+for the semantics.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `policy` | String | `"manual"` | Auto-commit policy: `"manual"` (caller-driven commits) or `"every_docs"` (commit every `every_docs` applied documents) |
+| `every_docs` | Integer | -- | `every_docs` policy only. Commit after this many applied documents. Unset (or `0`) disables auto-commit, equivalent to `"manual"` |
+
+`CommitPolicy` is orthogonal to `[index.wal]`: the WAL section governs *when
+appends are fsync'd*, while this section governs *when the stores materialize*.
+An auto-commit works under any WAL policy because a commit always begins with a
+WAL flush.
 
 ## Environment Variables
 

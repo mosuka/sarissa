@@ -140,6 +140,33 @@ def test_flush_wal_per_record_is_noop():
     assert len(docs) == 1
 
 
+def test_commit_policy_constructors():
+    """All CommitPolicy constructors build without error."""
+    assert laurus.CommitPolicy.manual() is not None
+    assert laurus.CommitPolicy.every_docs(100) is not None
+    # every_docs(0) is valid — it disables auto-commit (equivalent to manual).
+    assert laurus.CommitPolicy.every_docs(0) is not None
+    assert "every_docs(100)" in repr(laurus.CommitPolicy.every_docs(100))
+
+
+def test_index_accepts_commit_policies():
+    """Index construction accepts every CommitPolicy variant, and the default."""
+    assert laurus.Index(commit_policy=laurus.CommitPolicy.manual()) is not None
+    assert laurus.Index(commit_policy=laurus.CommitPolicy.every_docs(100)) is not None
+    assert laurus.Index(commit_policy=laurus.CommitPolicy.every_docs(0)) is not None
+    # Omitting commit_policy keeps the default (manual).
+    assert laurus.Index() is not None
+
+
+def test_index_auto_commit_end_to_end():
+    """An index built with EveryDocs is usable; a doc is retrievable with no
+    explicit commit (the binding path is wired end-to-end)."""
+    idx = laurus.Index(commit_policy=laurus.CommitPolicy.every_docs(1))
+    idx.put_document("d1", {"title": "Auto"})
+    # No explicit idx.commit() here.
+    assert len(idx.get_documents("d1")) == 1
+
+
 # ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------

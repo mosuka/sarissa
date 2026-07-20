@@ -4,7 +4,7 @@
 //! index storage, and logging. All sections have sensible defaults so that
 //! a minimal (or even empty) TOML file produces a working configuration.
 
-use laurus::{DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, WalSyncPolicy};
+use laurus::{CommitPolicy, DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, WalSyncPolicy};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -54,6 +54,9 @@ pub struct IndexConfig {
     /// Write-ahead log durability settings. Defaults to per-record fsync.
     #[serde(default)]
     pub wal: WalConfig,
+    /// Auto-commit settings. Defaults to manual (caller/server-driven commits).
+    #[serde(default)]
+    pub commit: CommitConfig,
 }
 
 impl Default for IndexConfig {
@@ -61,6 +64,7 @@ impl Default for IndexConfig {
         Self {
             data_dir: default_data_dir(),
             wal: WalConfig::default(),
+            commit: CommitConfig::default(),
         }
     }
 }
@@ -123,6 +127,57 @@ impl WalConfig {
                 max_bytes: self.group_max_bytes.unwrap_or(DEFAULT_GROUP_MAX_BYTES),
                 max_interval: self.group_max_interval_ms.map(Duration::from_millis),
             },
+        }
+    }
+}
+
+/// The auto-commit policy selector deserialized from the config file.
+///
+/// Mirrors the variants of [`laurus::CommitPolicy`] without their parameters;
+/// the [`CommitConfig::every_docs`] threshold is applied when the policy is
+/// [`CommitPolicyKind::EveryDocs`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitPolicyKind {
+    /// Never auto-commit (default); maps to [`CommitPolicy::Manual`].
+    #[default]
+    Manual,
+    /// Commit every `every_docs` applied documents; maps to
+    /// [`CommitPolicy::EveryDocs`].
+    EveryDocs,
+}
+
+/// Auto-commit configuration.
+///
+/// Selects the [`laurus::CommitPolicy`] used for the index. The default is
+/// [`CommitPolicyKind::Manual`], preserving caller-driven commits. When
+/// `policy = "every_docs"`, the optional `every_docs` threshold sets the
+/// document count between commits; an unset (or `0`) threshold disables
+/// auto-commit, matching [`CommitPolicy::EveryDocs`]`(0)`.
+#[derive(Debug, Clone, Copy, Deserialize, Default)]
+pub struct CommitConfig {
+    /// Which auto-commit policy to use. Defaults to `manual`.
+    #[serde(default)]
+    pub policy: CommitPolicyKind,
+    /// Commit after this many applied documents (`every_docs` policy only).
+    /// Unset (or `0`) disables auto-commit.
+    #[serde(default)]
+    pub every_docs: Option<usize>,
+}
+
+impl CommitConfig {
+    /// Convert this configuration into a [`laurus::CommitPolicy`].
+    ///
+    /// # Returns
+    ///
+    /// [`CommitPolicy::Manual`] when `policy` is `manual`, or
+    /// [`CommitPolicy::EveryDocs`] with the configured threshold (`0` when
+    /// unset, which the engine treats as disabled) when `policy` is
+    /// `every_docs`.
+    pub fn to_policy(&self) -> CommitPolicy {
+        match self.policy {
+            CommitPolicyKind::Manual => CommitPolicy::Manual,
+            CommitPolicyKind::EveryDocs => CommitPolicy::EveryDocs(self.every_docs.unwrap_or(0)),
         }
     }
 }
@@ -210,5 +265,40 @@ mod tests {
                 max_interval: Some(Duration::from_millis(500)),
             }
         );
+    }
+
+    #[test]
+    fn default_commit_policy_is_manual() {
+        // An empty config (no [index.commit] section) must keep manual commits.
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.index.commit.policy, CommitPolicyKind::Manual);
+        assert_eq!(config.index.commit.to_policy(), CommitPolicy::Manual);
+    }
+
+    #[test]
+    fn every_docs_policy_maps_threshold() {
+        let toml = r#"
+            [index.commit]
+            policy = "every_docs"
+            every_docs = 1000
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.index.commit.policy, CommitPolicyKind::EveryDocs);
+        assert_eq!(
+            config.index.commit.to_policy(),
+            CommitPolicy::EveryDocs(1000)
+        );
+    }
+
+    #[test]
+    fn every_docs_policy_defaults_threshold_to_zero_when_omitted() {
+        // policy = "every_docs" without a threshold maps to EveryDocs(0), which
+        // the engine treats as disabled (equivalent to Manual).
+        let toml = r#"
+            [index.commit]
+            policy = "every_docs"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.index.commit.to_policy(), CommitPolicy::EveryDocs(0));
     }
 }

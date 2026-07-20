@@ -55,12 +55,15 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
     tracing::info!("Laurus server starting");
     tracing::info!("Data directory: {}", config.index.data_dir.display());
 
-    // Resolve the WAL durability policy once; it applies to both the boot-time
-    // open below and any index created later via the CreateIndex RPC.
+    // Resolve the WAL durability and auto-commit policies once; they apply to
+    // both the boot-time open below and any index created later via the
+    // CreateIndex RPC.
     let wal_policy = config.index.wal.to_policy();
+    let commit_policy = config.index.commit.to_policy();
 
     // Open an existing index. If none exists, start without an index.
-    let engine = match context::open_index(&config.index.data_dir, wal_policy).await {
+    let engine = match context::open_index(&config.index.data_dir, wal_policy, commit_policy).await
+    {
         Ok(engine) => {
             tracing::info!("Opened existing index");
             Some(engine)
@@ -82,6 +85,7 @@ pub async fn run(config: &Config) -> anyhow::Result<()> {
         engine: engine.clone(),
         data_dir,
         wal_policy,
+        commit_policy,
     };
     let search_service = SearchService {
         engine: engine.clone(),

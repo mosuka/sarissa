@@ -5,7 +5,7 @@
 The primary entry point. Wraps the Laurus search engine.
 
 ```ruby
-Laurus::Index.new(path: nil, schema: nil, wal_sync_policy: nil)
+Laurus::Index.new(path: nil, schema: nil, wal_sync_policy: nil, commit_policy: nil)
 ```
 
 ### Constructor
@@ -15,6 +15,7 @@ Laurus::Index.new(path: nil, schema: nil, wal_sync_policy: nil)
 | `path:` | `String \| nil` | `nil` | Directory path for persistent storage. `nil` creates an in-memory index. |
 | `schema:` | `Schema \| nil` | `nil` | Schema definition. An empty schema is used when omitted. |
 | `wal_sync_policy:` | `WalSyncPolicy \| nil` | `nil` | Write-ahead log (WAL) durability policy. `nil` keeps the default per-record fsync. See [WAL sync policy & durability](#wal-sync-policy--durability). |
+| `commit_policy:` | `CommitPolicy \| nil` | `nil` | Auto-commit policy. `nil` keeps the default manual mode (the caller drives every `commit`). See [Commit policy & auto-commit](#commit-policy--auto-commit). |
 
 ### Methods
 
@@ -91,6 +92,45 @@ index = Laurus::Index.new(path: "./myindex", wal_sync_policy: policy)
 
 index.put_document("doc1", { "title" => "Hello" })
 index.flush_wal  # records persisted even though the group batch is not full
+```
+
+### Commit policy & auto-commit
+
+By default the caller drives every commit: buffered writes only become
+searchable once you call `commit` explicitly. You can hand that responsibility
+to the engine with an **auto-commit policy**, which commits automatically after
+a fixed number of applied documents.
+
+#### CommitPolicy
+
+`Laurus::CommitPolicy` is an immutable value object describing when the engine
+materialises buffered writes into the stores. Pass it to
+`Index.new(commit_policy:)`.
+
+```ruby
+# Default: manual — the caller drives every commit.
+Laurus::CommitPolicy.manual
+
+# Auto-commit: commit after every N applied documents.
+Laurus::CommitPolicy.every_docs(1000)
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `CommitPolicy.manual` | Default. No auto-commit — the caller drives every `commit`. |
+| `CommitPolicy.every_docs(n)` | Auto-commit after every `n` applied documents. Counted across both singular and batch ingest, including every `n` documents **within** a single batch. |
+
+`every_docs(0)` is valid and disables auto-commit, making it equivalent to
+`manual`.
+
+Commit policy is orthogonal to [WalSyncPolicy](#wal-sync-policy--durability):
+`WalSyncPolicy` governs WAL `fsync` durability, whereas `CommitPolicy` governs
+when the stores materialise buffered writes. Set them independently.
+
+```ruby
+# Auto-commit after every 1000 applied documents.
+policy = Laurus::CommitPolicy.every_docs(1000)
+index = Laurus::Index.new(path: "./myindex", commit_policy: policy)
 ```
 
 ---

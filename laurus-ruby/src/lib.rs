@@ -12,6 +12,7 @@
 #![allow(dead_code)]
 
 mod analysis;
+mod commit_policy;
 mod convert;
 mod errors;
 mod index;
@@ -31,6 +32,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     index::define(ruby, &module)?;
     schema::define(ruby, &module)?;
     wal::define(ruby, &module)?;
+    commit_policy::define(ruby, &module)?;
 
     // Search result & request, fusion algorithms
     search::define(ruby, &module)?;

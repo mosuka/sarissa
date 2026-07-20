@@ -14,6 +14,7 @@
 #![allow(clippy::enum_variant_names)]
 
 mod analysis;
+mod commit;
 mod convert;
 mod embedder;
 mod errors;

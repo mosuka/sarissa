@@ -10,6 +10,7 @@ class Index {
     path?: string | null,
     schema?: Schema,
     walSyncPolicy?: WalSyncPolicy,
+    commitPolicy?: CommitPolicy,
   ): Promise<Index>;
 }
 ```
@@ -21,6 +22,7 @@ class Index {
 | `path` | `string \| null` | `null` | Directory for persistent storage. `null` creates an in-memory index. |
 | `schema` | `Schema` | empty | Schema definition. |
 | `walSyncPolicy` | `WalSyncPolicy` | per-record | WAL durability policy. Omit to keep the default per-record `fsync`. See [WAL sync policy / durability](#wal-sync-policy--durability). |
+| `commitPolicy` | `CommitPolicy` | manual | Auto-commit policy. Omit to keep the default manual policy (the caller drives every `commit()`). See [Commit policy / auto-commit](#commit-policy--auto-commit). |
 
 ### Methods
 
@@ -115,6 +117,55 @@ await index.commit(); // also flushes the WAL
 
 Omit `walSyncPolicy` (or pass `WalSyncPolicy.perRecord()`) to keep the
 default, fully durable behaviour.
+
+### Commit policy / auto-commit
+
+By default the caller drives every `commit()`, so pending changes become
+searchable only when you call it explicitly. `Index.create` accepts an
+optional `commitPolicy` to let the engine auto-commit on an ingestion-driven
+cadence instead, so writes are materialized without an explicit `commit()`.
+
+```typescript
+class CommitPolicy {
+  static manual(): CommitPolicy;
+  static everyDocs(n: number): CommitPolicy;
+}
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `CommitPolicy.manual()` | Default. No auto-commit; the caller drives every `commit()`. |
+| `CommitPolicy.everyDocs(n)` | Auto-commit after every `n` applied documents. |
+
+With `everyDocs(n)` the engine commits after every `n` applied documents,
+counted across both singular and batch ingest — including every `n`
+documents **within** a single batch. Passing `everyDocs(0)` is valid and
+disables auto-commit, which is equivalent to `CommitPolicy.manual()`.
+
+`commitPolicy` is orthogonal to `walSyncPolicy`: `walSyncPolicy` governs WAL
+`fsync` durability, while `commitPolicy` governs **when** the stores
+materialize pending changes into a searchable commit. You can combine them
+freely.
+
+```javascript
+import { Index, CommitPolicy } from "laurus-nodejs";
+
+// Auto-commit after every 1000 applied documents.
+const index = await Index.create(
+  null,
+  schema,
+  undefined,
+  CommitPolicy.everyDocs(1000),
+);
+
+for (let i = 0; i < 10000; i++) {
+  await index.putDocument(`doc${i}`, { title: `Document ${i}` });
+}
+// The engine has already committed ten times; no explicit commit() needed.
+```
+
+Omit `commitPolicy` (or pass `CommitPolicy.manual()`) to keep the default,
+caller-driven commit behaviour.
 
 ---
 

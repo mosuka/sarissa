@@ -17,7 +17,7 @@ mod schema;
 mod search;
 
 use analysis::{PySynonymDictionary, PySynonymGraphFilter, PyToken, PyWhitespaceTokenizer};
-use index::{PyIndex, PyWalSyncPolicy};
+use index::{PyCommitPolicy, PyIndex, PyWalSyncPolicy};
 use pyo3::prelude::*;
 use query::{
     PyBooleanQuery, PyFuzzyQuery, PyGeo3dBoundingBoxQuery, PyGeo3dDistanceQuery,
@@ -54,6 +54,7 @@ fn laurus(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyIndex>()?;
     m.add_class::<PySchema>()?;
     m.add_class::<PyWalSyncPolicy>()?;
+    m.add_class::<PyCommitPolicy>()?;
 
     // ── Search result & request ───────────────────────────────────────────
     m.add_class::<PySearchResult>()?;

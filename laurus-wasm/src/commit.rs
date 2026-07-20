@@ -1,0 +1,78 @@
+//! WASM wrapper for the Laurus [`CommitPolicy`] value object (Issue #893).
+//!
+//! Exposes the auto-commit policy to JavaScript so that callers can opt into
+//! automatic commits when constructing an [`crate::index::WasmIndex`].
+
+use laurus::CommitPolicy;
+use wasm_bindgen::prelude::*;
+
+/// Auto-commit policy for an [`crate::index::WasmIndex`].
+///
+/// Controls when the engine automatically runs the commit ladder during
+/// ingestion:
+///
+/// - **Manual** (the default) — the caller drives every `commit()`.
+/// - **Every-docs** — the engine commits after every `n` applied documents,
+///   across the singular and batch ingest APIs (and every `n` documents within
+///   a single batch).
+///
+/// This is orthogonal to `WalSyncPolicy`.
+///
+/// ```javascript
+/// import { Index, Schema, CommitPolicy } from "laurus-wasm";
+///
+/// const schema = new Schema();
+/// schema.addTextField("title");
+///
+/// // Auto-commit after every 1000 applied documents.
+/// const index = await Index.create(schema, undefined, CommitPolicy.everyDocs(1000));
+///
+/// // Manual (the default if no policy is supplied).
+/// const manual = CommitPolicy.manual();
+/// ```
+///
+/// **wasm note:** unlike `WalSyncPolicy`'s `maxIntervalMs` timer, `everyDocs`
+/// needs no background thread — it is checked inline during ingestion — so it
+/// works fully under WebAssembly.
+#[wasm_bindgen(js_name = "CommitPolicy")]
+#[derive(Clone, Copy)]
+pub struct WasmCommitPolicy {
+    /// The wrapped core auto-commit policy passed to `EngineBuilder`.
+    pub(crate) inner: CommitPolicy,
+}
+
+#[wasm_bindgen(js_class = "CommitPolicy")]
+impl WasmCommitPolicy {
+    /// The manual policy: the engine commits only when `commit()` is called
+    /// explicitly. This is the default when no policy is supplied.
+    ///
+    /// # Returns
+    ///
+    /// A `CommitPolicy` wrapping [`CommitPolicy::Manual`].
+    #[wasm_bindgen(js_name = "manual")]
+    pub fn manual() -> WasmCommitPolicy {
+        WasmCommitPolicy {
+            inner: CommitPolicy::Manual,
+        }
+    }
+
+    /// The auto-commit-every-`n`-documents policy.
+    ///
+    /// `everyDocs(0)` disables auto-commit, which is equivalent to
+    /// [`WasmCommitPolicy::manual`].
+    ///
+    /// # Arguments
+    ///
+    /// * `n` - Commit after this many applied documents. `0` disables
+    ///   auto-commit.
+    ///
+    /// # Returns
+    ///
+    /// A `CommitPolicy` wrapping [`CommitPolicy::EveryDocs`].
+    #[wasm_bindgen(js_name = "everyDocs")]
+    pub fn every_docs(n: u32) -> WasmCommitPolicy {
+        WasmCommitPolicy {
+            inner: CommitPolicy::EveryDocs(n as usize),
+        }
+    }
+}

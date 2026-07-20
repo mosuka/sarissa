@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::commit::WasmCommitPolicy;
 use crate::convert::{data_value_to_json, json_to_document};
 use crate::errors::laurus_err;
 use crate::query::{
@@ -173,6 +174,9 @@ impl WasmIndex {
     /// * `wal_sync_policy` - Optional WAL durability policy. Defaults to
     ///   per-record fsync when omitted. Pass `WalSyncPolicy.group()` to opt into
     ///   group-commit batching.
+    /// * `commit_policy` - Optional auto-commit policy. Defaults to manual
+    ///   (caller-driven commits) when omitted. Pass `CommitPolicy.everyDocs(n)`
+    ///   to auto-commit every `n` documents.
     ///
     /// # Returns
     ///
@@ -181,6 +185,7 @@ impl WasmIndex {
     pub async fn create(
         schema: WasmSchema,
         wal_sync_policy: Option<WasmWalSyncPolicy>,
+        commit_policy: Option<WasmCommitPolicy>,
     ) -> Result<WasmIndex, JsValue> {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let js_embedders = schema.js_embedders;
@@ -203,6 +208,9 @@ impl WasmIndex {
         }
         if let Some(policy) = wal_sync_policy {
             builder = builder.wal_sync_policy(policy.inner);
+        }
+        if let Some(policy) = commit_policy {
+            builder = builder.commit_policy(policy.inner);
         }
 
         let engine = builder.build().await.map_err(laurus_err)?;
@@ -228,6 +236,9 @@ impl WasmIndex {
     /// * `wal_sync_policy` - Optional WAL durability policy. Defaults to
     ///   per-record fsync when omitted. Pass `WalSyncPolicy.group()` to opt into
     ///   group-commit batching.
+    /// * `commit_policy` - Optional auto-commit policy. Defaults to manual
+    ///   (caller-driven commits) when omitted. Pass `CommitPolicy.everyDocs(n)`
+    ///   to auto-commit every `n` documents.
     ///
     /// # Returns
     ///
@@ -237,6 +248,7 @@ impl WasmIndex {
         name: String,
         schema: WasmSchema,
         wal_sync_policy: Option<WasmWalSyncPolicy>,
+        commit_policy: Option<WasmCommitPolicy>,
     ) -> Result<WasmIndex, JsValue> {
         let opfs = OpfsPersistence::open(&name).await?;
         let storage = opfs.load().await?;
@@ -259,6 +271,9 @@ impl WasmIndex {
         }
         if let Some(policy) = wal_sync_policy {
             builder = builder.wal_sync_policy(policy.inner);
+        }
+        if let Some(policy) = commit_policy {
+            builder = builder.commit_policy(policy.inner);
         }
 
         let engine = builder.build().await.map_err(laurus_err)?;

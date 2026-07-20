@@ -6,7 +6,7 @@ The main entry point for creating and querying search indexes.
 
 ### Static Methods
 
-#### `Index.create(schema?, walSyncPolicy?)`
+#### `Index.create(schema?, walSyncPolicy?, commitPolicy?)`
 
 Create a new in-memory (ephemeral) index.
 
@@ -15,9 +15,12 @@ Create a new in-memory (ephemeral) index.
   - `walSyncPolicy` (WalSyncPolicy, optional) -- WAL durability policy. Omit
     to keep the default per-record sync. See
     [WAL sync policy / durability](#wal-sync-policy--durability).
+  - `commitPolicy` (CommitPolicy, optional) -- Auto-commit policy. Omit to keep
+    the default (manual; caller-driven commits). See
+    [Commit policy / auto-commit](#commit-policy--auto-commit).
 - **Returns:** `Promise<Index>`
 
-#### `Index.open(name, schema?, walSyncPolicy?)`
+#### `Index.open(name, schema?, walSyncPolicy?, commitPolicy?)`
 
 Open or create a persistent index backed by OPFS.
 
@@ -27,6 +30,9 @@ Open or create a persistent index backed by OPFS.
   - `walSyncPolicy` (WalSyncPolicy, optional) -- WAL durability policy. Omit
     to keep the default per-record sync. See
     [WAL sync policy / durability](#wal-sync-policy--durability).
+  - `commitPolicy` (CommitPolicy, optional) -- Auto-commit policy. Omit to keep
+    the default (manual; caller-driven commits). See
+    [Commit policy / auto-commit](#commit-policy--auto-commit).
 - **Returns:** `Promise<Index>`
 
 ### Instance Methods
@@ -244,6 +250,62 @@ for (let i = 0; i < 10000; i++) {
 
 await index.flushWal(); // flushes the engine WAL (not OPFS)
 await index.commit();   // makes changes searchable AND persists to OPFS
+```
+
+## Commit policy / auto-commit
+
+A commit materializes buffered writes into the searchable stores.
+`Index.create` and `Index.open` accept an optional `commitPolicy` that controls
+whether the engine commits on your behalf. The default (omit the argument) is
+manual: you drive every `commit()` yourself.
+
+```typescript
+class CommitPolicy {
+  static manual(): CommitPolicy;
+  static everyDocs(n: number): CommitPolicy;
+}
+```
+
+| Constructor | Description |
+| :--- | :--- |
+| `CommitPolicy.manual()` | Default. No auto-commit; the caller drives every `commit()`. |
+| `CommitPolicy.everyDocs(n)` | Auto-commit after every `n` applied documents. |
+
+With `everyDocs(n)` the engine commits once every `n` applied documents. The
+counter spans both singular and batch ingest, and it also fires **within** a
+batch — a `putDocuments` call larger than `n` triggers one or more commits mid
+batch. `everyDocs(0)` is valid and disables auto-commit, which is equivalent to
+`CommitPolicy.manual()`.
+
+`commitPolicy` is **orthogonal** to `walSyncPolicy`: `walSyncPolicy` governs how
+often the WAL is fsynced for durability, while `commitPolicy` governs when the
+stores materialize buffered writes into searchable state. They are configured
+independently.
+
+### WASM note
+
+Unlike `walSyncPolicy`'s `maxIntervalMs` background timer (a no-op on wasm),
+`everyDocs` needs **no** background thread — the document counter is checked
+inline during ingestion — so auto-commit works fully under WebAssembly.
+
+```javascript
+import { Index, Schema, CommitPolicy } from "./pkg/laurus_wasm.js";
+
+const schema = new Schema();
+schema.addTextField("title");
+
+// Auto-commit after every 1000 applied documents.
+const index = await Index.open(
+  "my-index",
+  schema,
+  undefined,
+  CommitPolicy.everyDocs(1000),
+);
+
+for (let i = 0; i < 10000; i++) {
+  await index.putDocument(`doc${i}`, { title: `Document ${i}` });
+}
+// The engine has auto-committed 10 times; no explicit commit() required.
 ```
 
 ## Schema

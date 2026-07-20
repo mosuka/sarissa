@@ -5,7 +5,7 @@
 Laurus 検索エンジンをラップするメインクラスです。
 
 ```ruby
-Laurus::Index.new(path: nil, schema: nil, wal_sync_policy: nil)
+Laurus::Index.new(path: nil, schema: nil, wal_sync_policy: nil, commit_policy: nil)
 ```
 
 ### コンストラクタ
@@ -15,6 +15,7 @@ Laurus::Index.new(path: nil, schema: nil, wal_sync_policy: nil)
 | `path:` | `String \| nil` | `nil` | 永続ストレージのディレクトリパス。`nil` の場合はインメモリインデックスを作成します。 |
 | `schema:` | `Schema \| nil` | `nil` | スキーマ定義。省略時は空のスキーマが使用されます。 |
 | `wal_sync_policy:` | `WalSyncPolicy \| nil` | `nil` | 先行書き込みログ（WAL）の耐久性ポリシー。`nil` の場合はデフォルトのレコードごと fsync を維持します。[WAL 同期ポリシーと耐久性](#wal-同期ポリシーと耐久性) を参照。 |
+| `commit_policy:` | `CommitPolicy \| nil` | `nil` | 自動コミットポリシー。`nil` の場合はデフォルトの manual モード（呼び出し側がすべての `commit` を駆動）を維持します。[コミットポリシーと自動コミット](#コミットポリシーと自動コミット) を参照。 |
 
 ### メソッド
 
@@ -92,6 +93,46 @@ index = Laurus::Index.new(path: "./myindex", wal_sync_policy: policy)
 
 index.put_document("doc1", { "title" => "Hello" })
 index.flush_wal  # group バッチが満杯でなくてもレコードが永続化される
+```
+
+### コミットポリシーと自動コミット
+
+デフォルトでは、すべてのコミットは呼び出し側が駆動します。バッファリング
+された書き込みは、明示的に `commit` を呼び出したときにのみ検索可能になり
+ます。**自動コミットポリシー（auto-commit policy）** を使うと、その責務を
+エンジンに委ねられ、一定数のドキュメントを適用するたびに自動でコミットされ
+ます。
+
+#### CommitPolicy
+
+`Laurus::CommitPolicy` は、エンジンがバッファリングされた書き込みをいつ
+ストアへ実体化するかを記述するイミュータブルな値オブジェクトです。
+`Index.new(commit_policy:)` に渡します。
+
+```ruby
+# デフォルト: manual — すべてのコミットは呼び出し側が駆動。
+Laurus::CommitPolicy.manual
+
+# 自動コミット: N ドキュメント適用ごとにコミット。
+Laurus::CommitPolicy.every_docs(1000)
+```
+
+| コンストラクタ | 説明 |
+| :--- | :--- |
+| `CommitPolicy.manual` | デフォルト。自動コミットなし。すべての `commit` は呼び出し側が駆動します。 |
+| `CommitPolicy.every_docs(n)` | `n` ドキュメント適用ごとに自動コミットします。単発・バッチ両方の取り込みを通してカウントされ、単一バッチ **内** でも `n` ドキュメントごとにコミットされます。 |
+
+`every_docs(0)` は有効で、自動コミットを無効化します（`manual` と等価）。
+
+コミットポリシーは [WalSyncPolicy](#wal-同期ポリシーと耐久性) と直交して
+います。`WalSyncPolicy` が WAL の `fsync` 耐久性を制御するのに対し、
+`CommitPolicy` はストアがバッファリングされた書き込みをいつ実体化するかを
+制御します。両者は独立して設定します。
+
+```ruby
+# 1000 ドキュメント適用ごとに自動コミット。
+policy = Laurus::CommitPolicy.every_docs(1000)
+index = Laurus::Index.new(path: "./myindex", commit_policy: policy)
 ```
 
 ---
