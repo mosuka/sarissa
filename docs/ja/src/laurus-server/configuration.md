@@ -48,8 +48,9 @@ group_max_bytes = 1048576      # オプション; デフォルト 1 MiB
 group_max_interval_ms = 1000   # オプション; 未設定時は background timer なし（native のみ）
 
 [index.commit]
-policy = "every_docs"          # "manual"（デフォルト） | "every_docs"
+policy = "every_docs"          # "manual"（デフォルト） | "every_docs" | "interval"
 every_docs = 1000              # オプション; N 件ごとに commit（0/未設定で無効）
+interval_ms = 1000             # "interval" のみ; 最低 N ミリ秒ごとに commit（native のみ）
 ```
 
 ログの詳細度は設定ファイルではなく、`RUST_LOG` 環境変数で制御します（デフォルト: `info`）。
@@ -100,12 +101,14 @@ WAL は **per-record** fsync を使用します（各書き込みは返る前に
 インデックスと、後から `CreateIndex` で作成されるインデックスの両方に適用されます。
 セマンティクスは
 [永続化と WAL → 自動コミットポリシー](../laurus/persistence.md#自動コミットポリシーauto-commit-policy)
-を参照してください。
+を参照してください。`"interval"` は `"every_docs"` の時間ベース版であり、**native のみ** —
+WebAssembly では background thread がないため no-op になります。
 
 | フィールド | 型 | デフォルト | 説明 |
 | :--- | :--- | :--- | :--- |
-| `policy` | String | `"manual"` | 自動コミットポリシー: `"manual"`（呼び出し側が commit を駆動）または `"every_docs"`（`every_docs` 件ごとに commit） |
+| `policy` | String | `"manual"` | 自動コミットポリシー: `"manual"`（呼び出し側が commit を駆動）、`"every_docs"`（`every_docs` 件ごとに commit）、または `"interval"`（最低 `interval_ms` ミリ秒ごとに commit） |
 | `every_docs` | Integer | -- | `every_docs` ポリシーのみ。適用ドキュメント数がこの値に達するごとに commit。未設定（または `0`）で自動コミット無効（`"manual"` と同等） |
+| `interval_ms` | Integer | -- | `interval` ポリシーのみ。background timer により最低この間隔（ミリ秒）ごとに自動コミットするため、インジェストがアイドルでも末尾の部分バッチが commit されます — `every_docs` の時間ベース版。**native ターゲットのみ** — `wasm32` では no-op として扱われます（background thread なし） |
 
 `CommitPolicy` は `[index.wal]` と直交します。WAL セクションは *append がいつ fsync
 されるか* を、このセクションは *ストアがいつ materialize するか* を制御します。commit は

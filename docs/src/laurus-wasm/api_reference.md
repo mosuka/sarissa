@@ -263,6 +263,7 @@ manual: you drive every `commit()` yourself.
 class CommitPolicy {
   static manual(): CommitPolicy;
   static everyDocs(n: number): CommitPolicy;
+  static intervalMs(ms: number): CommitPolicy;
 }
 ```
 
@@ -270,12 +271,18 @@ class CommitPolicy {
 | :--- | :--- |
 | `CommitPolicy.manual()` | Default. No auto-commit; the caller drives every `commit()`. |
 | `CommitPolicy.everyDocs(n)` | Auto-commit after every `n` applied documents. |
+| `CommitPolicy.intervalMs(ms)` | Auto-commit at least every `ms` milliseconds via a background timer (default: none). **Native only — no-op on wasm.** |
 
 With `everyDocs(n)` the engine commits once every `n` applied documents. The
 counter spans both singular and batch ingest, and it also fires **within** a
 batch — a `putDocuments` call larger than `n` triggers one or more commits mid
 batch. `everyDocs(0)` is valid and disables auto-commit, which is equivalent to
 `CommitPolicy.manual()`.
+
+`intervalMs(ms)` is the time-based counterpart of `everyDocs`: a background
+timer commits at least every `ms` milliseconds, so a trailing partial batch is
+committed even while ingestion is idle. It is **native only** — see the WASM
+note below.
 
 `commitPolicy` is **orthogonal** to `walSyncPolicy`: `walSyncPolicy` governs how
 often the WAL is fsynced for durability, while `commitPolicy` governs when the
@@ -287,6 +294,12 @@ independently.
 Unlike `walSyncPolicy`'s `maxIntervalMs` background timer (a no-op on wasm),
 `everyDocs` needs **no** background thread — the document counter is checked
 inline during ingestion — so auto-commit works fully under WebAssembly.
+
+`intervalMs`, by contrast, relies on a background timer just like
+`walSyncPolicy`'s `maxIntervalMs`, and wasm has no background threads. The
+factory still constructs a value so portable policy code keeps compiling, but
+the timer never runs under WebAssembly and **`intervalMs` has no effect on
+wasm** — no timed commit ever fires. Use `everyDocs` for auto-commit on wasm.
 
 ```javascript
 import { Index, Schema, CommitPolicy } from "./pkg/laurus_wasm.js";

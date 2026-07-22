@@ -147,6 +147,8 @@ def test_commit_policy_constructors():
     # every_docs(0) is valid — it disables auto-commit (equivalent to manual).
     assert laurus.CommitPolicy.every_docs(0) is not None
     assert "every_docs(100)" in repr(laurus.CommitPolicy.every_docs(100))
+    assert laurus.CommitPolicy.interval_ms(1000) is not None
+    assert "interval_ms(1000)" in repr(laurus.CommitPolicy.interval_ms(1000))
 
 
 def test_index_accepts_commit_policies():
@@ -154,6 +156,7 @@ def test_index_accepts_commit_policies():
     assert laurus.Index(commit_policy=laurus.CommitPolicy.manual()) is not None
     assert laurus.Index(commit_policy=laurus.CommitPolicy.every_docs(100)) is not None
     assert laurus.Index(commit_policy=laurus.CommitPolicy.every_docs(0)) is not None
+    assert laurus.Index(commit_policy=laurus.CommitPolicy.interval_ms(1000)) is not None
     # Omitting commit_policy keeps the default (manual).
     assert laurus.Index() is not None
 

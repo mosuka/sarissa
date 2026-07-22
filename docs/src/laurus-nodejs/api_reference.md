@@ -129,6 +129,7 @@ cadence instead, so writes are materialized without an explicit `commit()`.
 class CommitPolicy {
   static manual(): CommitPolicy;
   static everyDocs(n: number): CommitPolicy;
+  static intervalMs(ms: number): CommitPolicy;
 }
 ```
 
@@ -136,11 +137,19 @@ class CommitPolicy {
 | :--- | :--- |
 | `CommitPolicy.manual()` | Default. No auto-commit; the caller drives every `commit()`. |
 | `CommitPolicy.everyDocs(n)` | Auto-commit after every `n` applied documents. |
+| `CommitPolicy.intervalMs(ms)` | Auto-commit at least every `ms` milliseconds via a background timer (default: none). **Native-only**; a no-op on wasm (no background threads). |
 
 With `everyDocs(n)` the engine commits after every `n` applied documents,
 counted across both singular and batch ingest — including every `n`
 documents **within** a single batch. Passing `everyDocs(0)` is valid and
 disables auto-commit, which is equivalent to `CommitPolicy.manual()`.
+
+`intervalMs(ms)` is the time-based counterpart of `everyDocs(n)`: a background
+timer auto-commits at least every `ms` milliseconds, so a trailing partial
+batch is materialized even while ingestion is idle. It is **native-only** — on
+wasm there are no background threads, so the engine treats `intervalMs` as a
+no-op (the factory still constructs the value, but no timed commit happens
+under WebAssembly).
 
 `commitPolicy` is orthogonal to `walSyncPolicy`: `walSyncPolicy` governs WAL
 `fsync` durability, while `commitPolicy` governs **when** the stores

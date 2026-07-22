@@ -205,11 +205,40 @@ impl PhpCommitPolicy {
         }
     }
 
+    /// Create an auto-commit-every-`ms`-milliseconds policy (#892).
+    ///
+    /// The engine runs the commit ladder at least every `ms` milliseconds via a
+    /// background timer, so a trailing partial batch is flushed even when
+    /// ingestion goes idle. This is the time-based counterpart of
+    /// [`PhpCommitPolicy::every_docs`].
+    ///
+    /// # Platform behavior
+    ///
+    /// Native only: on `wasm32` the engine never starts the timer, so `Interval`
+    /// is a documented no-op there. The factory still constructs the value.
+    ///
+    /// # Arguments
+    ///
+    /// * `ms` - Commit at least this often, in milliseconds. Negative values are
+    ///   clamped to `0`.
+    ///
+    /// # Returns
+    ///
+    /// A `CommitPolicy` wrapping [`CommitPolicy::Interval`].
+    pub fn interval_ms(ms: i64) -> Self {
+        Self {
+            inner: CommitPolicy::Interval(std::time::Duration::from_millis(ms.max(0) as u64)),
+        }
+    }
+
     /// Return a string representation.
     pub fn __to_string(&self) -> String {
         match self.inner {
             CommitPolicy::Manual => "CommitPolicy.manual()".to_string(),
             CommitPolicy::EveryDocs(n) => format!("CommitPolicy.everyDocs({n})"),
+            CommitPolicy::Interval(d) => {
+                format!("CommitPolicy.intervalMs({})", d.as_millis())
+            }
             // `CommitPolicy` is #[non_exhaustive]; render a future variant
             // generically rather than failing to compile.
             _ => "CommitPolicy(<unknown>)".to_string(),

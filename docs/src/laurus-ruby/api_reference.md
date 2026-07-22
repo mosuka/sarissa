@@ -99,7 +99,7 @@ index.flush_wal  # records persisted even though the group batch is not full
 By default the caller drives every commit: buffered writes only become
 searchable once you call `commit` explicitly. You can hand that responsibility
 to the engine with an **auto-commit policy**, which commits automatically after
-a fixed number of applied documents.
+a fixed number of applied documents or on a periodic timer.
 
 #### CommitPolicy
 
@@ -113,12 +113,16 @@ Laurus::CommitPolicy.manual
 
 # Auto-commit: commit after every N applied documents.
 Laurus::CommitPolicy.every_docs(1000)
+
+# Auto-commit: commit at least every N milliseconds (native only).
+Laurus::CommitPolicy.interval_ms(5000)
 ```
 
 | Constructor | Description |
 | :--- | :--- |
 | `CommitPolicy.manual` | Default. No auto-commit — the caller drives every `commit`. |
 | `CommitPolicy.every_docs(n)` | Auto-commit after every `n` applied documents. Counted across both singular and batch ingest, including every `n` documents **within** a single batch. |
+| `CommitPolicy.interval_ms(ms)` | Auto-commit at least every `ms` milliseconds via a background timer, so a trailing partial batch is committed even while ingestion is idle. The time-based counterpart of `every_docs`. Default: none. **Native only** — under WebAssembly (`wasm32`) there are no background threads, so the engine treats it as a no-op (the value still constructs, but no timed commit happens). |
 
 `every_docs(0)` is valid and disables auto-commit, making it equivalent to
 `manual`.

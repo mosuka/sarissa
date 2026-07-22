@@ -137,15 +137,14 @@ engine.put_documents(one_thousand_docs).await?;
 | :--- | :--- |
 | `Manual`（既定） | 自動コミットしない。すべての `commit()` を自分で駆動する。従来と同一の挙動。 |
 | `EveryDocs(n)` | 単数・バッチ両 API を通じて、適用ドキュメント `n` 件ごとにコミットラダーを実行。`EveryDocs(0)` は自動コミット無効（`Manual` と同じ）。 |
+| `Interval(Duration)` | 背景タイマーで少なくとも `Duration` ごとにコミットラダーを実行。インジェストが idle でも末尾の端数がコミットされる。**native ターゲットのみ** — `wasm32`（背景スレッドなし）では no-op（`WalSyncPolicy::Group` の `max_interval` と同様）。 |
 
 主なセマンティクス:
 
 - **group-commit を維持**: 各自動コミットは WAL フラッシュ 1 回 + materialization ラダー 1 回であり、ドキュメントごとのコミットには決してならない。1 回の `put_documents` / `add_documents` 呼び出し内でも自動コミットは **`n` 件ごと**（チャンク単位）に発火するため、大きなバッチは最後にまとめて 1 回ではなく逐次 materialize される。末尾の `< n` 件の端数は次の境界か明示 `commit()` まで WAL durable のまま残る。
 - **`WalSyncPolicy` と直交**: `CommitPolicy` は *ストアがいつ materialize するか* を、`WalSyncPolicy` は *WAL fsync の耐久性* を決める。`commit()` は必ず WAL フラッシュから始まるため、自動コミットは任意の WAL ポリシー下で機能する。
 - **クラッシュ意味論は不変**: 自動コミットは通常のコミットであり、クラッシュ時は未コミットの tail が手動コミットとまったく同じように再生される。
-- **並行性**: 正確なタイミングと「ack した書き込みは durable」という保証は、**単一 writer のインジェスト**（エンジンの書き込みパスが前提とするモデル。CLI・バインディングもこれに従う）で成立する。共有エンジン上の並行 writer 下では auto-commit は best-effort となる: commit ラダーは他スレッドの in-flight write に対してアトミックでないため、並行 auto-commit の実行中に ack された書き込みが次のコミットまで durable にならず、タイミングもドリフトしうる（並行の手動 `commit()` も同じ race を持つ — auto-commit はそれを ingest 経路から誘発するだけ）。並行下でこれらの保証が必要な場合は、明示コミットか単一インジェストタスクを使うこと。
-
-> **注:** 時間ベースの `Interval` ポリシー（*T* 秒ごとにコミット）は計画中です。背景コミットタイマーが必要で、既存コードを壊さずに追加されます。
+- **並行性**: 正確なタイミングと「ack した書き込みは durable」という保証は、**単一 writer のインジェスト**（エンジンの書き込みパスが前提とするモデル。CLI・バインディングもこれに従う）で成立する。共有エンジン上の並行 writer 下では auto-commit は best-effort となる: commit ラダーは他スレッドの in-flight write に対してアトミックでないため、並行 auto-commit の実行中に ack された書き込みが次のコミットまで durable にならず、タイミングもドリフトしうる（並行の手動 `commit()` も同じ race を持つ — auto-commit はそれを ingest 経路から誘発するだけ）。並行下でこれらの保証が必要な場合は、明示コミットか単一インジェストタスクを使うこと。`Interval` タイマーは専用スレッドでラダーを実行するため、同じ best-effort の注意が当てはまる。
 
 ## バッチインジェスト
 

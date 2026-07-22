@@ -119,7 +119,7 @@ A commit materializes buffered writes into the stores and makes all pending
 changes searchable. By default an `Index` never auto-commits, so the caller
 drives every `commit()` explicitly. The constructor accepts an optional
 `commit_policy` to instead let the engine auto-commit after a fixed number of
-applied documents.
+applied documents, or at least once every fixed time interval.
 
 ```python
 class CommitPolicy:
@@ -127,18 +127,28 @@ class CommitPolicy:
     def manual() -> CommitPolicy: ...
     @staticmethod
     def every_docs(n: int) -> CommitPolicy: ...
+    @staticmethod
+    def interval_ms(ms: int) -> CommitPolicy: ...
 ```
 
 | Constructor | Description |
 | :--- | :--- |
 | `CommitPolicy.manual()` | Default. No auto-commit; the caller drives every `commit()`. |
 | `CommitPolicy.every_docs(n)` | Auto-commit after every `n` applied documents. |
+| `CommitPolicy.interval_ms(ms)` | Auto-commit at least every `ms` milliseconds via a background timer (default: none). Native-only; a no-op on wasm. |
 
 `every_docs(n)` counts applied documents across both singular (`put_document`,
 `add_document`) and batch (`put_documents`, `add_documents`) ingest, and
 auto-commits after every `n` documents — including *within* a single batch.
 `every_docs(0)` is valid and disables auto-commit, making it equivalent to
 `manual()`.
+
+`interval_ms(ms)` is the time-based counterpart of `every_docs(n)`: a
+background timer commits at least every `ms` milliseconds, so a trailing
+partial batch is committed even while ingestion is idle. This factory is
+**native-only** — on wasm there are no background threads, so the engine treats
+it as a **no-op**: the value still constructs, but no timed commit happens under
+WebAssembly.
 
 `commit_policy` is orthogonal to `wal_sync_policy`: `wal_sync_policy` governs
 WAL `fsync` durability, whereas `commit_policy` governs when the stores
