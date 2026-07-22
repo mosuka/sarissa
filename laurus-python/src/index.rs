@@ -201,10 +201,36 @@ impl PyCommitPolicy {
         }
     }
 
+    /// Create an auto-commit-every-`ms`-milliseconds policy.
+    ///
+    /// A background timer runs the commit ladder at least every `ms`
+    /// milliseconds while ingestion is in progress. This is the time-based
+    /// counterpart of [`CommitPolicy.every_docs`].
+    ///
+    /// Note:
+    ///     This policy is native-only. On the `wasm32` target the engine never
+    ///     starts the background timer, so this policy is a documented no-op
+    ///     there (the value still constructs).
+    ///
+    /// Args:
+    ///     ms: Commit at least this often, in milliseconds.
+    ///
+    /// Returns:
+    ///     A `CommitPolicy` wrapping `CommitPolicy::Interval(Duration)`.
+    #[staticmethod]
+    pub fn interval_ms(ms: u64) -> Self {
+        Self {
+            inner: CommitPolicy::Interval(std::time::Duration::from_millis(ms)),
+        }
+    }
+
     fn __repr__(&self) -> String {
         match self.inner {
             CommitPolicy::Manual => "CommitPolicy.manual()".to_string(),
             CommitPolicy::EveryDocs(n) => format!("CommitPolicy.every_docs({n})"),
+            CommitPolicy::Interval(d) => {
+                format!("CommitPolicy.interval_ms({})", d.as_millis())
+            }
             // `CommitPolicy` is #[non_exhaustive]; a future variant renders
             // generically rather than failing to compile.
             _ => "CommitPolicy(<unknown>)".to_string(),

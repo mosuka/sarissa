@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use parking_lot::RwLock;
 
@@ -43,9 +44,8 @@ use self::schema::Schema;
 /// auto-commit works under any `WalSyncPolicy` because [`Engine::commit`] always
 /// begins with a WAL flush.
 ///
-/// The enum is `#[non_exhaustive]`: a time-based `Interval` variant is planned
-/// (it needs a background commit timer) and will be added without breaking
-/// exhaustive matches.
+/// The enum is `#[non_exhaustive]`, so downstream `match`es must carry a
+/// wildcard arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum CommitPolicy {
@@ -75,6 +75,17 @@ pub enum CommitPolicy {
     /// `EveryDocs(0)` disables auto-commit (equivalent to
     /// [`CommitPolicy::Manual`]).
     EveryDocs(usize),
+    /// Auto-commit at least every `Duration` via a background timer, so a
+    /// trailing partial batch is committed even while ingestion is idle (the
+    /// time-based counterpart of [`CommitPolicy::EveryDocs`]).
+    ///
+    /// The timer runs the full commit ladder on its own thread; the same
+    /// best-effort concurrency caveat as `EveryDocs` applies (a commit racing a
+    /// concurrent in-flight write may leave that write durable only at the next
+    /// commit). **Native targets only** — on `wasm32` there are no background
+    /// threads, so `Interval` is a no-op (the timer is never started), just like
+    /// [`WalSyncPolicy::Group`]'s `max_interval`.
+    Interval(Duration),
 }
 
 /// Combined statistics from both the lexical and vector stores.
@@ -155,6 +166,152 @@ impl Drop for WalFlushTimer {
     }
 }
 
+/// Run the commit durability ladder over the borrowed store sub-parts and reset
+/// the auto-commit counter (Issue #821, extracted for reuse by [`CommitTimer`]
+/// in #892).
+///
+/// The fixed order makes a crash at any step recoverable: `flush_wal` (the hard
+/// barrier) → `lexical.commit` (persists `last_wal_seq`) → `vector.commit` →
+/// `commit_documents` → `truncate`. Both [`Engine::commit`] and the background
+/// [`CommitTimer`] call this, so the timer needs only the `Arc` sub-parts — not
+/// the whole `Engine` (which would be a reference cycle).
+///
+/// # Errors
+///
+/// Returns an error if any ladder step fails; the counter is reset only after a
+/// fully successful commit.
+async fn run_commit_ladder(
+    lexical: &LexicalStore,
+    vector: &VectorStore,
+    log: &DocumentLog,
+    docs_since_commit: &AtomicU64,
+) -> Result<()> {
+    // Hard durability barrier: force the WAL durable before any store
+    // materializes its state, so the WAL is never less durable than the
+    // committed lexical/vector indexes. A near-no-op under the per-record
+    // default (each append already synced, so the dirty guard skips the
+    // fsync); the load-bearing step once group commit defers per-append
+    // fsync (#542 Phase 3).
+    log.flush_wal()?;
+    lexical.commit()?;
+    vector.commit().await?;
+    log.commit_documents()?;
+    // After successful commit to all stores, truncate the log.
+    log.truncate()?;
+    // Reset the auto-commit counter so a manual commit and an `EveryDocs`
+    // auto-commit keep the same cadence going forward (#890).
+    docs_since_commit.store(0, Ordering::Release);
+    Ok(())
+}
+
+/// Background timer that runs the full commit ladder at least every interval for
+/// [`CommitPolicy::Interval`] (Issue #892), so a trailing partial batch is
+/// committed even while ingestion is idle.
+///
+/// Mirrors [`WalFlushTimer`]: a dedicated thread with an mpsc stop channel,
+/// joined on drop. Unlike the WAL timer (which calls the synchronous
+/// `flush_wal` on `Arc<DocumentLog>`), the commit ladder is `async` and spans
+/// the lexical + vector stores, so the thread owns a private single-threaded
+/// tokio runtime and `block_on`s [`run_commit_ladder`] each tick. It holds only
+/// the `Arc` sub-parts the ladder needs — never the `Engine` — so there is no
+/// reference cycle and dropping the engine cleanly stops the timer. Native
+/// targets only; on `wasm32` (no background threads) `Interval` is a no-op.
+#[cfg(not(target_arch = "wasm32"))]
+struct CommitTimer {
+    /// Sending on (or dropping) this channel signals the thread to stop.
+    stop: std::sync::mpsc::Sender<()>,
+    /// Join handle for the commit thread, taken and joined on drop.
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl CommitTimer {
+    /// Spawn the commit thread, running the ladder every `interval`.
+    ///
+    /// # Arguments
+    ///
+    /// * `lexical` / `vector` / `log` / `docs_since_commit` - The store
+    ///   sub-parts the commit ladder operates on, shared with the engine.
+    /// * `interval` - How often to run the commit ladder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the private runtime or the OS thread cannot be
+    /// created.
+    fn spawn(
+        lexical: Arc<LexicalStore>,
+        vector: Arc<VectorStore>,
+        log: Arc<DocumentLog>,
+        docs_since_commit: Arc<AtomicU64>,
+        interval: Duration,
+    ) -> Result<Self> {
+        use std::sync::mpsc::RecvTimeoutError;
+
+        let (stop, rx) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::Builder::new()
+            .name("laurus-commit-timer".to_string())
+            .spawn(move || {
+                // A private current-thread runtime drives the async ladder. The
+                // ladder's only runtime-bound await is a `tokio::sync::Mutex`
+                // lock (in `VectorStore::commit`), which is runtime-agnostic, so
+                // this is independent of whatever runtime the caller uses.
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        log::warn!("commit timer: failed to build runtime: {e}");
+                        return;
+                    }
+                };
+                // Tick while each wait ends in a timeout: run the commit ladder.
+                // A stop signal (`Ok`) or a dropped sender (`Disconnected`) ends
+                // the loop and the thread.
+                while let Err(RecvTimeoutError::Timeout) = rx.recv_timeout(interval) {
+                    // Catch a panic from deep in the ladder so a single failure
+                    // does not silently kill the timer thread — which would stop
+                    // auto-commit for the engine's whole lifetime with no
+                    // diagnostic. The stores guard their own state behind locks,
+                    // so the next tick simply retries. `AssertUnwindSafe` is
+                    // sound here: after a caught panic the closure only re-reads
+                    // the shared `Arc` sub-parts and retries the commit.
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        rt.block_on(run_commit_ladder(
+                            &lexical,
+                            &vector,
+                            &log,
+                            &docs_since_commit,
+                        ))
+                    }));
+                    match outcome {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => log::warn!("commit timer: failed to commit: {e}"),
+                        Err(_) => {
+                            log::error!("commit timer: commit panicked; retrying on the next tick")
+                        }
+                    }
+                }
+            })?;
+        Ok(Self {
+            stop,
+            handle: Some(handle),
+        })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for CommitTimer {
+    fn drop(&mut self) {
+        // Wake the thread immediately so it exits without waiting out the
+        // current interval, then join it.
+        let _ = self.stop.send(());
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 /// Unified Engine that manages both Lexical and Vector indices.
 ///
 /// This engine acts as a facade, coordinating document ingestion and search
@@ -165,8 +322,12 @@ impl Drop for WalFlushTimer {
 /// to track the external document identifier.
 pub struct Engine {
     schema: RwLock<Schema>,
-    lexical: LexicalStore,
-    vector: VectorStore,
+    /// The lexical store. `Arc` so the [`CommitTimer`] can share it as a
+    /// sub-part (a timer holding the whole `Engine` would be a reference cycle);
+    /// every access is through `&self` methods, so the `Arc` is transparent.
+    lexical: Arc<LexicalStore>,
+    /// The vector store. `Arc` for the same reason as [`Self::lexical`].
+    vector: Arc<VectorStore>,
     log: Arc<DocumentLog>,
     /// Pre-constructed analyzers registered at build time and consulted
     /// before built-in names and `schema.analyzers` when resolving
@@ -189,14 +350,22 @@ pub struct Engine {
     /// document in [`Self::index_internal`] and reset to `0` by
     /// [`Self::commit`], so both manual and auto commits keep the count
     /// consistent. Lock-free (mirrors [`DocumentLog`]'s counters); exact for
-    /// serial ingestion, best-effort under concurrent writers.
-    docs_since_commit: AtomicU64,
+    /// serial ingestion, best-effort under concurrent writers. `Arc` so the
+    /// [`CommitTimer`] shares the same counter and resets it on each timed
+    /// commit.
+    docs_since_commit: Arc<AtomicU64>,
     /// Background WAL flush timer for a [`WalSyncPolicy::Group`] configured with
     /// a `max_interval`. `None` when no interval is set. Held only to keep the
     /// timer thread alive for the engine's lifetime; dropping the engine stops
     /// it. Absent on `wasm32` (no background threads — the interval is ignored).
     #[cfg(not(target_arch = "wasm32"))]
     _wal_flush_timer: Option<WalFlushTimer>,
+    /// Background auto-commit timer for [`CommitPolicy::Interval`] (Issue #892).
+    /// `None` under any other policy. Held only to keep the timer thread alive
+    /// for the engine's lifetime; dropping the engine stops and joins it.
+    /// Absent on `wasm32` (no background threads — `Interval` is a no-op).
+    #[cfg(not(target_arch = "wasm32"))]
+    _commit_timer: Option<CommitTimer>,
 }
 
 use crate::engine::search::{FusionAlgorithm, SearchResult};
@@ -846,22 +1015,13 @@ impl Engine {
     /// Returns an error if flushing the WAL, committing the lexical store,
     /// vector store, document store, or truncating the WAL fails.
     pub async fn commit(&self) -> Result<()> {
-        // Hard durability barrier: force the WAL durable before any store
-        // materializes its state, so the WAL is never less durable than the
-        // committed lexical/vector indexes. A near-no-op under the per-record
-        // default (each append already synced, so the dirty guard skips the
-        // fsync); the load-bearing step once group commit defers per-append
-        // fsync (#542 Phase 3).
-        self.log.flush_wal()?;
-        self.lexical.commit()?;
-        self.vector.commit().await?;
-        self.log.commit_documents()?;
-        // After successful commit to all stores, truncate the log
-        self.log.truncate()?;
-        // Reset the auto-commit counter so a manual commit and an
-        // `EveryDocs` auto-commit keep the same cadence going forward (#890).
-        self.docs_since_commit.store(0, Ordering::Release);
-        Ok(())
+        run_commit_ladder(
+            &self.lexical,
+            &self.vector,
+            &self.log,
+            &self.docs_since_commit,
+        )
+        .await
     }
 
     /// Force every appended-but-unsynced WAL record durable, without a full
@@ -2192,8 +2352,12 @@ impl EngineBuilder {
         let document_storage: Arc<dyn Storage> =
             Arc::new(PrefixedStorage::new("documents", self.storage.clone()));
 
-        let lexical = LexicalStore::new(lexical_storage, lexical_config)?;
-        let vector = VectorStore::new(vector_storage, vector_config)?;
+        // The commit-able stores and counter are `Arc` so the background
+        // `CommitTimer` (Issue #892) can share them as sub-parts without a
+        // reference cycle back to the `Engine`.
+        let lexical = Arc::new(LexicalStore::new(lexical_storage, lexical_config)?);
+        let vector = Arc::new(VectorStore::new(vector_storage, vector_config)?);
+        let docs_since_commit = Arc::new(AtomicU64::new(0));
 
         let log = Arc::new(DocumentLog::with_sync_policy(
             self.storage,
@@ -2215,6 +2379,20 @@ impl EngineBuilder {
             None => None,
         };
 
+        // Start the auto-commit timer for `CommitPolicy::Interval`. Native
+        // only; on wasm32 `Interval` is a no-op (no background threads).
+        #[cfg(not(target_arch = "wasm32"))]
+        let commit_timer = match self.commit_policy {
+            CommitPolicy::Interval(interval) => Some(CommitTimer::spawn(
+                Arc::clone(&lexical),
+                Arc::clone(&vector),
+                Arc::clone(&log),
+                Arc::clone(&docs_since_commit),
+                interval,
+            )?),
+            _ => None,
+        };
+
         let engine = Engine {
             schema: RwLock::new(self.schema),
             lexical,
@@ -2223,9 +2401,11 @@ impl EngineBuilder {
             runtime_analyzers: self.runtime_analyzers,
             embedding_cache,
             commit_policy: self.commit_policy,
-            docs_since_commit: AtomicU64::new(0),
+            docs_since_commit,
             #[cfg(not(target_arch = "wasm32"))]
             _wal_flush_timer: wal_flush_timer,
+            #[cfg(not(target_arch = "wasm32"))]
+            _commit_timer: commit_timer,
         };
 
         engine.recover().await?;
@@ -3814,6 +3994,78 @@ mod tests {
             engine.search(request).await.unwrap().len(),
             1,
             "an auto-committed doc must be searchable without an explicit commit"
+        );
+    }
+
+    /// #892: under `CommitPolicy::Interval` the background timer commits a
+    /// trailing doc even while ingestion is idle — the WAL is truncated within
+    /// the interval with no explicit commit from the caller.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn interval_commits_while_idle() {
+        let (engine, storage) =
+            commit_policy_engine(CommitPolicy::Interval(Duration::from_millis(30))).await;
+        engine.put_document("d1", title_doc("idle")).await.unwrap();
+        assert!(
+            wal_bytes(&storage) > 0,
+            "the doc is uncommitted immediately after the put"
+        );
+
+        // Poll up to ~2s for the timer to run the commit ladder (WAL truncated).
+        let mut committed = false;
+        for _ in 0..200 {
+            if wal_bytes(&storage) == 0 {
+                committed = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            committed,
+            "the Interval timer must commit the idle doc within its interval (#892)"
+        );
+    }
+
+    /// #892: dropping an engine built with `CommitPolicy::Interval` returns
+    /// promptly — the timer holds only `Arc` sub-parts (not the `Engine`), so
+    /// there is no reference cycle and the drop stops and joins the thread.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn interval_engine_drops_cleanly() {
+        let (engine, _storage) =
+            commit_policy_engine(CommitPolicy::Interval(Duration::from_millis(20))).await;
+        engine.put_document("d1", title_doc("drop")).await.unwrap();
+        // Let the timer tick at least once, then drop and time the shutdown.
+        std::thread::sleep(Duration::from_millis(50));
+        let started = std::time::Instant::now();
+        drop(engine);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "dropping an Interval engine must not hang (no reference cycle, clean join)"
+        );
+    }
+
+    /// #892: a doc committed by the Interval timer is durably searchable without
+    /// any explicit commit from the caller (end-to-end through the ladder).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn interval_commits_are_searchable() {
+        let (engine, storage) =
+            commit_policy_engine(CommitPolicy::Interval(Duration::from_millis(30))).await;
+        engine.put_document("a", title_doc("alpha")).await.unwrap();
+        // Wait for the timer to commit.
+        for _ in 0..200 {
+            if wal_bytes(&storage) == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:alpha"))
+            .limit(10)
+            .build();
+        assert_eq!(
+            engine.search(request).await.unwrap().len(),
+            1,
+            "an Interval-committed doc must be searchable without an explicit commit"
         );
     }
 }

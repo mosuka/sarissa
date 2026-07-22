@@ -145,6 +145,10 @@ pub enum CommitPolicyKind {
     /// Commit every `every_docs` applied documents; maps to
     /// [`CommitPolicy::EveryDocs`].
     EveryDocs,
+    /// Auto-commit at least every `interval_ms` milliseconds via a background
+    /// timer; maps to [`CommitPolicy::Interval`] (Issue #892). Native-only: on
+    /// `wasm32` the engine never starts the timer, so this is a no-op there.
+    Interval,
 }
 
 /// Auto-commit configuration.
@@ -153,7 +157,10 @@ pub enum CommitPolicyKind {
 /// [`CommitPolicyKind::Manual`], preserving caller-driven commits. When
 /// `policy = "every_docs"`, the optional `every_docs` threshold sets the
 /// document count between commits; an unset (or `0`) threshold disables
-/// auto-commit, matching [`CommitPolicy::EveryDocs`]`(0)`.
+/// auto-commit, matching [`CommitPolicy::EveryDocs`]`(0)`. When
+/// `policy = "interval"`, the optional `interval_ms` threshold sets the
+/// background auto-commit interval in milliseconds; an unset (or `0`)
+/// interval disables the timer, matching [`CommitPolicy::Interval`]`(0)`.
 #[derive(Debug, Clone, Copy, Deserialize, Default)]
 pub struct CommitConfig {
     /// Which auto-commit policy to use. Defaults to `manual`.
@@ -163,6 +170,10 @@ pub struct CommitConfig {
     /// Unset (or `0`) disables auto-commit.
     #[serde(default)]
     pub every_docs: Option<usize>,
+    /// Auto-commit interval in milliseconds (`interval` policy only). Unset
+    /// (or `0`) disables the timer, matching [`CommitPolicy::Interval`]`(0)`.
+    #[serde(default)]
+    pub interval_ms: Option<u64>,
 }
 
 impl CommitConfig {
@@ -170,14 +181,18 @@ impl CommitConfig {
     ///
     /// # Returns
     ///
-    /// [`CommitPolicy::Manual`] when `policy` is `manual`, or
+    /// [`CommitPolicy::Manual`] when `policy` is `manual`,
     /// [`CommitPolicy::EveryDocs`] with the configured threshold (`0` when
     /// unset, which the engine treats as disabled) when `policy` is
-    /// `every_docs`.
+    /// `every_docs`, or [`CommitPolicy::Interval`] with the configured
+    /// millisecond interval (`0` when unset) when `policy` is `interval`.
     pub fn to_policy(&self) -> CommitPolicy {
         match self.policy {
             CommitPolicyKind::Manual => CommitPolicy::Manual,
             CommitPolicyKind::EveryDocs => CommitPolicy::EveryDocs(self.every_docs.unwrap_or(0)),
+            CommitPolicyKind::Interval => {
+                CommitPolicy::Interval(Duration::from_millis(self.interval_ms.unwrap_or(0)))
+            }
         }
     }
 }
@@ -300,5 +315,20 @@ mod tests {
         "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.index.commit.to_policy(), CommitPolicy::EveryDocs(0));
+    }
+
+    #[test]
+    fn interval_policy_maps_duration() {
+        let toml = r#"
+            [index.commit]
+            policy = "interval"
+            interval_ms = 500
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.index.commit.policy, CommitPolicyKind::Interval);
+        assert_eq!(
+            config.index.commit.to_policy(),
+            CommitPolicy::Interval(Duration::from_millis(500))
+        );
     }
 }

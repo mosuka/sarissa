@@ -77,11 +77,14 @@ class TestIndex < Minitest::Test
     refute_nil Laurus::CommitPolicy.every_docs(100)
     # every_docs(0) is valid — it disables auto-commit (equivalent to manual).
     refute_nil Laurus::CommitPolicy.every_docs(0)
+    # interval_ms builds the time-based auto-commit policy.
+    refute_nil Laurus::CommitPolicy.interval_ms(1000)
 
     # Every variant, and the default (omitted kwarg), is accepted by Index.new.
     refute_nil Laurus::Index.new(commit_policy: Laurus::CommitPolicy.manual)
     refute_nil Laurus::Index.new(commit_policy: Laurus::CommitPolicy.every_docs(100))
     refute_nil Laurus::Index.new(commit_policy: Laurus::CommitPolicy.every_docs(0))
+    refute_nil Laurus::Index.new(commit_policy: Laurus::CommitPolicy.interval_ms(1000))
   end
 
   def test_index_with_every_docs_auto_commit

@@ -100,8 +100,9 @@ $index->flushWal(); // group バッチが満杯でなくてもレコードが永
 コミットは、バッファリングされた書き込みを Lexical ストアと Vector ストアに
 実体化（materialise）し、保留中の変更を検索可能にします。デフォルトでは
 Laurus が自動でコミットすることはなく、呼び出し側がすべての `commit()` を
-駆動します。代わりに、適用したドキュメント数が一定に達するたびにエンジンに
-**自動コミット（auto-commit）**させることもできます。
+駆動します。代わりに、適用したドキュメント数が一定に達するたびに、あるいは
+一定の時間間隔ごとに、エンジンに **自動コミット（auto-commit）**させることも
+できます。
 
 #### CommitPolicy
 
@@ -116,12 +117,18 @@ Laurus が自動でコミットすることはなく、呼び出し側がすべ�
 \Laurus\CommitPolicy::everyDocs(
     int $n,   // このドキュメント数を適用するたびにコミット
 ): CommitPolicy
+
+// 少なくとも N ミリ秒ごとに自動コミット（ネイティブ専用。wasm では no-op）。
+\Laurus\CommitPolicy::intervalMs(
+    int $ms,   // 少なくともこの間隔（ミリ秒）でコミット
+): CommitPolicy
 ```
 
 | コンストラクタ | 説明 |
 | :--- | :--- |
 | `CommitPolicy::manual()` | デフォルト。エンジンは自動でコミットせず、呼び出し側がすべての `commit()` を駆動します。 |
 | `CommitPolicy::everyDocs($n)` | 適用したドキュメント `$n` 件ごとに自動コミットします。カウントは単一 ingest とバッチ ingest の両方にまたがり、バッチ **内** でも `$n` 件ごとにトリガーされます。 |
+| `CommitPolicy::intervalMs($ms)` | バックグラウンドタイマーにより、少なくとも `$ms` ミリ秒ごとに自動コミットします。ingest がアイドル状態でも、末尾の部分バッチがコミットされます。`everyDocs` の時間ベース版です。デフォルト: なし。**ネイティブ専用** — wasm では no-op です（WebAssembly にはバックグラウンドスレッドがありません）。値は構築されますが、タイマーによるコミットは発生しません。 |
 
 `CommitPolicy::everyDocs(0)` は有効で、自動コミットを無効化します。
 `CommitPolicy::manual()` と等価です。

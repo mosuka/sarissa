@@ -131,15 +131,14 @@ engine.put_documents(one_thousand_docs).await?;
 | :--- | :--- |
 | `Manual` (default) | Never auto-commits; you drive every `commit()`. Identical to the historical behavior. |
 | `EveryDocs(n)` | Runs the commit ladder after every `n` applied documents, across the singular and batch APIs. `EveryDocs(0)` disables auto-commit (same as `Manual`). |
+| `Interval(Duration)` | Runs the commit ladder at least every `Duration` via a background timer, so a trailing partial batch is committed even while ingestion is idle. **Native targets only** — a no-op on `wasm32` (no background threads), like `WalSyncPolicy::Group`'s `max_interval`. |
 
 Key semantics:
 
 - **Group-commit preserved.** Each auto-commit is one WAL flush plus one materialization ladder — never one commit per document. Within a single `put_documents` / `add_documents` call the auto-commit fires **every `n` documents** (chunked), so a large batch materializes incrementally rather than in one final ladder; the trailing `< n` remainder stays WAL-durable until the next boundary or an explicit `commit()`.
 - **Orthogonal to `WalSyncPolicy`.** `CommitPolicy` decides *when the stores materialize*; `WalSyncPolicy` decides *WAL fsync durability*. Auto-commit works under any WAL policy because `commit()` always begins with a WAL flush.
 - **Crash semantics unchanged.** An auto-commit is a normal commit; a crash replays the uncommitted tail exactly as it would under manual commits.
-- **Concurrency.** The exact cadence and the usual "acknowledged write is durable" guarantee hold for **single-writer ingestion** (the model the engine's write path — and the CLI/bindings — are built around). Under concurrent writers on a shared engine, auto-commit is best-effort: because the commit ladder is not atomic with respect to another thread's in-flight write, a write acknowledged while a concurrent auto-commit runs may only become durable at the following commit, and the cadence may drift. (A concurrent manual `commit()` races the same way — auto-commit merely triggers it from the ingest path.) Use explicit commits, or a single ingest task, if you need these guarantees under concurrency.
-
-> **Note:** A time-based `Interval` policy (commit every *T* seconds) is planned; it needs a background commit timer and will be added without breaking existing code.
+- **Concurrency.** The exact cadence and the usual "acknowledged write is durable" guarantee hold for **single-writer ingestion** (the model the engine's write path — and the CLI/bindings — are built around). Under concurrent writers on a shared engine, auto-commit is best-effort: because the commit ladder is not atomic with respect to another thread's in-flight write, a write acknowledged while a concurrent auto-commit runs may only become durable at the following commit, and the cadence may drift. (A concurrent manual `commit()` races the same way — auto-commit merely triggers it from the ingest path.) The `Interval` timer runs the ladder on its own thread, so the same best-effort caveat applies to it. Use explicit commits, or a single ingest task, if you need these guarantees under concurrency.
 
 ## Batch Ingestion
 

@@ -81,4 +81,28 @@ impl JsCommitPolicy {
             inner: CommitPolicy::EveryDocs(n as usize),
         }
     }
+
+    /// Create an auto-commit-at-least-every-`ms`-milliseconds policy.
+    ///
+    /// A background timer runs the commit ladder at least once per `ms`
+    /// milliseconds while ingestion is active — the time-based counterpart of
+    /// `everyDocs`.
+    ///
+    /// **Native-only:** on `wasm32` targets the engine never starts the timer,
+    /// so this policy is a documented no-op there (the value is still
+    /// constructed).
+    ///
+    /// # Arguments
+    ///
+    /// * `ms` - Commit at least this often, in milliseconds.
+    ///
+    /// # Returns
+    ///
+    /// A `CommitPolicy` representing `Interval(Duration::from_millis(ms))`.
+    #[napi(factory)]
+    pub fn interval_ms(ms: u32) -> Self {
+        Self {
+            inner: CommitPolicy::Interval(std::time::Duration::from_millis(ms as u64)),
+        }
+    }
 }

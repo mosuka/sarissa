@@ -824,6 +824,20 @@ class LaurusTest extends TestCase
         $this->assertNotNull($idx2);
     }
 
+    public function testCommitPolicyIntervalMsAccepted(): void
+    {
+        // intervalMs (#892) builds a value object that the Index constructor
+        // accepts as the 4th argument.
+        $interval = Laurus\CommitPolicy::intervalMs(1000);
+        $this->assertNotNull($interval);
+
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+
+        $idx = new Laurus\Index(null, $schema, null, Laurus\CommitPolicy::intervalMs(1000));
+        $this->assertNotNull($idx);
+    }
+
     public function testEveryDocsAutoCommitEndToEnd(): void
     {
         // An index built with everyDocs(1) is wired end-to-end: a document is

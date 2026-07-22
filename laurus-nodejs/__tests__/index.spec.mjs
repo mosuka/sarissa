@@ -128,6 +128,19 @@ describe("Commit policy", () => {
     expect(CommitPolicy.everyDocs(0)).toBeDefined();
   });
 
+  it("accepts an intervalMs(ms) factory", async () => {
+    expect(CommitPolicy.intervalMs(1000)).toBeDefined();
+    const schema = new Schema();
+    schema.addTextField("title");
+    const index = await Index.create(
+      null,
+      schema,
+      undefined,
+      CommitPolicy.intervalMs(1000),
+    );
+    expect(index).toBeDefined();
+  });
+
   it("creates an index with an EveryDocs policy and retrieves a doc", async () => {
     const schema = new Schema();
     schema.addTextField("title");

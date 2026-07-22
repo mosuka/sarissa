@@ -75,4 +75,29 @@ impl WasmCommitPolicy {
             inner: CommitPolicy::EveryDocs(n as usize),
         }
     }
+
+    /// The auto-commit-at-least-every-interval policy (Issue #892).
+    ///
+    /// The engine runs the commit ladder at least once every `ms`
+    /// milliseconds via a background timer — the time-based counterpart of
+    /// [`WasmCommitPolicy::every_docs`].
+    ///
+    /// **wasm note:** unlike under native builds, WebAssembly has no background
+    /// thread, so the engine never starts the timer and `intervalMs` is a
+    /// documented no-op at runtime under wasm. The factory still constructs the
+    /// value so the same policy code is portable across targets.
+    ///
+    /// # Arguments
+    ///
+    /// * `ms` - Commit at least every this many milliseconds.
+    ///
+    /// # Returns
+    ///
+    /// A `CommitPolicy` wrapping [`CommitPolicy::Interval`].
+    #[wasm_bindgen(js_name = "intervalMs")]
+    pub fn interval_ms(ms: u32) -> WasmCommitPolicy {
+        WasmCommitPolicy {
+            inner: CommitPolicy::Interval(std::time::Duration::from_millis(ms as u64)),
+        }
+    }
 }

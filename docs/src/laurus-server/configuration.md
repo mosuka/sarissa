@@ -48,8 +48,9 @@ group_max_bytes = 1048576      # optional; default 1 MiB
 group_max_interval_ms = 1000   # optional; no background timer when unset (native only)
 
 [index.commit]
-policy = "every_docs"          # "manual" (default) | "every_docs"
+policy = "every_docs"          # "manual" (default) | "every_docs" | "interval"
 every_docs = 1000              # optional; commit every N docs (0/unset disables)
+interval_ms = 1000             # "interval" only; commit at least every N ms (native only)
 ```
 
 Log verbosity is controlled by the `RUST_LOG` environment variable (default: `info`), not through the config file.
@@ -99,12 +100,15 @@ is **manual** — it commits only when the server materializes an index (there i
 no automatic commit during ingestion). The policy applies to both an index
 opened at boot and any index created later through `CreateIndex`. See
 [Persistence & WAL → Auto-commit Policy](../laurus/persistence.md#auto-commit-policy)
-for the semantics.
+for the semantics. `"interval"` is the time-based counterpart of `"every_docs"`
+and is **native only** — under WebAssembly it is a no-op because there are no
+background threads.
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `policy` | String | `"manual"` | Auto-commit policy: `"manual"` (caller-driven commits) or `"every_docs"` (commit every `every_docs` applied documents) |
+| `policy` | String | `"manual"` | Auto-commit policy: `"manual"` (caller-driven commits), `"every_docs"` (commit every `every_docs` applied documents), or `"interval"` (commit at least every `interval_ms` milliseconds) |
 | `every_docs` | Integer | -- | `every_docs` policy only. Commit after this many applied documents. Unset (or `0`) disables auto-commit, equivalent to `"manual"` |
+| `interval_ms` | Integer | -- | `interval` policy only. Auto-commit at least this often (milliseconds) via a background timer, so a trailing partial batch commits even while ingestion is idle — the time-based counterpart of `every_docs`. **Native targets only** — treated as a no-op on `wasm32` (no background threads) |
 
 `CommitPolicy` is orthogonal to `[index.wal]`: the WAL section governs *when
 appends are fsync'd*, while this section governs *when the stores materialize*.

@@ -132,6 +132,7 @@ await index.commit(); // WAL もフラッシュされます
 class CommitPolicy {
   static manual(): CommitPolicy;
   static everyDocs(n: number): CommitPolicy;
+  static intervalMs(ms: number): CommitPolicy;
 }
 ```
 
@@ -139,11 +140,19 @@ class CommitPolicy {
 | :--- | :--- |
 | `CommitPolicy.manual()` | デフォルト。自動コミットなし。呼び出し側がすべての `commit()` を駆動します。 |
 | `CommitPolicy.everyDocs(n)` | 適用されたドキュメント `n` 件ごとに自動コミットします。 |
+| `CommitPolicy.intervalMs(ms)` | バックグラウンドタイマーにより少なくとも `ms` ミリ秒ごとに自動コミットします（デフォルト: なし）。**ネイティブ専用**。wasm では no-op（バックグラウンドスレッドがないため）。 |
 
 `everyDocs(n)` では、エンジンは適用されたドキュメント `n` 件ごとにコミットし、
 その件数は単発・バッチ両方の取り込みにまたがって数えられます — 1 つのバッチ
 **内部**でもドキュメント `n` 件ごとにコミットされます。`everyDocs(0)` は有効で
 自動コミットを無効化し、`CommitPolicy.manual()` と等価です。
+
+`intervalMs(ms)` は `everyDocs(n)` の時間ベース版です。バックグラウンドタイマー
+が少なくとも `ms` ミリ秒ごとに自動コミットするため、取り込みがアイドル状態でも
+末尾の部分的なバッチが実体化されます。これは**ネイティブ専用**です — wasm には
+バックグラウンドスレッドがないため、エンジンは `intervalMs` を no-op として扱い
+ます（ファクトリは値を構築しますが、WebAssembly ではタイマーによるコミットは
+発生しません）。
 
 `commitPolicy` は `walSyncPolicy` と直交します。`walSyncPolicy` は WAL の
 `fsync` 永続性を制御するのに対し、`commitPolicy` は保留中の変更を検索可能な

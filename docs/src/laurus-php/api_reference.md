@@ -99,7 +99,8 @@ $index->flushWal(); // records persisted even though the group batch is not full
 A commit materialises buffered writes into the lexical and vector stores and
 makes pending changes searchable. By default Laurus never commits on your
 behalf — the caller drives every `commit()`. You can instead let the engine
-**auto-commit** after a fixed number of applied documents.
+**auto-commit** after a fixed number of applied documents, or at least once
+per fixed time interval.
 
 #### CommitPolicy
 
@@ -114,12 +115,18 @@ commits. Pass it to the `Index` constructor's `$commit_policy` argument.
 \Laurus\CommitPolicy::everyDocs(
     int $n,   // commit after this many applied documents
 ): CommitPolicy
+
+// Auto-commit at least every N milliseconds (native only; no-op on wasm).
+\Laurus\CommitPolicy::intervalMs(
+    int $ms,   // commit at least this often, in milliseconds
+): CommitPolicy
 ```
 
 | Constructor | Description |
 | :--- | :--- |
 | `CommitPolicy::manual()` | Default. The engine never commits on its own; the caller drives every `commit()`. |
 | `CommitPolicy::everyDocs($n)` | Auto-commit after every `$n` applied documents. Counting spans both singular and batch ingest, and triggers every `$n` documents **within** a batch. |
+| `CommitPolicy::intervalMs($ms)` | Auto-commit at least every `$ms` milliseconds via a background timer, so a trailing partial batch is committed even while ingestion is idle. The time-based counterpart of `everyDocs`. Default: none. **Native only** — a no-op on wasm (WebAssembly has no background threads); the value still constructs, but no timed commit happens. |
 
 `CommitPolicy::everyDocs(0)` is valid and disables auto-commit — it is
 equivalent to `CommitPolicy::manual()`.

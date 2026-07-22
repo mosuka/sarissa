@@ -121,7 +121,8 @@ index.commit()  # WAL もフラッシュされます
 保留中の変更を検索可能にします。デフォルトでは `Index` は自動コミットを
 行わないため、呼び出し側がすべての `commit()` を明示的に実行します。
 コンストラクタはオプションの `commit_policy` を受け付け、一定件数の
-ドキュメントを適用するごとにエンジンが自動的にコミットするようにできます。
+ドキュメントを適用するごと、または一定時間ごとにエンジンが自動的に
+コミットするようにできます。
 
 ```python
 class CommitPolicy:
@@ -129,18 +130,28 @@ class CommitPolicy:
     def manual() -> CommitPolicy: ...
     @staticmethod
     def every_docs(n: int) -> CommitPolicy: ...
+    @staticmethod
+    def interval_ms(ms: int) -> CommitPolicy: ...
 ```
 
 | コンストラクタ | 説明 |
 | :--- | :--- |
 | `CommitPolicy.manual()` | デフォルト。自動コミットなし。呼び出し側がすべての `commit()` を実行します。 |
 | `CommitPolicy.every_docs(n)` | `n` 件のドキュメントを適用するごとに自動コミットします。 |
+| `CommitPolicy.interval_ms(ms)` | バックグラウンドタイマーにより、少なくとも `ms` ミリ秒ごとに自動コミットします（デフォルト: なし）。ネイティブ専用で、wasm では no-op です。 |
 
 `every_docs(n)` は、単体（`put_document`、`add_document`）とバッチ
 （`put_documents`、`add_documents`）の両方の取り込みにまたがって適用済み
 ドキュメントを数え、`n` 件ごとに自動コミットします — 1 つのバッチの
 **内部**でも同様です。`every_docs(0)` も有効で、自動コミットを無効化するため
 `manual()` と等価になります。
+
+`interval_ms(ms)` は `every_docs(n)` の時間ベースの対応版です。
+バックグラウンドタイマーが少なくとも `ms` ミリ秒ごとにコミットするため、
+取り込みがアイドル状態でも末尾の部分バッチがコミットされます。この
+ファクトリは **ネイティブ専用** です — wasm にはバックグラウンドスレッドが
+存在しないため、エンジンはこれを **no-op** として扱います。値の構築は
+できますが、WebAssembly 上ではタイマーによるコミットは発生しません。
 
 `commit_policy` は `wal_sync_policy` と直交します。`wal_sync_policy` は WAL の
 `fsync` 永続性を制御するのに対し、`commit_policy` はストアが保留中の変更を
