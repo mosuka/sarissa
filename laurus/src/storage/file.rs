@@ -854,6 +854,21 @@ pub struct FileOutput {
     writer: Option<BufWriter<File>>,
     sync_writes: bool,
     position: u64,
+    /// Whether bytes have been written since the last successful
+    /// `sync_all()` (via [`Self::flush_and_sync`] or [`Self::close`]).
+    ///
+    /// Starts `true` so a handle that is closed without ever calling
+    /// `flush_and_sync` still syncs on close, matching the historical
+    /// behavior. Set by [`StorageOutput::flush_and_sync`]'s write path;
+    /// cleared once that sync succeeds — lets [`StorageOutput::close`] skip a
+    /// redundant `sync_all()` when `flush_and_sync` already made everything
+    /// durable and nothing was written afterward (Issue #877).
+    dirty: bool,
+    /// Test-only: number of real `sync_all()` (fsync) calls issued by this
+    /// handle. Lets tests assert the exact fsync count instead of inferring it
+    /// from timing or `strace`.
+    #[cfg(test)]
+    sync_count: usize,
 }
 
 impl FileOutput {
@@ -864,6 +879,9 @@ impl FileOutput {
             writer: Some(writer),
             sync_writes,
             position: 0,
+            dirty: true,
+            #[cfg(test)]
+            sync_count: 0,
         })
     }
 }
@@ -876,6 +894,9 @@ impl Write for FileOutput {
             .ok_or_else(|| std::io::Error::other("FileOutput already closed"))?;
         let bytes_written = writer.write(buf)?;
         self.position += bytes_written as u64;
+        // Any successful write, buffered or not, means the file is no longer
+        // fully represented by the last `sync_all()` (Issue #877).
+        self.dirty = true;
 
         if self.sync_writes {
             // Re-borrow since position assignment ended the previous borrow.
@@ -920,6 +941,11 @@ impl StorageOutput for FileOutput {
             .get_ref()
             .sync_all()
             .map_err(|e| LaurusError::storage(format!("Failed to sync: {e}")))?;
+        self.dirty = false;
+        #[cfg(test)]
+        {
+            self.sync_count += 1;
+        }
 
         Ok(())
     }
@@ -930,14 +956,26 @@ impl StorageOutput for FileOutput {
 
     fn close(&mut self) -> Result<()> {
         if let Some(writer) = self.writer.take() {
-            // Flush buffered data and get the underlying File handle.
+            // Flush buffered data and get the underlying File handle. Needed
+            // regardless of `dirty`: if nothing was written since the last
+            // `flush_and_sync`, the buffer is already empty and this is a
+            // no-op, but the handle must still be extracted to sync/drop it.
             let file = writer
                 .into_inner()
                 .map_err(|e| LaurusError::storage(format!("Failed to flush on close: {e}")))?;
 
-            // Sync all data and metadata to disk.
-            file.sync_all()
-                .map_err(|e| LaurusError::storage(format!("Failed to sync on close: {e}")))?;
+            // Sync all data and metadata to disk — unless `flush_and_sync`
+            // already made everything durable and nothing was written since
+            // (Issue #877: avoids a second redundant `fsync` per file for
+            // every caller that flushes before closing, e.g. `StructWriter`).
+            if self.dirty {
+                file.sync_all()
+                    .map_err(|e| LaurusError::storage(format!("Failed to sync on close: {e}")))?;
+                #[cfg(test)]
+                {
+                    self.sync_count += 1;
+                }
+            }
 
             // `file` is dropped here, explicitly releasing the OS file handle.
         }
@@ -1097,6 +1135,122 @@ mod tests {
     fn test_file_storage_creation() {
         let (_temp_dir, storage) = create_test_storage();
         assert!(!storage.closed);
+    }
+
+    /// Construct a `FileOutput` directly (bypassing the `Storage` trait) so
+    /// tests can read its test-only `sync_count`.
+    fn open_file_output(dir: &TempDir, name: &str) -> FileOutput {
+        let file = File::create(dir.path().join(name)).unwrap();
+        FileOutput::new(file, 8192, false).unwrap()
+    }
+
+    /// #877: `flush_and_sync()` followed by `close()` with no intervening
+    /// write must fsync exactly once, not twice — `close()` must recognize
+    /// `flush_and_sync` already made everything durable.
+    #[test]
+    fn flush_and_sync_then_close_syncs_once() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut output = open_file_output(&temp_dir, "a.bin");
+
+        output.write_all(b"hello").unwrap();
+        output.flush_and_sync().unwrap();
+        assert_eq!(output.sync_count, 1, "flush_and_sync must fsync once");
+
+        output.close().unwrap();
+        assert_eq!(
+            output.sync_count, 1,
+            "close() must skip a redundant fsync when nothing was written \
+             since the last flush_and_sync (#877)"
+        );
+    }
+
+    /// #877: a handle that is closed WITHOUT ever calling `flush_and_sync`
+    /// must still fsync on close — the optimization only applies when
+    /// `flush_and_sync` already covered everything.
+    #[test]
+    fn close_without_flush_and_sync_still_syncs() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut output = open_file_output(&temp_dir, "b.bin");
+
+        output.write_all(b"hello").unwrap();
+        output.close().unwrap();
+
+        assert_eq!(
+            output.sync_count, 1,
+            "close() must still fsync when nothing has synced this data yet"
+        );
+    }
+
+    /// #877: a write AFTER `flush_and_sync()` re-dirties the handle, so the
+    /// following `close()` must fsync again — the skip is only safe when
+    /// nothing changed since the last sync.
+    #[test]
+    fn write_after_flush_and_sync_forces_close_to_sync_again() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut output = open_file_output(&temp_dir, "c.bin");
+
+        output.write_all(b"first").unwrap();
+        output.flush_and_sync().unwrap();
+        assert_eq!(output.sync_count, 1);
+
+        output.write_all(b"second").unwrap();
+        output.close().unwrap();
+        assert_eq!(
+            output.sync_count, 2,
+            "a write after flush_and_sync must still be synced on close"
+        );
+    }
+
+    /// #877: an empty handle (never written to) closed with no prior
+    /// `flush_and_sync` still fsyncs once, matching historical behavior for
+    /// callers that create-then-immediately-close (e.g. recreating an empty
+    /// file).
+    #[test]
+    fn close_with_no_writes_still_syncs_once() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut output = open_file_output(&temp_dir, "d.bin");
+        output.close().unwrap();
+        assert_eq!(output.sync_count, 1);
+    }
+
+    /// #877: durability is unaffected when `close()` skips its fsync — every
+    /// byte written before `close()` is readable back after reopening, on the
+    /// path where `flush_and_sync` ran first and `close()` relies on it
+    /// (the exact case the skip applies to).
+    #[test]
+    fn data_survives_close_after_prior_flush_and_sync() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage =
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap();
+
+        let mut out = storage.create_output("synced_then_closed.bin").unwrap();
+        out.write_all(b"synced then closed").unwrap();
+        out.flush_and_sync().unwrap();
+        out.close().unwrap();
+
+        let mut input = storage.open_input("synced_then_closed.bin").unwrap();
+        let mut buf = Vec::new();
+        input.read_to_end(&mut buf).unwrap();
+        assert_eq!(buf, b"synced then closed");
+    }
+
+    /// #877: durability holds on the other path too — `close()` alone, with
+    /// no prior `flush_and_sync`, must still fsync (per
+    /// `close_without_flush_and_sync_still_syncs`) and the data must survive.
+    #[test]
+    fn data_survives_close_without_prior_flush_and_sync() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage =
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap();
+
+        let mut out = storage.create_output("closed_only.bin").unwrap();
+        out.write_all(b"closed without a prior sync").unwrap();
+        out.close().unwrap();
+
+        let mut input = storage.open_input("closed_only.bin").unwrap();
+        let mut buf = Vec::new();
+        input.read_to_end(&mut buf).unwrap();
+        assert_eq!(buf, b"closed without a prior sync");
     }
 
     #[test]
