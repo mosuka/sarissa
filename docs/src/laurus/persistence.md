@@ -225,7 +225,9 @@ The commit ladder is:
    `last_wal_seq`), then `sync()`.
 3. **`vector.commit()`** — write the vector segment, then `sync()`.
 4. **`commit_documents()`** — write the document store segment, then `sync()`.
-5. **`truncate()`** — replace the WAL with a fresh, empty, fsync'd file.
+5. **`truncate_retaining_after(applied_before)`** — discard every WAL record
+   this commit covered; **retain** any record whose mutation had not finished
+   applying to both stores when the commit started (Issue #876).
 
 This order guarantees two invariants:
 
@@ -233,8 +235,18 @@ This order guarantees two invariants:
   only persisted in step 2+, which always runs *after* the step-1 barrier, so a
   committed index can never reference a WAL record that is not yet durable.
 - **Every store is fully durable before the WAL is truncated.** Steps 2–4 each
-  `sync()` before step 5 empties the WAL, so the WAL is only discarded once the
-  data it described is safely materialized.
+  `sync()` before step 5 discards the covered portion of the WAL, so nothing is
+  discarded before the data it described is safely materialized.
+
+`commit()` is **not** serialized against concurrent `put`/`add`/`delete` calls
+(nor against `CommitPolicy::Interval`'s background timer, which runs this same
+ladder). Step 5 accounts for this: it snapshots the engine's ingest high-water
+mark *before* step 1 runs, and retains every WAL record past that snapshot
+instead of unconditionally emptying the file. A mutation racing the commit
+therefore keeps its WAL record — and is replayed on the next recovery — even
+though it was not included in this commit's materialization. When nothing
+races the commit (the common case), the snapshot covers the whole WAL and step
+5 empties the file exactly as before.
 
 Recovery replays the WAL on the next `build()`, skipping records at or below each
 store's `last_wal_seq`. Replay is **idempotent** — it re-applies each record
@@ -254,7 +266,7 @@ The table below shows the outcome of a crash at each step (identical for
 | After step 2, before step 3 | WAL + lexical (`last_wal_seq = N`) | Lexical skips ≤ N; vector replays from WAL |
 | After step 3, before step 4 | WAL + lexical + vector | Both stores skip; documents restored from WAL |
 | After step 4, before step 5 | WAL + all stores | WAL still present; both stores skip, no duplicates |
-| After step 5 | All stores, WAL empty | Nothing to replay |
+| After step 5 | All stores; WAL empty unless a mutation raced this commit | Nothing to replay (or just the racing mutation's record) |
 
 No interleaving lets a committed index reference a lost WAL record, so group
 commit introduces no new durability gap beyond its documented contract (a crash
