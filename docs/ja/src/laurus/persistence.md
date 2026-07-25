@@ -231,7 +231,9 @@ let engine = Engine::builder(storage, schema)
    `sync()`。
 3. **`vector.commit()`** — vector セグメントを書き、`sync()`。
 4. **`commit_documents()`** — document store セグメントを書き、`sync()`。
-5. **`truncate()`** — WAL を空の fsync 済みファイルで置き換える。
+5. **`truncate_retaining_after(applied_before)`** — このコミットが対象とした WAL レコードを
+   破棄し、コミット開始時点で両ストアへの適用が完了していなかったレコードは**保持**する
+   （Issue #876）。
 
 この順序は次の 2 つの不変条件を保証します。
 
@@ -239,8 +241,16 @@ let engine = Engine::builder(storage, schema)
   以降でのみ永続化され、必ずステップ 1 のバリアの後に実行されるため、コミット済み index が
   まだ durable でない WAL レコードを参照することはありません。
 - **すべてのストアは WAL が truncate される前に完全に durable 化される。** ステップ 2〜4 は
-  ステップ 5 が WAL を空にする前にそれぞれ `sync()` するため、WAL はそれが記述したデータが
+  ステップ 5 が対象範囲を破棄する前にそれぞれ `sync()` するため、WAL はそれが記述したデータが
   安全に materialize された後にのみ破棄されます。
+
+`commit()` は並行する `put`/`add`/`delete` 呼び出しと直列化**されません**（`CommitPolicy::Interval`
+の背景タイマーも同じラダーを実行するため同様です）。ステップ 5 はこれを踏まえた設計になって
+います: ステップ 1 の実行前にエンジンの ingest high-water mark をスナップショットし、その
+スナップショットより後の WAL レコードはすべて保持します。これにより、commit と並行した
+mutation はこの commit の materialize には含まれなくても WAL レコードを保持し続け、次回の
+リカバリで replay されます。並行する mutation が無い通常ケースでは、スナップショットが WAL
+全体をカバーするため、ステップ 5 は従来どおり WAL を空にします。
 
 リカバリは次回の `build()` で WAL を replay し、各ストアの `last_wal_seq` 以下のレコードを
 スキップします。replay は**冪等（idempotent）**です。各レコードを元々記録された `doc_id`
@@ -259,7 +269,7 @@ let engine = Engine::builder(storage, schema)
 | ステップ 2 の後、3 の前 | WAL + lexical（`last_wal_seq = N`） | lexical は ≤ N をスキップ、vector は WAL から replay |
 | ステップ 3 の後、4 の前 | WAL + lexical + vector | 両ストアがスキップ、documents は WAL から復元 |
 | ステップ 4 の後、5 の前 | WAL + 全ストア | WAL は残存、両ストアがスキップ、重複なし |
-| ステップ 5 の後 | 全ストア、WAL は空 | replay 対象なし |
+| ステップ 5 の後 | 全ストア。並行 mutation が無ければ WAL は空 | replay 対象なし（並行 mutation があればそのレコードのみ） |
 
 コミット済み index が失われた WAL レコードを参照する interleaving は存在しないため、group
 commit は文書化された契約（`flush_wal()` や `commit()` でまだ durable 化されていない書き込みの

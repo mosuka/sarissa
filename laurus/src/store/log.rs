@@ -899,27 +899,115 @@ impl DocumentLog {
     ///
     /// Called after a successful commit to discard processed entries.
     pub fn truncate(&self) -> Result<()> {
-        {
-            let mut writer_guard = self.wal_writer.lock();
-            // Flush + close the open handle before discarding it. The flush is
-            // guarded by `dirty`, so it's skipped when every record is already
-            // self-synced (the per-record default) but still runs once fsync is
-            // deferred — dropping the handle with unsynced bytes would lose them
-            // (#542 Phase 2/3).
-            if let Some(mut state) = writer_guard.take() {
-                if state.dirty {
-                    state.out.flush_and_sync()?;
-                }
-                state.out.close()?;
+        // Retain nothing: the caller asserts every record is covered by a
+        // durable checkpoint. `SeqNumber::MAX` leaves no record with a greater
+        // seq, so this is the historical whole-file truncate.
+        self.truncate_retaining_after(SeqNumber::MAX)
+    }
+
+    /// Truncate the WAL, **retaining every record whose seq is greater than
+    /// `retain_after_seq`** (Issue #876).
+    ///
+    /// [`Self::truncate`] wipes the whole file, which is only safe when every
+    /// record it discards is already covered by the stores' persisted
+    /// checkpoints. A mutation that lands *while* a commit is running is not:
+    /// the commit ladder is not serialized against ingestion, so a record can
+    /// be appended after the stores materialized their state but before the
+    /// truncate. Wiping it would lose an acknowledged write on the next crash —
+    /// its data lives only in the fresh in-memory writer. Passing the stores'
+    /// durable checkpoint keeps exactly those uncovered records, so recovery
+    /// replays them.
+    ///
+    /// # Arguments
+    ///
+    /// * `retain_after_seq` - The highest sequence number the caller has made
+    ///   durable. Records with `seq > retain_after_seq` are preserved; the rest
+    ///   are discarded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing, reading back, recreating, or re-appending
+    /// to the WAL file fails.
+    pub fn truncate_retaining_after(&self, retain_after_seq: SeqNumber) -> Result<()> {
+        // Hold the writer lock across the whole operation so a concurrent
+        // append cannot interleave with the read-back and rewrite; it blocks
+        // and lands cleanly on the file this call produces.
+        let mut writer_guard = self.wal_writer.lock();
+        // Flush + close the open handle before reading/discarding it. The flush
+        // is guarded by `dirty`, so it's skipped when every record is already
+        // self-synced (the per-record default) but still runs once fsync is
+        // deferred — dropping the handle with unsynced bytes would lose them
+        // (#542 Phase 2/3).
+        if let Some(mut state) = writer_guard.take() {
+            if state.dirty {
+                state.out.flush_and_sync()?;
             }
+            state.out.close()?;
         }
 
-        let mut writer = self.wal_storage.create_output(&self.wal_path)?;
-        writer.flush_and_sync()?;
-        writer.close()?;
+        // Fast path: nothing was appended past the caller's checkpoint, so the
+        // whole file is covered and an in-place wipe is safe — every record it
+        // discards is already durably represented in the stores' committed
+        // segments, so there is nothing at risk in the moment the file is
+        // empty. This is the no-concurrency common case and is byte-identical
+        // to the historical `truncate()`.
+        if self.last_seq() <= retain_after_seq {
+            let mut writer = self.wal_storage.create_output(&self.wal_path)?;
+            writer.flush_and_sync()?;
+            writer.close()?;
+            self.wal_storage.sync()?;
+            return Ok(());
+        }
 
-        // Sync storage to ensure the truncated WAL file is visible.
-        // Critical on Windows where file metadata may be cached.
+        // Slow path: a mutation raced this commit. The writer is closed, so the
+        // file is complete. `read_all` only ever advances the id/seq counters
+        // (never regresses them), so replaying it here is safe.
+        let retained: Vec<LogRecord> = self
+            .read_all()?
+            .into_iter()
+            .filter(|record| record.seq > retain_after_seq)
+            .collect();
+
+        // Build the retained tail in a TEMP file and atomically rename it over
+        // the WAL, rather than truncating the live file in place and rewriting
+        // it afterwards. `retained` holds exactly the records that are NOT yet
+        // durably represented anywhere else (that is why this path exists at
+        // all) — an in-place wipe would make the WAL durably empty for the
+        // window before the rewrite completes, so a crash in that window would
+        // permanently lose them, reintroducing the very bug (#876) this method
+        // fixes. The rename is a single atomic filesystem operation: the WAL is
+        // never observably in a state that is missing a retained record.
+        let (tmp_name, tmp_out) = self.wal_storage.create_temp_output(&self.wal_path)?;
+        let mut tmp_state = Some(WalWriterState {
+            out: tmp_out,
+            format: WalFormat::V3,
+            dirty: false,
+            unsynced_records: 0,
+            unsynced_bytes: 0,
+            #[cfg(test)]
+            sync_count: 0,
+        });
+        if let Some(state) = tmp_state.as_mut() {
+            state.out.write_all(WAL_MAGIC)?;
+            state.out.write_all(&[WAL_VERSION])?;
+        }
+        // Defer the per-record fsync `write_record` would otherwise do under
+        // `WalSyncPolicy::PerRecord` (one syscall per retained record) and
+        // sync once after the whole tail is written instead.
+        {
+            let _deferral = self.defer_sync();
+            for record in &retained {
+                self.write_record(&mut tmp_state, record)?;
+            }
+        }
+        if let Some(state) = tmp_state.as_mut() {
+            state.out.flush_and_sync()?;
+            state.out.close()?;
+        }
+
+        self.wal_storage.rename_file(&tmp_name, &self.wal_path)?;
+        // Sync storage to ensure the renamed WAL file is visible. Critical on
+        // Windows where directory listings and file metadata may be cached.
         self.wal_storage.sync()?;
 
         Ok(())
@@ -1958,5 +2046,114 @@ mod tests {
         log.commit_documents().unwrap();
         let retrieved = log.get_document(1).unwrap();
         assert!(retrieved.is_some());
+    }
+
+    /// Append `external_id` and return the seq the WAL assigned it.
+    fn append_named(log: &DocumentLog, external_id: &str) -> SeqNumber {
+        log.append(external_id, small_doc()).unwrap().1
+    }
+
+    /// The `external_id`s still present in the WAL, in seq order.
+    fn surviving_ids(log: &DocumentLog) -> Vec<String> {
+        log.read_all()
+            .unwrap()
+            .into_iter()
+            .map(|r| match r.entry {
+                LogEntry::Upsert { external_id, .. } => external_id,
+                LogEntry::Delete { external_id, .. } => external_id,
+            })
+            .collect()
+    }
+
+    /// #876: `truncate_retaining_after` keeps only records with `seq` strictly
+    /// greater than the retain point — this is the primitive the commit ladder
+    /// relies on to preserve a mutation that raced the commit instead of losing
+    /// it to a whole-file truncate.
+    #[test]
+    fn truncate_retaining_after_keeps_only_later_records() {
+        let log = make_log();
+        append_named(&log, "a"); // seq 1
+        let retain_from = append_named(&log, "b"); // seq 2 — the commit's snapshot
+        append_named(&log, "c"); // seq 3 — raced the commit
+        append_named(&log, "d"); // seq 4 — also raced
+
+        log.truncate_retaining_after(retain_from).unwrap();
+
+        assert_eq!(
+            surviving_ids(&log),
+            vec!["c".to_string(), "d".to_string()],
+            "only records appended after the retain point must survive"
+        );
+    }
+
+    /// #876: when nothing was appended past the retain point, the result must
+    /// be indistinguishable from the historical whole-file truncate — the
+    /// no-concurrency common case must not pay for the read-back/rewrite path.
+    #[test]
+    fn truncate_retaining_after_is_a_full_truncate_when_nothing_raced() {
+        let log = make_log();
+        append_named(&log, "a");
+        let retain_from = append_named(&log, "b");
+
+        log.truncate_retaining_after(retain_from).unwrap();
+
+        assert!(
+            surviving_ids(&log).is_empty(),
+            "no record raced the retain point, so none should survive"
+        );
+        // The file itself is empty (the fast path recreates it, same as `truncate`).
+        assert_eq!(
+            log.wal_storage.file_size(&log.wal_path).unwrap(),
+            0,
+            "the fast path must leave a zero-byte file, matching `truncate()`"
+        );
+    }
+
+    /// #876: `truncate()` (used by every caller that has nothing to retain,
+    /// e.g. tests exercising the historical behavior) is unaffected — it is
+    /// `truncate_retaining_after(SeqNumber::MAX)`, so it always takes the fast
+    /// path and wipes everything.
+    #[test]
+    fn truncate_still_wipes_everything() {
+        let log = make_log();
+        append_named(&log, "a");
+        append_named(&log, "b");
+
+        log.truncate().unwrap();
+
+        assert!(surviving_ids(&log).is_empty());
+    }
+
+    /// #876: a delete record appended after the retain point must survive the
+    /// truncate exactly like an upsert — the retain filter is entry-agnostic.
+    #[test]
+    fn truncate_retaining_after_preserves_a_racing_delete() {
+        let log = make_log();
+        let retain_from = append_named(&log, "a");
+        log.append_delete(1, "b").unwrap();
+
+        log.truncate_retaining_after(retain_from).unwrap();
+
+        assert_eq!(surviving_ids(&log), vec!["b".to_string()]);
+    }
+
+    /// #876: after a partial truncate, the WAL is still a well-formed file that
+    /// further appends and a fresh `read_all` can build on — the rewritten tail
+    /// must stamp a valid header, not just raw frames.
+    #[test]
+    fn truncate_retaining_after_leaves_a_well_formed_wal_for_further_appends() {
+        let log = make_log();
+        let retain_from = append_named(&log, "a");
+        append_named(&log, "b");
+
+        log.truncate_retaining_after(retain_from).unwrap();
+        append_named(&log, "c");
+
+        assert_eq!(
+            surviving_ids(&log),
+            vec!["b".to_string(), "c".to_string()],
+            "a further append after the partial truncate must be readable \
+             alongside the retained tail"
+        );
     }
 }

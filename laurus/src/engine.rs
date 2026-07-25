@@ -185,7 +185,16 @@ async fn run_commit_ladder(
     vector: &VectorStore,
     log: &DocumentLog,
     docs_since_commit: &AtomicU64,
+    applied_seq: &AtomicU64,
 ) -> Result<()> {
+    // Snapshot the ingest high-water mark BEFORE any store materializes
+    // (Issue #876). `applied_seq` is advanced only after a document has landed
+    // in BOTH stores' NRT buffers, so every record at or below this snapshot is
+    // guaranteed to be materialized by the `lexical.commit()` below — the store
+    // commits hold the same writer lock those upserts take, so a document that
+    // finished before this point cannot be excluded from the commit. Anything
+    // appended (or applied) afterwards must survive the truncate.
+    let applied_before = applied_seq.load(Ordering::Acquire);
     // Hard durability barrier: force the WAL durable before any store
     // materializes its state, so the WAL is never less durable than the
     // committed lexical/vector indexes. A near-no-op under the per-record
@@ -196,8 +205,15 @@ async fn run_commit_ladder(
     lexical.commit()?;
     vector.commit().await?;
     log.commit_documents()?;
-    // After successful commit to all stores, truncate the log.
-    log.truncate()?;
+    // Truncate the log, but RETAIN every record this commit did not materialize
+    // (Issue #876). The ladder is not serialized against ingestion, so a
+    // mutation can append its WAL record while the commit runs — wiping the
+    // whole file would destroy that record while its data lives only in the
+    // fresh in-memory writer, losing an acknowledged write on the next crash.
+    // Retaining from the pre-commit snapshot is conservative: a record that was
+    // in fact materialized is merely replayed again on recovery, which is
+    // idempotent.
+    log.truncate_retaining_after(applied_before)?;
     // Reset the auto-commit counter so a manual commit and an `EveryDocs`
     // auto-commit keep the same cadence going forward (#890).
     docs_since_commit.store(0, Ordering::Release);
@@ -243,6 +259,7 @@ impl CommitTimer {
         vector: Arc<VectorStore>,
         log: Arc<DocumentLog>,
         docs_since_commit: Arc<AtomicU64>,
+        applied_seq: Arc<AtomicU64>,
         interval: Duration,
     ) -> Result<Self> {
         use std::sync::mpsc::RecvTimeoutError;
@@ -282,6 +299,7 @@ impl CommitTimer {
                             &vector,
                             &log,
                             &docs_since_commit,
+                            &applied_seq,
                         ))
                     }));
                     match outcome {
@@ -354,6 +372,16 @@ pub struct Engine {
     /// [`CommitTimer`] shares the same counter and resets it on each timed
     /// commit.
     docs_since_commit: Arc<AtomicU64>,
+    /// Highest WAL sequence number whose mutation has been applied to **both**
+    /// stores' NRT buffers (Issue #876).
+    ///
+    /// Advanced in [`Self::index_internal`] / the delete path only after both
+    /// stores accepted the mutation, so a commit can snapshot it up front and
+    /// know that everything at or below it will be materialized by that commit.
+    /// [`run_commit_ladder`] uses the snapshot as the WAL retain point, so a
+    /// record appended by a mutation racing the commit is preserved instead of
+    /// being wiped by the truncate. `Arc` so the [`CommitTimer`] shares it.
+    applied_seq: Arc<AtomicU64>,
     /// Background WAL flush timer for a [`WalSyncPolicy::Group`] configured with
     /// a `max_interval`. `None` when no interval is set. Held only to keep the
     /// timer thread alive for the engine's lifetime; dropping the engine stops
@@ -465,6 +493,14 @@ impl Engine {
                     if record.seq > vector_last_seq {
                         self.vector.set_last_wal_seq(record.seq);
                     }
+                    // Publish the high-water mark exactly as `index_internal`
+                    // does (Issue #876): by this point both stores are at or
+                    // above `record.seq`, whether just applied here or already
+                    // covered by an earlier partial commit. Without this, the
+                    // `self.commit()` below would snapshot `applied_seq` at its
+                    // stale build-time 0 and its own truncate would wrongly
+                    // retain every record it just durably committed.
+                    self.applied_seq.fetch_max(record.seq, Ordering::AcqRel);
                 }
                 LogEntry::Delete {
                     doc_id,
@@ -484,6 +520,8 @@ impl Engine {
                     if record.seq > vector_last_seq {
                         self.vector.set_last_wal_seq(record.seq);
                     }
+                    // See the matching comment in the `Upsert` arm above.
+                    self.applied_seq.fetch_max(record.seq, Ordering::AcqRel);
                 }
             }
         }
@@ -741,6 +779,11 @@ impl Engine {
         // This ensures failed index operations are retried on recovery.
         self.lexical.set_last_wal_seq(seq)?;
         self.vector.set_last_wal_seq(seq);
+        // Publish the ingest high-water mark only now that BOTH stores hold the
+        // mutation, so a concurrent commit can safely treat everything at or
+        // below it as materializable (Issue #876). `fetch_max` keeps it
+        // monotonic under concurrent writers.
+        self.applied_seq.fetch_max(seq, Ordering::AcqRel);
 
         // 7. Count the applied document toward the auto-commit threshold. The
         // trigger itself lives at the API boundary (see `maybe_auto_commit`),
@@ -985,6 +1028,9 @@ impl Engine {
             // This ensures failed deletes are retried on recovery.
             self.lexical.set_last_wal_seq(seq)?;
             self.vector.set_last_wal_seq(seq);
+            // Publish the high-water mark only once both stores hold the delete
+            // (Issue #876) — see `index_internal` for the rationale.
+            self.applied_seq.fetch_max(seq, Ordering::AcqRel);
         }
         Ok(())
     }
@@ -999,7 +1045,9 @@ impl Engine {
     ///    where the lexical `last_wal_seq` checkpoint is persisted.
     /// 3. `vector.commit()` — materialize + fsync the vector store.
     /// 4. `commit_documents()` — materialize + fsync the document store.
-    /// 5. `truncate()` — replace the WAL with an empty, fsync'd file.
+    /// 5. `truncate_retaining_after(applied_before)` — discard everything this
+    ///    commit covered; **retain** anything appended (or still being applied)
+    ///    concurrently (Issue #876).
     ///
     /// This order upholds two invariants. First, `last_wal_seq` is persisted
     /// only in step 2+, always *after* the step-1 barrier, so a committed index
@@ -1008,7 +1056,14 @@ impl Engine {
     /// so the WAL is discarded only once the data it described is durable. A
     /// crash between any two steps therefore leaves enough in the WAL for the
     /// idempotent replay in [`Self::recover`] to reconstruct a consistent state.
-    /// After a successful commit, the WAL is empty and all data is durable.
+    ///
+    /// This method itself is **not** serialized against concurrent
+    /// `put`/`add`/`delete` calls. After a successful commit with no concurrent
+    /// mutation, the WAL is empty and all data is durable, exactly as before
+    /// Issue #876. Under a mutation that raced this commit, the WAL is **not**
+    /// necessarily empty afterward: it retains that mutation's record so the
+    /// next crash can still recover it. `CommitPolicy::Interval`'s background
+    /// timer runs this same ladder, so the same caveat applies to auto-commits.
     ///
     /// # Errors
     ///
@@ -1020,6 +1075,7 @@ impl Engine {
             &self.vector,
             &self.log,
             &self.docs_since_commit,
+            &self.applied_seq,
         )
         .await
     }
@@ -2358,6 +2414,7 @@ impl EngineBuilder {
         let lexical = Arc::new(LexicalStore::new(lexical_storage, lexical_config)?);
         let vector = Arc::new(VectorStore::new(vector_storage, vector_config)?);
         let docs_since_commit = Arc::new(AtomicU64::new(0));
+        let applied_seq = Arc::new(AtomicU64::new(0));
 
         let log = Arc::new(DocumentLog::with_sync_policy(
             self.storage,
@@ -2388,6 +2445,7 @@ impl EngineBuilder {
                 Arc::clone(&vector),
                 Arc::clone(&log),
                 Arc::clone(&docs_since_commit),
+                Arc::clone(&applied_seq),
                 interval,
             )?),
             _ => None,
@@ -2402,6 +2460,7 @@ impl EngineBuilder {
             embedding_cache,
             commit_policy: self.commit_policy,
             docs_since_commit,
+            applied_seq,
             #[cfg(not(target_arch = "wasm32"))]
             _wal_flush_timer: wal_flush_timer,
             #[cfg(not(target_arch = "wasm32"))]
@@ -4067,5 +4126,118 @@ mod tests {
             1,
             "an Interval-committed doc must be searchable without an explicit commit"
         );
+    }
+
+    /// #876: a mutation whose WAL record was appended but not yet applied to
+    /// the stores when a commit starts must not lose that record to the WAL
+    /// truncate.
+    ///
+    /// `index_internal` appends the WAL record for a mutation *before* applying
+    /// it to the lexical/vector stores, so there is a real window — between the
+    /// append and the apply — where a concurrent commit could run. This test
+    /// makes that window deterministic instead of racing threads (which would
+    /// deadlock: every ladder step holds a lock the "racing" apply needs): it
+    /// appends "b"'s WAL record directly via `log.append`, exactly as
+    /// `index_internal` does, but — like a mutation caught mid-flight — does
+    /// NOT apply it to the stores before `commit()` runs. `commit()` must
+    /// snapshot `applied_seq` (covering only "a", already applied) BEFORE
+    /// materializing, so "b"'s un-applied record is retained by the truncate
+    /// and replayed on the next recovery.
+    #[tokio::test]
+    async fn wal_record_appended_but_not_yet_applied_survives_commit_truncate() {
+        let (engine, storage) = commit_policy_engine(CommitPolicy::Manual).await;
+
+        // "a" goes through the normal path: WAL-appended AND applied to both
+        // stores before `commit()` runs.
+        engine.put_document("a", title_doc("alpha")).await.unwrap();
+
+        // "b" simulates a mutation caught between its WAL append and its store
+        // apply: append the WAL record directly (mirrors `index_internal`'s
+        // step 2) without upserting it into `lexical`/`vector` (which would be
+        // steps 4-5) — `applied_seq` is therefore NOT advanced for it.
+        engine.log.append("b", title_doc("bravo")).unwrap();
+
+        // The commit ladder must snapshot `applied_seq` before materializing,
+        // so "b" — appended but never applied — is retained by the truncate
+        // rather than wiped with the rest of the (now-covered) WAL.
+        engine.commit().await.unwrap();
+        assert!(
+            wal_bytes(&storage) > 0,
+            "the WAL record for the not-yet-applied mutation must survive the \
+             commit's truncate (#876)"
+        );
+
+        // Recovery must replay it: reopen on the same storage.
+        drop(engine);
+        let reopened = Engine::new(storage.clone(), {
+            use crate::engine::schema::FieldOption;
+            use crate::lexical::core::field::TextOption;
+            Schema::builder()
+                .add_field("title", FieldOption::Text(TextOption::default()))
+                .build()
+        })
+        .await
+        .unwrap();
+
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+        let alpha = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:alpha"))
+            .limit(10)
+            .build();
+        assert_eq!(reopened.search(alpha).await.unwrap().len(), 1);
+
+        let bravo = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:bravo"))
+            .limit(10)
+            .build();
+        assert_eq!(
+            reopened.search(bravo).await.unwrap().len(),
+            1,
+            "the mutation caught mid-flight during commit must be recovered \
+             from its retained WAL record (#876)"
+        );
+    }
+
+    /// #876: `recover()`'s own internal `commit()` must actually empty the
+    /// WAL, not just replay the records into the stores.
+    ///
+    /// `recover()` mutates the stores directly rather than through
+    /// `index_internal`, so it must publish `applied_seq` itself; otherwise the
+    /// `commit()` it calls at the end snapshots the stale build-time `0`,
+    /// `truncate_retaining_after` takes the slow path unconditionally, and
+    /// re-retains every record it just durably committed — the WAL never
+    /// shrinks until an unrelated future mutation happens to raise
+    /// `applied_seq` past it.
+    #[tokio::test]
+    async fn recover_commit_empties_the_wal() {
+        let (engine, storage) = commit_policy_engine(CommitPolicy::Manual).await;
+        engine.put_document("a", title_doc("alpha")).await.unwrap();
+        // Crash: drop without an explicit commit, leaving "a" WAL-only.
+        drop(engine);
+        assert!(
+            wal_bytes(&storage) > 0,
+            "precondition: WAL has a pending record"
+        );
+
+        // Reopen: recover() replays "a" and commits internally.
+        let schema = {
+            use crate::engine::schema::FieldOption;
+            use crate::lexical::core::field::TextOption;
+            Schema::builder()
+                .add_field("title", FieldOption::Text(TextOption::default()))
+                .build()
+        };
+        let reopened = Engine::new(storage.clone(), schema).await.unwrap();
+        assert_eq!(
+            wal_bytes(&storage),
+            0,
+            "recovery's own commit must empty the WAL, matching the documented \
+             post-commit invariant (#876)"
+        );
+
+        // An immediately-following no-op commit must stay a no-op (fast path),
+        // not repeat a read-back/rewrite of the same stale tail forever.
+        reopened.commit().await.unwrap();
+        assert_eq!(wal_bytes(&storage), 0);
     }
 }
