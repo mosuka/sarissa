@@ -1,9 +1,7 @@
 //! Flat vector index implementation.
 
-pub mod maintenance;
 pub mod reader;
 pub mod searcher;
-pub mod segment;
 pub mod writer;
 
 #[cfg(not(target_arch = "wasm32"))]

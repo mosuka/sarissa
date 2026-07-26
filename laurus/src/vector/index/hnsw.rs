@@ -1,7 +1,6 @@
 //! HNSW vector index implementation.
 
 pub mod graph;
-pub mod maintenance;
 pub mod reader;
 pub mod searcher;
 pub mod segment;
