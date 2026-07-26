@@ -47,6 +47,16 @@ pub struct IvfIndexWriter {
     is_finalized: bool,
     total_vectors_to_add: Option<usize>,
     next_vec_id: u64,
+    /// The cluster-count ceiling the caller configured (via
+    /// [`IvfIndexConfig::n_clusters`], [`Self::with_ivf_params`], or
+    /// [`Self::set_expected_vector_count`]) — never mutated by training.
+    /// `train_centroids` clamps the *effective* `index_config.n_clusters`
+    /// down to `min(configured_n_clusters, vectors.len())` for training and
+    /// serialization, but this field is what that clamp is always computed
+    /// from, so the effective count recovers (rather than staying
+    /// permanently shrunk) once the corpus grows past it again (Issue #889
+    /// PR-5).
+    configured_n_clusters: usize,
 }
 
 impl IvfIndexWriter {
@@ -62,6 +72,7 @@ impl IvfIndexWriter {
         writer_config: VectorIndexWriterConfig,
         path: impl Into<String>,
     ) -> Result<Self> {
+        let configured_n_clusters = index_config.n_clusters;
         Ok(Self {
             index_config,
             writer_config,
@@ -74,6 +85,7 @@ impl IvfIndexWriter {
             is_finalized: false,
             total_vectors_to_add: None,
             next_vec_id: 0,
+            configured_n_clusters,
         })
     }
 
@@ -95,6 +107,7 @@ impl IvfIndexWriter {
             return Self::load(index_config, writer_config, storage, &path);
         }
 
+        let configured_n_clusters = index_config.n_clusters;
         Ok(Self {
             index_config,
             writer_config,
@@ -106,6 +119,7 @@ impl IvfIndexWriter {
             is_finalized: false,
             total_vectors_to_add: None,
             next_vec_id: 0,
+            configured_n_clusters,
         })
     }
 
@@ -254,6 +268,7 @@ impl IvfIndexWriter {
         let max_id = vectors.iter().map(|(id, _, _)| *id).max().unwrap_or(0);
         let next_vec_id = if num_vectors > 0 { max_id + 1 } else { 0 };
 
+        let configured_n_clusters = index_config.n_clusters;
         Ok(Self {
             index_config,
             writer_config,
@@ -266,21 +281,29 @@ impl IvfIndexWriter {
             is_finalized: true,
             total_vectors_to_add: Some(num_vectors),
             next_vec_id,
+            configured_n_clusters,
         })
     }
 
     /// Set IVF-specific parameters.
     pub fn with_ivf_params(mut self, n_clusters: usize, n_probe: usize) -> Self {
         self.index_config.n_clusters = n_clusters;
+        self.configured_n_clusters = n_clusters;
         self.index_config.n_probe = n_probe;
         self
     }
 
     /// Set the expected total number of vectors (for progress tracking).
+    ///
+    /// Also updates the cluster-count ceiling ([`Self::with_ivf_params`]'s
+    /// `n_clusters`, or the configured default) to a size-appropriate
+    /// default, since the caller is stating a new expectation about the
+    /// eventual corpus size.
     pub fn set_expected_vector_count(&mut self, count: usize) {
         self.total_vectors_to_add = Some(count);
         // Adjust number of clusters based on dataset size
         self.index_config.n_clusters = Self::compute_default_clusters(count);
+        self.configured_n_clusters = self.index_config.n_clusters;
     }
 
     /// Compute default number of clusters based on dataset size.
@@ -343,18 +366,13 @@ impl IvfIndexWriter {
             ));
         }
 
-        if self.vectors.len() < self.index_config.n_clusters {
-            return Err(LaurusError::InvalidOperation(format!(
-                "Cannot create {} clusters from {} vectors",
-                self.index_config.n_clusters,
-                self.vectors.len() as u64
-            )));
-        }
-
-        println!(
-            "Training {} centroids using k-means...",
-            self.index_config.n_clusters
-        );
+        // Issue #889 PR-5: clamp to the available corpus instead of
+        // hard-erroring. `configured_n_clusters` is the ceiling the caller
+        // asked for and is never mutated by training, so the effective
+        // count recovers as the corpus grows across successive
+        // `add_vectors` calls rather than staying permanently shrunk once a
+        // small commit clamps it down.
+        self.index_config.n_clusters = self.configured_n_clusters.min(self.vectors.len()).max(1);
 
         // Initialize centroids with k-means++
         self.init_centroids_kmeans_plus_plus()?;
@@ -363,7 +381,7 @@ impl IvfIndexWriter {
         let max_iterations = 100;
         let convergence_threshold = 1e-6;
 
-        for iteration in 0..max_iterations {
+        for _iteration in 0..max_iterations {
             let old_centroids = self.centroids.clone();
 
             // Assign vectors to clusters
@@ -375,7 +393,6 @@ impl IvfIndexWriter {
             // Check for convergence
             let convergence = self.compute_convergence(&old_centroids);
             if convergence < convergence_threshold {
-                println!("K-means converged after {} iterations", iteration + 1);
                 break;
             }
         }
@@ -1022,11 +1039,9 @@ impl VectorIndexWriter for IvfIndexWriter {
         self.vectors = vectors;
         self.total_vectors_to_add = Some(self.vectors.len());
 
-        // Adjust cluster count if needed
-        if self.vectors.len() < self.index_config.n_clusters {
-            self.index_config.n_clusters = self.vectors.len().max(1);
-        }
-
+        // Cluster-count clamping now happens uniformly in `train_centroids`
+        // (Issue #889 PR-5), regardless of whether vectors arrived via
+        // `build` or `add_vectors`.
         self.check_memory_limit()?;
         Ok(())
     }
@@ -1279,23 +1294,14 @@ impl VectorIndexWriter for IvfIndexWriter {
             ));
         }
 
-        println!("Optimizing IVF index...");
-
         // Rebalance clusters if they're too uneven
         let total_vectors = self.vectors.len();
         let avg_vectors_per_cluster = total_vectors / self.index_config.n_clusters.max(1);
         let sparse_threshold = avg_vectors_per_cluster / 4;
         let dense_threshold = avg_vectors_per_cluster * 4;
 
-        let merged = self.merge_sparse_clusters(sparse_threshold.max(2))?;
-        if merged > 0 {
-            println!("Merged {} sparse clusters", merged);
-        }
-
-        let split = self.split_dense_clusters(dense_threshold)?;
-        if split > 0 {
-            println!("Split {} dense clusters", split);
-        }
+        self.merge_sparse_clusters(sparse_threshold.max(2))?;
+        self.split_dense_clusters(dense_threshold)?;
 
         // For now, just compact memory
         self.vectors.shrink_to_fit();
