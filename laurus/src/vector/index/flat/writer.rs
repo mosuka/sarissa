@@ -423,9 +423,13 @@ impl VectorIndexWriter for FlatIndexWriter {
             .as_ref()
             .ok_or_else(|| LaurusError::InvalidOperation("No storage configured".to_string()))?;
 
-        // Create the index file
+        // Write to a temp file and atomically rename into place (Issue #889,
+        // matching HNSW's #784 pattern) so a crash mid-write leaves the
+        // previously committed `.flat` intact instead of a truncated,
+        // unreadable segment.
         let file_name = format!("{}.flat", self.path);
-        let mut output = storage.create_output(&file_name)?;
+        let tmp_name = format!("{}.flat.tmp", self.path);
+        let mut output = storage.create_output(&tmp_name)?;
 
         // Write metadata
         let vector_count: u32 = self.vectors.len().try_into().map_err(|_| {
@@ -472,7 +476,11 @@ impl VectorIndexWriter for FlatIndexWriter {
             write_quantized_record(&mut output, int8, *meta)?;
         }
 
-        output.flush()?;
+        // Close with an fsync BEFORE the rename (mirrors HNSW's #882 review
+        // fix): a flush alone leaves the content in the page cache, so a
+        // power loss could surface a published-but-hollow segment file.
+        output.close()?;
+        storage.rename_file(&tmp_name, &file_name)?;
         Ok(())
     }
 
