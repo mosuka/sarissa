@@ -2,6 +2,8 @@
 
 pub mod reader;
 pub mod searcher;
+pub mod segment;
+pub mod segmented;
 #[cfg(test)]
 mod tests;
 pub mod writer;

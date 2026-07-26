@@ -86,8 +86,7 @@ impl VectorIndexFactory {
                 Self::dispatch_hnsw(storage, name, hnsw_config, false)
             }
             VectorIndexTypeConfig::IVF(ivf_config) => {
-                let index = IvfIndex::create(storage, name, ivf_config)?;
-                Ok(Box::new(index))
+                Self::dispatch_ivf(storage, name, ivf_config, false)
             }
         }
     }
@@ -176,6 +175,48 @@ impl VectorIndexFactory {
         Ok(Box::new(index))
     }
 
+    /// Dispatch an IVF config to the segmented or monolithic implementation
+    /// (Issue #889 PR-6, mirroring `dispatch_flat`/`dispatch_hnsw`).
+    ///
+    /// The `segmented` flag (defaulting `false` until #889 PR-7) routes to
+    /// [`SegmentedIvfIndex::open_or_create`], which handles create, open,
+    /// AND the zero-copy migration of a legacy monolithic index — so BOTH
+    /// factory arms must come through here: a legacy index always has a
+    /// `metadata.json` and therefore always takes the *open* arm, which is
+    /// exactly where the migration must fire.
+    ///
+    /// With the flag off, opening a directory that contains a segment
+    /// manifest is rejected: the monolithic index would silently serve only
+    /// the migrated segment-0 data and hide every later segment.
+    fn dispatch_ivf(
+        storage: Arc<dyn Storage>,
+        name: &str,
+        ivf_config: crate::vector::index::config::IvfIndexConfig,
+        open_only: bool,
+    ) -> Result<Box<dyn VectorIndex>> {
+        use crate::vector::index::ivf::segmented::SegmentedIvfIndex;
+
+        if ivf_config.segmented {
+            let index = SegmentedIvfIndex::open_or_create(storage, name, ivf_config)?;
+            return Ok(Box::new(index));
+        }
+        // Reverse guard: a segmented directory must not be opened
+        // monolithically — the single-file view would silently hide every
+        // segment sealed after the migration.
+        if storage.file_exists("segments.json") {
+            return Err(crate::error::LaurusError::invalid_config(format!(
+                "index '{name}' uses the segmented layout (segments.json exists) but \
+                 `segmented` is disabled; enable it to open this index"
+            )));
+        }
+        let index = if open_only {
+            IvfIndex::open(storage, name, ivf_config)?
+        } else {
+            IvfIndex::create(storage, name, ivf_config)?
+        };
+        Ok(Box::new(index))
+    }
+
     /// Open an existing index or create a new one if it doesn't exist.
     ///
     /// This is the recommended method for general use, as it handles both
@@ -249,8 +290,11 @@ impl VectorIndexFactory {
                 Self::dispatch_hnsw(storage, name, hnsw_config, true)
             }
             VectorIndexTypeConfig::IVF(ivf_config) => {
-                let index = IvfIndex::open(storage, name, ivf_config)?;
-                Ok(Box::new(index))
+                // Same dispatch as `create` (Issue #889 PR-6): the segmented
+                // path's `open_or_create` opens existing manifests and
+                // migrates legacy monolithic indexes; the flag-off path is
+                // reverse-guarded against segmented directories.
+                Self::dispatch_ivf(storage, name, ivf_config, true)
             }
         }
     }
