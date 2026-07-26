@@ -136,6 +136,11 @@ impl VectorStore {
                         // distances.
                         normalize_vectors: opt.distance
                             == crate::vector::core::distance::DistanceMetric::Cosine,
+                        // Wire the deletion config's compaction policy into
+                        // the index so commit can auto-compact under the
+                        // segmented layout (Issue #889, mirroring HNSW/#782).
+                        auto_compaction: config.deletion_config.auto_compaction,
+                        compaction_threshold: config.deletion_config.compaction_threshold,
                         embedder: config.embedder.clone(),
                         ..Default::default()
                     }),

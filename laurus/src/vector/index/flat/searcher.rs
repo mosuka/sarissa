@@ -100,6 +100,7 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                     }
                     if let Some((prepared, pool, idx)) = &quant_ctx
                         && let Some(&pos) = idx.get(&doc_id)
+                        && !flat_reader.is_some_and(|r| r.is_deleted(doc_id))
                     {
                         let (int8, meta) = pool.record_at(pos);
                         let distance = distance_quantized(metric, prepared, int8, meta);
