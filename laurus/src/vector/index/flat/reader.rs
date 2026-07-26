@@ -281,7 +281,13 @@ impl FlatVectorIndexReader {
         &self.vectors
     }
 
-    fn is_deleted(&self, doc_id: u64) -> bool {
+    /// Whether `doc_id` is logically deleted per the attached bitmap (if
+    /// any). `pub(crate)` so the searcher's per-storage-mode fast paths
+    /// (e.g. the quantized-pool scan in [`crate::vector::index::flat::searcher`],
+    /// which reads straight from the quantized pool and bypasses
+    /// [`VectorIndexReader::get_vector`]) can filter deleted docs without
+    /// going through that slower, allocation-heavy accessor.
+    pub(crate) fn is_deleted(&self, doc_id: u64) -> bool {
         if let Some(bitmap) = &self.deletion_bitmap {
             bitmap.is_deleted(doc_id)
         } else {

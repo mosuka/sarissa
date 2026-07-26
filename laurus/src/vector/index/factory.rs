@@ -80,8 +80,7 @@ impl VectorIndexFactory {
     ) -> Result<Box<dyn VectorIndex>> {
         match config {
             VectorIndexTypeConfig::Flat(flat_config) => {
-                let index = FlatIndex::create(storage, name, flat_config)?;
-                Ok(Box::new(index))
+                Self::dispatch_flat(storage, name, flat_config, false)
             }
             VectorIndexTypeConfig::HNSW(hnsw_config) => {
                 Self::dispatch_hnsw(storage, name, hnsw_config, false)
@@ -91,6 +90,48 @@ impl VectorIndexFactory {
                 Ok(Box::new(index))
             }
         }
+    }
+
+    /// Dispatch a Flat config to the segmented or monolithic implementation
+    /// (Issue #889 PR-4, mirroring `dispatch_hnsw`).
+    ///
+    /// The `segmented` flag (defaulting `false` until #889 PR-7) routes to
+    /// [`SegmentedFlatIndex::open_or_create`], which handles create, open,
+    /// AND the zero-copy migration of a legacy monolithic index — so BOTH
+    /// factory arms must come through here: a legacy index always has a
+    /// `metadata.json` and therefore always takes the *open* arm, which is
+    /// exactly where the migration must fire.
+    ///
+    /// With the flag off, opening a directory that contains a segment
+    /// manifest is rejected: the monolithic index would silently serve only
+    /// the migrated segment-0 data and hide every later segment.
+    fn dispatch_flat(
+        storage: Arc<dyn Storage>,
+        name: &str,
+        flat_config: crate::vector::index::config::FlatIndexConfig,
+        open_only: bool,
+    ) -> Result<Box<dyn VectorIndex>> {
+        use crate::vector::index::flat::segmented::SegmentedFlatIndex;
+
+        if flat_config.segmented {
+            let index = SegmentedFlatIndex::open_or_create(storage, name, flat_config)?;
+            return Ok(Box::new(index));
+        }
+        // Reverse guard: a segmented directory must not be opened
+        // monolithically — the single-file view would silently hide every
+        // segment sealed after the migration.
+        if storage.file_exists("segments.json") {
+            return Err(crate::error::LaurusError::invalid_config(format!(
+                "index '{name}' uses the segmented layout (segments.json exists) but \
+                 `segmented` is disabled; enable it to open this index"
+            )));
+        }
+        let index = if open_only {
+            FlatIndex::open(storage, name, flat_config)?
+        } else {
+            FlatIndex::create(storage, name, flat_config)?
+        };
+        Ok(Box::new(index))
     }
 
     /// Dispatch an HNSW config to the segmented or monolithic implementation
@@ -194,8 +235,11 @@ impl VectorIndexFactory {
     ) -> Result<Box<dyn VectorIndex>> {
         match config {
             VectorIndexTypeConfig::Flat(flat_config) => {
-                let index = FlatIndex::open(storage, name, flat_config)?;
-                Ok(Box::new(index))
+                // Same dispatch as `create` (Issue #889 PR-4): the segmented
+                // path's `open_or_create` opens existing manifests and
+                // migrates legacy monolithic indexes; the flag-off path is
+                // reverse-guarded against segmented directories.
+                Self::dispatch_flat(storage, name, flat_config, true)
             }
             VectorIndexTypeConfig::HNSW(hnsw_config) => {
                 // Same dispatch as `create` (#882): the segmented path's
