@@ -120,40 +120,70 @@ fn seed_then_append(path: &std::path::Path, name: &str, base: u64, n: u64) {
 
 /// Assert the appended nodes' self-recall matches a fresh full build's over the
 /// same id range, within a small tolerance (pre-#872 the append was ~0.5x).
-fn assert_append_matches_fresh(base: u64, n: u64) {
+///
+/// Takes the **best of `cold_trials` independent `seed_then_append` builds**
+/// (Issue #886): under `parallel_build`, nondeterministic thread interleaving
+/// occasionally produces a graph whose appended-node self-recall dips into a
+/// tail below the tolerance even though the #872 fix is working — a single
+/// build's result is not a reliable pass/fail signal on its own. `cold_trials
+/// == 1` (the seed-1 rebuild regime, which is not flaky — see the module doc)
+/// keeps the original single-build behavior at no extra cost. A genuine
+/// regression (the #872 defect is a structural, deterministic funneling
+/// through `old_ep`, not a scheduling fluke) reproduces on **every** trial, so
+/// taking the max cannot mask it: manually disabling the #872 `promoted_ep`
+/// fix under `RAYON_NUM_THREADS=2` reproduced an identical failing
+/// self-recall@10 (~0.83, tolerance exceeded) on all 3 trials.
+fn assert_append_matches_fresh(base: u64, n: u64, cold_trials: u32) {
     let fresh_dir = tempdir().unwrap();
     fresh_build(fresh_dir.path(), "fresh", n);
     let fresh = self_recall_at_10(fresh_dir.path(), "fresh", base, n);
-
-    let cold_dir = tempdir().unwrap();
-    seed_then_append(cold_dir.path(), "cold", base, n);
-    let cold = self_recall_at_10(cold_dir.path(), "cold", base, n);
 
     // Sanity: the fresh build must itself be well-connected.
     assert!(
         fresh > 0.9,
         "fresh full-build self-recall@10 should be high, got {fresh:.4}"
     );
+
+    let mut best_cold = f32::NEG_INFINITY;
+    for _ in 0..cold_trials {
+        let cold_dir = tempdir().unwrap();
+        seed_then_append(cold_dir.path(), "cold", base, n);
+        let cold = self_recall_at_10(cold_dir.path(), "cold", base, n);
+        best_cold = best_cold.max(cold);
+    }
+
     // Absolute-difference tolerance so a marginally-higher cold value (it can
     // slightly exceed fresh) also passes.
     assert!(
-        cold >= fresh - 0.05,
-        "base={base} seed-then-bulk-load self-recall@10 ({cold:.4}) must match the \
-         fresh build ({fresh:.4}) within tolerance (#872)",
+        best_cold >= fresh - 0.05,
+        "base={base} seed-then-bulk-load self-recall@10 (best of {cold_trials}: \
+         {best_cold:.4}) must match the fresh build ({fresh:.4}) within tolerance (#872)",
     );
 }
 
 /// #872, base `< ef_construction`: a seed-1-then-bulk-append build is rebuilt
 /// fresh, so it must reach the same self-recall as a fresh full build.
+///
+/// Single-trial: the rebuild regime's cold and fresh sides run the identical
+/// full-parallel-build code path (Issue #872's discard-and-rebuild branch), so
+/// their variance is highly correlated and mostly cancels in the diff — this
+/// regime has not been observed to be flaky (Issue #886).
 #[test]
 fn seed_then_bulk_load_recall_matches_fresh_build() {
-    assert_append_matches_fresh(1, 5000);
+    assert_append_matches_fresh(1, 5000, 1);
 }
 
 /// #872, base `>= ef_construction`: appending onto a real (non-trivial) base
 /// keeps the incremental path; the promoted-entry-point-first fix must still
 /// give the appended nodes fresh-build recall (pre-fix ~0.73 vs ~0.98).
+///
+/// Best-of-3 (Issue #886): the incremental append is a structurally different
+/// code path from the fresh build's one-shot construction, so their variance
+/// does not cancel — on low-core CI runners, rare unlucky parallel-insertion
+/// orderings can dip a single build's self-recall into a tail (observed:
+/// ~0.91) even though the fix is working. Three independent trials make that
+/// tail exponentially rarer while still failing hard on a genuine regression.
 #[test]
 fn incremental_append_recall_matches_fresh_build() {
-    assert_append_matches_fresh(200, 5000);
+    assert_append_matches_fresh(200, 5000, 3);
 }
