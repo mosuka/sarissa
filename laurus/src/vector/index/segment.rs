@@ -8,6 +8,7 @@
 //! type-specific) and supplies a [`manager::SegmentFileLayout`] describing
 //! its on-disk file suffixes.
 
+pub mod fanout;
 pub mod manager;
 pub mod merge;
 pub mod merge_policy;
