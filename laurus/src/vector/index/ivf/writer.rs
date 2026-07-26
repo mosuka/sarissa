@@ -361,9 +361,16 @@ impl IvfIndexWriter {
     /// Train centroids using k-means clustering.
     fn train_centroids(&mut self) -> Result<()> {
         if self.vectors.is_empty() {
-            return Err(LaurusError::InvalidOperation(
-                "Cannot train centroids on empty vector set".to_string(),
-            ));
+            // Issue #889 PR-6: a segmented force-merge can legitimately
+            // reduce a merge window to zero surviving vectors (every
+            // document in it was logically deleted). Represent that as
+            // zero clusters rather than erroring — `build_inverted_lists`,
+            // `write`, and every reader/searcher already handle
+            // `n_clusters == 0` gracefully (their loops just run zero
+            // times), so there is nothing downstream left to special-case.
+            self.index_config.n_clusters = 0;
+            self.centroids.clear();
+            return Ok(());
         }
 
         // Issue #889 PR-5: clamp to the available corpus instead of
@@ -1071,13 +1078,9 @@ impl VectorIndexWriter for IvfIndexWriter {
             return Ok(());
         }
 
-        if self.vectors.is_empty() {
-            return Err(LaurusError::InvalidOperation(
-                "Cannot finalize empty index".to_string(),
-            ));
-        }
-
-        // Train centroids using k-means
+        // `train_centroids` handles the empty-vectors case itself (Issue
+        // #889 PR-6: zero clusters, not an error) — no separate guard
+        // needed here.
         self.train_centroids()?;
 
         // Build inverted lists
@@ -1405,5 +1408,25 @@ mod tests {
             assignments_a, assignments_b,
             "cluster assignments must be identical across runs"
         );
+    }
+
+    /// Issue #889 PR-6: finalizing a writer with zero buffered vectors must
+    /// succeed with zero clusters instead of erroring — the segmented
+    /// force-merge path can legitimately reduce a merge window to zero
+    /// surviving vectors when every document in it was deleted.
+    #[test]
+    fn finalize_on_empty_vectors_succeeds_with_zero_clusters() {
+        let config = IvfIndexConfig {
+            dimension: 4,
+            n_clusters: 8,
+            n_probe: 1,
+            ..Default::default()
+        };
+        let mut writer =
+            IvfIndexWriter::new(config, VectorIndexWriterConfig::default(), "empty_merge").unwrap();
+
+        writer.finalize().unwrap();
+        assert_eq!(writer.centroids().len(), 0);
+        assert_eq!(writer.ivf_params().0, 0, "n_clusters must be reset to 0");
     }
 }

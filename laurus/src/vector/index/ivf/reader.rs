@@ -334,7 +334,13 @@ impl IvfIndexReader {
         &self.vectors
     }
 
-    fn is_deleted(&self, doc_id: u64) -> bool {
+    /// Whether `doc_id` is logically deleted per the attached bitmap (if
+    /// any). `pub(crate)` so the searcher's quantized-pool fast path
+    /// (`crate::vector::index::ivf::searcher`, which reads straight from
+    /// the pool and bypasses [`VectorIndexReader::get_vector`]) can filter
+    /// deleted docs without going through that slower accessor (Issue
+    /// #889 PR-6, mirroring the same fix in the Flat reader/searcher).
+    pub(crate) fn is_deleted(&self, doc_id: u64) -> bool {
         if let Some(bitmap) = &self.deletion_bitmap {
             bitmap.is_deleted(doc_id)
         } else {

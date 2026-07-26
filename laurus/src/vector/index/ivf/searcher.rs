@@ -266,6 +266,7 @@ impl VectorIndexSearcher for IvfSearcher {
                 }
                 if let (Some(pool), Some(prepared)) = (&quant_pool, &prepared_quantized)
                     && let Some((int8, meta)) = pool.get_record(*doc_id, field_name)
+                    && !ivf_reader.is_some_and(|r| r.is_deleted(*doc_id))
                 {
                     let distance = crate::vector::core::distance_quantized::distance_quantized(
                         metric, prepared, int8, meta,
