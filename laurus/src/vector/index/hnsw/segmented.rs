@@ -43,12 +43,13 @@ use crate::vector::core::vector::Vector;
 use crate::vector::index::config::HnswIndexConfig;
 use crate::vector::index::hnsw::reader::HnswIndexReader;
 use crate::vector::index::hnsw::searcher::HnswSearcher;
-use crate::vector::index::hnsw::segment::manager::{
+use crate::vector::index::hnsw::segment::merge_engine::MergeEngine;
+use crate::vector::index::hnsw::writer::HnswIndexWriter;
+use crate::vector::index::segment::manager::{
     ManagedSegmentInfo, MergeCandidate, SegmentManager, SegmentManagerConfig,
 };
-use crate::vector::index::hnsw::segment::merge_engine::{MergeConfig, MergeEngine};
-use crate::vector::index::hnsw::segment::reader_cache::SegmentedReaderCache;
-use crate::vector::index::hnsw::writer::HnswIndexWriter;
+use crate::vector::index::segment::merge::MergeConfig;
+use crate::vector::index::segment::reader_cache::SegmentedReaderCache;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::{
     ValidationReport, VectorIndexMetadata, VectorIndexReader, VectorIterator, VectorStats,
@@ -73,7 +74,7 @@ struct SegmentedShared {
     manager: Arc<SegmentManager>,
 
     /// Per-segment reader cache (#660); invalidated on merge.
-    reader_cache: Arc<SegmentedReaderCache>,
+    reader_cache: Arc<SegmentedReaderCache<HnswIndexReader>>,
 
     /// Index-level logical-deletion bitmap (doc-scoped). `None` means "not
     /// yet loaded / no deletions"; lazily loaded from `{name}.delmap`.
@@ -239,6 +240,7 @@ impl SegmentedHnswIndex {
         let manager = Arc::new(SegmentManager::new(
             SegmentManagerConfig::default(),
             storage.clone(),
+            crate::vector::index::hnsw::segment::LAYOUT,
         )?);
 
         if migrate {
@@ -306,7 +308,7 @@ impl SegmentedHnswIndex {
     /// engine; source readers are invalidated afterwards. Returns whether a
     /// merge actually ran.
     fn merge_once(&self) -> Result<bool> {
-        use crate::vector::index::hnsw::segment::merge_policy::TieredMergePolicy;
+        use crate::vector::index::segment::merge_policy::TieredMergePolicy;
 
         let Some(candidate) = self.shared.manager.check_merge(&TieredMergePolicy::new()) else {
             return Ok(false);

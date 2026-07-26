@@ -6,8 +6,9 @@ use laurus::vector::Vector;
 use laurus::vector::VectorFieldConfig;
 use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::vector::index::field::{FieldSearchInput, VectorFieldReader, VectorFieldWriter};
+use laurus::vector::index::hnsw;
 use laurus::vector::index::hnsw::reader::HnswIndexReader;
-use laurus::vector::index::hnsw::segment::manager::{SegmentManager, SegmentManagerConfig};
+use laurus::vector::index::segment::manager::{SegmentManager, SegmentManagerConfig};
 use laurus::vector::index::segmented_field::SegmentedVectorField;
 use laurus::vector::store::request::QueryVector;
 use laurus::vector::{FieldOption, HnswOption};
@@ -25,7 +26,11 @@ async fn test_segmented_field_manual_merge() -> Result<(), Box<dyn std::error::E
         ..Default::default()
     };
 
-    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+    let manager = Arc::new(SegmentManager::new(
+        manager_config,
+        storage.clone(),
+        hnsw::segment::LAYOUT,
+    )?);
 
     // 2. Setup Field
     let field_config = VectorFieldConfig {
@@ -113,7 +118,11 @@ async fn segmented_field_reader_cache_reuses_and_invalidates()
         min_vectors_per_segment: 1,
         ..Default::default()
     };
-    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+    let manager = Arc::new(SegmentManager::new(
+        manager_config,
+        storage.clone(),
+        hnsw::segment::LAYOUT,
+    )?);
 
     let field_config = VectorFieldConfig {
         vector: Some(FieldOption::Hnsw(HnswOption {
@@ -253,7 +262,11 @@ async fn segmented_flush_and_merge_emit_rerank_sidecar() -> Result<(), Box<dyn s
         min_vectors_per_segment: 1,
         ..Default::default()
     };
-    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+    let manager = Arc::new(SegmentManager::new(
+        manager_config,
+        storage.clone(),
+        hnsw::segment::LAYOUT,
+    )?);
 
     let field_config = VectorFieldConfig {
         vector: Some(FieldOption::Hnsw(HnswOption {
@@ -364,7 +377,11 @@ async fn segmented_merge_keeps_vectors_unnormalized_for_euclidean()
         min_vectors_per_segment: 1,
         ..Default::default()
     };
-    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+    let manager = Arc::new(SegmentManager::new(
+        manager_config,
+        storage.clone(),
+        hnsw::segment::LAYOUT,
+    )?);
 
     let field_config = VectorFieldConfig {
         vector: Some(FieldOption::Hnsw(HnswOption {
@@ -469,7 +486,11 @@ async fn segmented_merge_preserves_rerank_sidecar_f32_losslessly()
         min_vectors_per_segment: 1,
         ..Default::default()
     };
-    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+    let manager = Arc::new(SegmentManager::new(
+        manager_config,
+        storage.clone(),
+        hnsw::segment::LAYOUT,
+    )?);
 
     let field_config = VectorFieldConfig {
         vector: Some(FieldOption::Hnsw(HnswOption {
@@ -585,6 +606,7 @@ fn cosine_field(
             ..Default::default()
         },
         storage.clone(),
+        hnsw::segment::LAYOUT,
     )?);
     let field_config = VectorFieldConfig {
         vector: Some(FieldOption::Hnsw(HnswOption {

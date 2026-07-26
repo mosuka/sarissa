@@ -22,7 +22,8 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use common::{DEFAULT_SEED, SAMPLE_SIZE_FAST, lcg_vec_unit};
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use laurus::vector::index::field::{FieldSearchInput, VectorFieldReader, VectorFieldWriter};
-use laurus::vector::index::hnsw::segment::manager::{SegmentManager, SegmentManagerConfig};
+use laurus::vector::index::hnsw;
+use laurus::vector::index::segment::manager::{SegmentManager, SegmentManagerConfig};
 use laurus::vector::index::segmented_field::SegmentedVectorField;
 use laurus::vector::store::request::QueryVector;
 use laurus::vector::{
@@ -46,8 +47,12 @@ const DIM: usize = 128;
 fn active_field_with(count: usize) -> SegmentedVectorField {
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     let manager = Arc::new(
-        SegmentManager::new(SegmentManagerConfig::default(), storage.clone())
-            .expect("segment manager"),
+        SegmentManager::new(
+            SegmentManagerConfig::default(),
+            storage.clone(),
+            hnsw::segment::LAYOUT,
+        )
+        .expect("segment manager"),
     );
     let field_config = VectorFieldConfig {
         vector: Some(FieldOption::Hnsw(HnswOption {

@@ -1,18 +1,19 @@
-//! Per-segment [`HnswIndexReader`] cache for
-//! [`SegmentedVectorField`](crate::vector::index::segmented_field::SegmentedVectorField).
+//! Per-segment reader cache shared across segment-per-commit vector index
+//! types (Issue #889; originated in HNSW's segment-per-commit design,
+//! Issue #634).
 //!
-//! Before this cache existed, each `search_managed_segments` call reloaded
-//! every managed segment from disk via `HnswIndexReader::load`, re-parsing
-//! the segment header, rebuilding the int8 quantized pool, the prefetch
-//! index, and the per-field doc-id lookup. For a multi-segment index the
-//! per-query I/O often dominated the actual graph traversal cost.
+//! Before this cache existed, every search against a segmented index
+//! reloaded every managed segment from disk on each call, re-parsing the
+//! segment header and rebuilding its in-memory search state. For a
+//! multi-segment index the per-query I/O often dominated the actual search
+//! cost.
 //!
-//! This cache holds an [`Arc<HnswIndexReader>`] per `segment_id` so that the
-//! second and subsequent searches against the same segment hit memory only.
-//! Entries are invalidated by
-//! [`SegmentedVectorField::perform_merge_with_policy`](crate::vector::index::segmented_field::SegmentedVectorField::perform_merge_with_policy)
-//! immediately after the underlying segment manager removes a source
-//! segment as part of a merge.
+//! This cache holds an `Arc<R>` per `segment_id` (`R` is the index type's
+//! concrete reader — `HnswIndexReader`, `FlatVectorIndexReader`,
+//! `IvfIndexReader`) so that the second and subsequent searches against the
+//! same segment hit memory only. Entries are invalidated by the owning
+//! index's merge path immediately after the segment manager removes a
+//! source segment as part of a merge.
 //!
 //! Issue [#660](https://github.com/mosuka/laurus/issues/660). Reuses the
 //! storage-level per-segment input cache landed in
@@ -26,21 +27,30 @@ use ahash::AHashMap;
 use parking_lot::RwLock;
 
 use crate::error::Result;
-use crate::vector::index::hnsw::reader::HnswIndexReader;
 
-/// Caches `Arc<HnswIndexReader>` per `segment_id`.
+/// Caches `Arc<R>` per `segment_id`.
 ///
-/// The cache is intentionally minimal: it stores every requested reader
-/// for the lifetime of the owning
-/// [`SegmentedVectorField`](crate::vector::index::segmented_field::SegmentedVectorField)
-/// (i.e. no LRU eviction or memory budget). A future change can swap the
-/// inner map for an LRU-backed implementation without touching call sites.
-#[derive(Debug, Default)]
-pub struct SegmentedReaderCache {
-    inner: RwLock<AHashMap<String, Arc<HnswIndexReader>>>,
+/// The cache is intentionally minimal: it stores every requested reader for
+/// the lifetime of the owning index (i.e. no LRU eviction or memory
+/// budget). A future change can swap the inner map for an LRU-backed
+/// implementation without touching call sites.
+#[derive(Debug)]
+pub struct SegmentedReaderCache<R> {
+    inner: RwLock<AHashMap<String, Arc<R>>>,
 }
 
-impl SegmentedReaderCache {
+impl<R> Default for SegmentedReaderCache<R> {
+    // Not derived: `#[derive(Default)]` on a generic struct adds an `R:
+    // Default` bound, but `R` here is only ever stored behind an `Arc` and
+    // never itself defaulted.
+    fn default() -> Self {
+        Self {
+            inner: RwLock::new(AHashMap::default()),
+        }
+    }
+}
+
+impl<R> SegmentedReaderCache<R> {
     /// Create an empty cache.
     pub fn new() -> Self {
         Self::default()
@@ -56,15 +66,15 @@ impl SegmentedReaderCache {
     ///
     /// * `segment_id` - The segment identifier to look up.
     /// * `loader` - Invoked only on a cache miss; returns the freshly-built
-    ///   [`HnswIndexReader`].
+    ///   reader.
     ///
     /// # Returns
     ///
     /// `Ok(Arc::clone(&reader))` if the reader is found or successfully
     /// loaded. Propagates `loader`'s error otherwise.
-    pub fn get_or_load<F>(&self, segment_id: &str, loader: F) -> Result<Arc<HnswIndexReader>>
+    pub fn get_or_load<F>(&self, segment_id: &str, loader: F) -> Result<Arc<R>>
     where
-        F: FnOnce() -> Result<HnswIndexReader>,
+        F: FnOnce() -> Result<R>,
     {
         if let Some(reader) = self.inner.read().get(segment_id) {
             return Ok(Arc::clone(reader));
@@ -125,19 +135,18 @@ mod tests {
     use crate::error::LaurusError;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Build a dummy `HnswIndexReader` from a `SimpleVectorReader`-style
-    /// shortcut would be ideal, but the cache only stores `Arc<HnswIndexReader>`
-    /// and our tests don't need the reader to be functional — they only
-    /// need to assert that the loader is invoked the right number of times
-    /// for a given access pattern.
+    /// The cache only stores `Arc<R>` and these tests don't need the reader
+    /// to be functional — they only need to assert that the loader is
+    /// invoked the right number of times for a given access pattern.
     ///
     /// Instead, return an `Err` from the loader and assert the call count.
     /// `get_or_load` propagates the error without inserting anything, so we
-    /// can use call counters to distinguish hits from misses.
+    /// can use call counters to distinguish hits from misses. `()` stands in
+    /// for a concrete reader type here.
 
     #[test]
     fn get_or_load_invokes_loader_on_miss_only() {
-        let cache = SegmentedReaderCache::new();
+        let cache: SegmentedReaderCache<()> = SegmentedReaderCache::new();
         let calls = AtomicUsize::new(0);
 
         // First call: loader is invoked, returns Err so nothing is cached.
@@ -160,7 +169,7 @@ mod tests {
 
     #[test]
     fn invalidate_is_noop_for_unknown_segment() {
-        let cache = SegmentedReaderCache::new();
+        let cache: SegmentedReaderCache<()> = SegmentedReaderCache::new();
         cache.invalidate("never-cached");
         assert_eq!(cache.len(), 0);
         assert!(cache.is_empty());
@@ -168,7 +177,7 @@ mod tests {
 
     #[test]
     fn clear_empties_the_cache() {
-        let cache = SegmentedReaderCache::new();
+        let cache: SegmentedReaderCache<()> = SegmentedReaderCache::new();
         assert!(cache.is_empty());
         cache.clear();
         assert!(cache.is_empty());
@@ -176,9 +185,31 @@ mod tests {
 
     #[test]
     fn contains_reports_membership() {
-        let cache = SegmentedReaderCache::new();
+        let cache: SegmentedReaderCache<()> = SegmentedReaderCache::new();
         assert!(!cache.contains("seg-a"));
         // No way to insert via the public API without a real reader; that
         // case is covered by the integration test in `segmented_field`.
+    }
+
+    #[test]
+    fn get_or_load_caches_successful_loads() {
+        let cache: SegmentedReaderCache<u32> = SegmentedReaderCache::new();
+        let calls = AtomicUsize::new(0);
+        let load = || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(42)
+        };
+
+        let r1 = cache.get_or_load("seg-a", load).unwrap();
+        assert_eq!(*r1, 42);
+        assert_eq!(cache.len(), 1);
+
+        let r2 = cache.get_or_load("seg-a", load).unwrap();
+        assert_eq!(*r2, 42);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "second call must hit the cache, not reinvoke the loader"
+        );
     }
 }

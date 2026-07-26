@@ -6,10 +6,14 @@
 //! The segment registry is persisted in a `segments.json` manifest. Since
 //! #634 (PR-1 / #879) the manifest is **versioned, checksummed, and written
 //! atomically** (temp file + CRC-32 trailer + fsync + rename — the same
-//! #784/#786 standard the `.hnsw` segment files follow), so it can serve as
+//! #784/#786 standard the segment data files follow), so it can serve as
 //! the commit pivot for the segment-per-commit pipeline: a crash mid-save
 //! leaves the previous manifest intact, and a corrupted manifest fails the
 //! open loudly instead of silently starting empty.
+//!
+//! Originally HNSW-only, this manager is shared across index types since
+//! Issue #889 via [`SegmentFileLayout`] — the only piece of its behavior
+//! that varies by on-disk file suffix.
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -31,6 +35,44 @@ const MANIFEST_TMP_FILE: &str = "segments.json.tmp";
 
 /// Current manifest format version (see [`SegmentManifest`]).
 const MANIFEST_VERSION: u32 = 1;
+
+/// Filename suffixes a segment's on-disk files use, parameterizing
+/// [`SegmentManager`] across index types that share this manifest/merge
+/// machinery but write different file extensions (Issue #889).
+#[derive(Debug, Clone, Copy)]
+pub struct SegmentFileLayout {
+    /// Primary segment data file suffix, e.g. `.hnsw`.
+    pub primary: &'static str,
+
+    /// Sidecar file suffixes beyond the primary, e.g. `.hnsw.f32` for
+    /// HNSW's f32 rerank sidecar. Counted by [`SegmentManager::add_segment`]
+    /// size measurement and removed by
+    /// [`SegmentManager::delete_segment_files`] alongside the primary file.
+    pub sidecars: &'static [&'static str],
+
+    /// Suffix for a segment's own atomic-write temp-staging file, e.g.
+    /// `.hnsw.tmp`. Recognized (and swept if orphaned) by the segment
+    /// manager's internal orphan sweep on open.
+    pub tmp: &'static str,
+}
+
+impl SegmentFileLayout {
+    /// All suffixes this layout recognizes for a segment's own files, plus
+    /// the layout-independent `.delmap` suffix, ordered **longest first**.
+    ///
+    /// A shorter suffix that is itself the tail of a longer one (e.g.
+    /// `.hnsw` is the tail of `.hnsw.tmp`) must be tried last, or the longer
+    /// file gets mis-stemmed (`foo.hnsw.tmp` stripped of `.hnsw` leaves
+    /// `foo` + a dangling `.tmp`, not the segment id `foo`).
+    fn ordered_suffixes(&self) -> Vec<&'static str> {
+        let mut suffixes: Vec<&'static str> = self.sidecars.to_vec();
+        suffixes.push(self.primary);
+        suffixes.push(self.tmp);
+        suffixes.push(".delmap");
+        suffixes.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        suffixes
+    }
+}
 
 /// Versioned payload of the `segments.json` manifest (#634 PR-1 / #879).
 ///
@@ -144,45 +186,6 @@ pub struct MergeCandidate {
     pub total_size: u64,
 }
 
-/// Strategy for selecting segments to merge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MergeStrategy {
-    /// Merge smallest segments first.
-    Smallest,
-
-    /// Merge segments with most deletions first.
-    MostDeletions,
-
-    /// Merge adjacent segments.
-    Adjacent,
-}
-
-/// Urgency level for merge operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum MergeUrgency {
-    /// No urgent need to merge.
-    Low,
-
-    /// Should merge soon.
-    Medium,
-
-    /// Should merge immediately.
-    High,
-}
-
-/// Plan for merging segments.
-#[derive(Debug, Clone)]
-pub struct MergePlan {
-    /// Merge candidates.
-    pub candidates: Vec<MergeCandidate>,
-
-    /// Strategy used.
-    pub strategy: MergeStrategy,
-
-    /// Urgency level.
-    pub urgency: MergeUrgency,
-}
-
 /// Statistics about segment manager.
 #[derive(Debug, Clone)]
 pub struct SegmentManagerStats {
@@ -206,6 +209,7 @@ pub struct SegmentManagerStats {
 #[derive(Debug)]
 pub struct SegmentManager {
     config: SegmentManagerConfig,
+    layout: SegmentFileLayout,
     storage: Arc<dyn Storage>,
     segments: Arc<RwLock<Vec<ManagedSegmentInfo>>>,
     next_segment_id: Arc<RwLock<u64>>,
@@ -218,7 +222,7 @@ impl SegmentManager {
     /// Create a new segment manager with the given configuration.
     ///
     /// Loads the `segments.json` manifest when present and sweeps orphaned
-    /// segment files (a torn flush can leave a `segment_*.hnsw` on storage
+    /// segment files (a torn flush can leave a `segment_*` file on storage
     /// that never made it into the manifest — its documents are covered by
     /// WAL replay, so the file is garbage).
     ///
@@ -228,9 +232,14 @@ impl SegmentManager {
     /// CRC check — a corrupted registry must fail the open loudly rather
     /// than silently starting empty (which would orphan, and then sweep,
     /// every live segment).
-    pub fn new(config: SegmentManagerConfig, storage: Arc<dyn Storage>) -> Result<Self> {
+    pub fn new(
+        config: SegmentManagerConfig,
+        storage: Arc<dyn Storage>,
+        layout: SegmentFileLayout,
+    ) -> Result<Self> {
         let manager = Self {
             config,
+            layout,
             storage,
             segments: Arc::new(RwLock::new(Vec::new())),
             next_segment_id: Arc::new(RwLock::new(0)),
@@ -390,28 +399,25 @@ impl SegmentManager {
 
     /// Best-effort sweep of files that belong to no registered segment.
     ///
-    /// Only touches names this manager itself generates
-    /// (`segment_NNNNNN.hnsw` plus its `.hnsw.f32` / `.delmap` sidecars and
-    /// `.hnsw.tmp` staging files) and the manifest temp file, so foreign
-    /// files — e.g. a monolithic `vector_index.hnsw` in the same directory —
-    /// are never affected. Runs only after a successful manifest load.
+    /// Only touches names this manager itself generates (`segment_NNNNNN`
+    /// plus its [`SegmentFileLayout`] suffixes) and the manifest temp file,
+    /// so foreign files — e.g. a monolithic `vector_index.hnsw` in the same
+    /// directory — are never affected. Runs only after a successful
+    /// manifest load.
     fn cleanup_orphans(&self) {
         let Ok(files) = self.storage.list_files() else {
             return;
         };
         let segments = self.segments.read();
+        let suffixes = self.layout.ordered_suffixes();
         for file in files {
             if file == MANIFEST_TMP_FILE {
                 let _ = self.storage.delete_file(&file);
                 continue;
             }
-            // Strip a known suffix; skip files that are not segment-shaped.
-            let Some(stem) = file
-                .strip_suffix(".hnsw.tmp")
-                .or_else(|| file.strip_suffix(".hnsw.f32"))
-                .or_else(|| file.strip_suffix(".delmap"))
-                .or_else(|| file.strip_suffix(".hnsw"))
-            else {
+            // Strip a known suffix (longest first); skip files that are not
+            // segment-shaped.
+            let Some(stem) = suffixes.iter().find_map(|suffix| file.strip_suffix(suffix)) else {
                 continue;
             };
             let Some(ordinal) = stem.strip_prefix("segment_") else {
@@ -449,20 +455,18 @@ impl SegmentManager {
         self.save_state_locked(&segments)
     }
 
-    /// Sum the on-storage sizes of a segment's file and rerank sidecar.
+    /// Sum the on-storage sizes of a segment's primary file and sidecars.
     ///
     /// `.delmap` is deliberately excluded (#882): per-segment deletion
     /// bitmaps do not exist — the bitmap is index-level — and for a
     /// legacy-migrated segment (whose id equals the index name) including
     /// it would misattribute the index bitmap's size to the segment.
     fn measure_segment_size(&self, segment_id: &str) -> u64 {
-        [
-            format!("{segment_id}.hnsw"),
-            format!("{segment_id}.hnsw.f32"),
-        ]
-        .iter()
-        .filter_map(|name| self.storage.file_size(name).ok())
-        .sum()
+        std::iter::once(self.layout.primary)
+            .chain(self.layout.sidecars.iter().copied())
+            .map(|suffix| format!("{segment_id}{suffix}"))
+            .filter_map(|name| self.storage.file_size(&name).ok())
+            .sum()
     }
 
     /// Remove a segment.
@@ -477,8 +481,8 @@ impl SegmentManager {
     }
 
     /// Delete physical files associated with a segment, including its
-    /// rerank sidecar (`.hnsw.f32`) — leaving it behind orphans storage
-    /// after every merge (#879).
+    /// sidecars — leaving them behind orphans storage after every merge
+    /// (#879).
     ///
     /// Deliberately does NOT touch `{segment_id}.delmap` (#882): the
     /// segmented index keeps ONE index-level deletion bitmap named
@@ -488,8 +492,11 @@ impl SegmentManager {
     /// merge consumes that segment.
     pub fn delete_segment_files(&self, segment_id: &str) -> Result<()> {
         // Best effort deletion - ignore if a file doesn't exist
-        let _ = self.storage.delete_file(&format!("{segment_id}.hnsw"));
-        let _ = self.storage.delete_file(&format!("{segment_id}.hnsw.f32"));
+        for suffix in
+            std::iter::once(self.layout.primary).chain(self.layout.sidecars.iter().copied())
+        {
+            let _ = self.storage.delete_file(&format!("{segment_id}{suffix}"));
+        }
         Ok(())
     }
 
@@ -624,55 +631,6 @@ impl SegmentManager {
         segments.len() as u32 > self.config.max_segments
     }
 
-    /// Create a merge plan.
-    pub fn create_merge_plan(&self, strategy: MergeStrategy) -> Option<MergePlan> {
-        let segments = self.segments.read();
-
-        if segments.len() <= 1 {
-            return None;
-        }
-
-        let mut segment_list: Vec<_> = segments.iter().cloned().collect();
-
-        // Sort based on strategy
-        match strategy {
-            MergeStrategy::Smallest => {
-                segment_list.sort_by_key(|s| s.vector_count);
-            }
-            MergeStrategy::MostDeletions => {
-                segment_list.sort_by_key(|s| std::cmp::Reverse(s.has_deletions));
-            }
-            MergeStrategy::Adjacent => {
-                segment_list.sort_by_key(|s| s.vector_offset);
-            }
-        }
-
-        // Select segments to merge
-        let merge_count = self.config.merge_factor.min(segment_list.len() as u32) as usize;
-        let to_merge = &segment_list[..merge_count];
-
-        let candidate = MergeCandidate {
-            segments: to_merge.to_vec(),
-            total_vectors: to_merge.iter().map(|s| s.vector_count).sum(),
-            total_size: to_merge.iter().map(|s| s.size_bytes).sum(),
-        };
-
-        // Determine urgency
-        let urgency = if segments.len() as u32 > self.config.max_segments * 2 {
-            MergeUrgency::High
-        } else if segments.len() as u32 > self.config.max_segments {
-            MergeUrgency::Medium
-        } else {
-            MergeUrgency::Low
-        };
-
-        Some(MergePlan {
-            candidates: vec![candidate],
-            strategy,
-            urgency,
-        })
-    }
-
     /// Get statistics.
     pub fn stats(&self) -> SegmentManagerStats {
         let segments = self.segments.read();
@@ -700,7 +658,16 @@ impl SegmentManager {
 mod tests {
     use super::*;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    use crate::vector::index::hnsw::segment::merge_policy::SimpleMergePolicy;
+    use crate::vector::index::segment::merge_policy::SimpleMergePolicy;
+
+    /// The layout exercised by every test below except the
+    /// layout-parameterization test itself: mirrors HNSW's real on-disk
+    /// suffixes, matching these tests' `.hnsw`-shaped fixture names.
+    const TEST_LAYOUT: SegmentFileLayout = SegmentFileLayout {
+        primary: ".hnsw",
+        sidecars: &[".hnsw.f32"],
+        tmp: ".hnsw.tmp",
+    };
 
     fn create_info(id: &str, count: u64) -> ManagedSegmentInfo {
         ManagedSegmentInfo {
@@ -717,7 +684,7 @@ mod tests {
     fn test_segment_manager_basic() {
         let config = SegmentManagerConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = SegmentManager::new(config, storage).unwrap();
+        let manager = SegmentManager::new(config, storage, TEST_LAYOUT).unwrap();
 
         let segment_id = manager.generate_segment_id();
         assert_eq!(segment_id, "segment_000000");
@@ -736,7 +703,8 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         {
-            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            let manager =
+                SegmentManager::new(config.clone(), storage.clone(), TEST_LAYOUT).unwrap();
             let info = ManagedSegmentInfo::new("segment_000000".to_string(), 1000, 0, 0);
             manager.add_segment(info).unwrap();
             // Saves automatically
@@ -744,7 +712,7 @@ mod tests {
 
         // Reload
         {
-            let manager = SegmentManager::new(config, storage.clone()).unwrap();
+            let manager = SegmentManager::new(config, storage.clone(), TEST_LAYOUT).unwrap();
             let segments = manager.list_segments();
             assert_eq!(segments.len(), 1);
             assert_eq!(segments[0].segment_id, "segment_000000");
@@ -759,7 +727,8 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         {
-            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            let manager =
+                SegmentManager::new(config.clone(), storage.clone(), TEST_LAYOUT).unwrap();
             let id0 = manager.generate_segment_id();
             let id1 = manager.generate_segment_id();
             manager
@@ -776,7 +745,7 @@ mod tests {
         }
 
         {
-            let manager = SegmentManager::new(config, storage).unwrap();
+            let manager = SegmentManager::new(config, storage, TEST_LAYOUT).unwrap();
             let segments = manager.list_segments();
             assert_eq!(segments.len(), 1);
             assert_eq!(segments[0].segment_id, "segment_000000");
@@ -804,7 +773,7 @@ mod tests {
             out.close().unwrap();
         }
 
-        let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+        let manager = SegmentManager::new(config.clone(), storage.clone(), TEST_LAYOUT).unwrap();
         assert_eq!(manager.list_segments().len(), 1);
         assert_eq!(
             manager.generate_segment_id(),
@@ -814,7 +783,7 @@ mod tests {
 
         // A save upgrades the file; a reload parses the versioned format.
         manager.save_state().unwrap();
-        let manager = SegmentManager::new(config, storage).unwrap();
+        let manager = SegmentManager::new(config, storage, TEST_LAYOUT).unwrap();
         assert_eq!(manager.list_segments().len(), 1);
         assert_eq!(manager.list_segments()[0].segment_id, "segment_000007");
     }
@@ -827,7 +796,8 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         {
-            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            let manager =
+                SegmentManager::new(config.clone(), storage.clone(), TEST_LAYOUT).unwrap();
             manager
                 .add_segment(create_info("segment_000000", 100))
                 .unwrap();
@@ -848,7 +818,7 @@ mod tests {
         }
 
         assert!(
-            SegmentManager::new(config, storage).is_err(),
+            SegmentManager::new(config, storage, TEST_LAYOUT).is_err(),
             "a corrupted manifest must fail the open, not silently start empty"
         );
     }
@@ -873,7 +843,7 @@ mod tests {
             out.close().unwrap();
         }
 
-        let manager = SegmentManager::new(config, storage).unwrap();
+        let manager = SegmentManager::new(config, storage, TEST_LAYOUT).unwrap();
         let segments = manager.list_segments();
         assert_eq!(segments[0].generation, 1, "stamped in list order");
         assert_eq!(segments[1].generation, 2, "monotone with position");
@@ -900,7 +870,7 @@ mod tests {
             out.close().unwrap();
         }
 
-        let manager = SegmentManager::new(config, storage).unwrap();
+        let manager = SegmentManager::new(config, storage, TEST_LAYOUT).unwrap();
         let segments = manager.list_segments();
         let gen_of = |id: &str| {
             segments
@@ -927,7 +897,8 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         {
-            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            let manager =
+                SegmentManager::new(config.clone(), storage.clone(), TEST_LAYOUT).unwrap();
             manager
                 .add_segment(create_info("segment_000000", 100))
                 .unwrap();
@@ -948,7 +919,7 @@ mod tests {
             out.close().unwrap();
         }
 
-        let err = SegmentManager::new(config, storage).unwrap_err();
+        let err = SegmentManager::new(config, storage, TEST_LAYOUT).unwrap_err();
         assert!(
             err.to_string().contains("checksum mismatch"),
             "the CRC verify must reject a trailer-only corruption, got: {err}"
@@ -963,7 +934,8 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         {
-            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            let manager =
+                SegmentManager::new(config.clone(), storage.clone(), TEST_LAYOUT).unwrap();
             manager
                 .add_segment(create_info("segment_000000", 100))
                 .unwrap();
@@ -975,7 +947,7 @@ mod tests {
             out.close().unwrap();
         }
 
-        let manager = SegmentManager::new(config, storage.clone()).unwrap();
+        let manager = SegmentManager::new(config, storage.clone(), TEST_LAYOUT).unwrap();
         assert_eq!(
             manager.list_segments().len(),
             1,
@@ -1002,7 +974,8 @@ mod tests {
         };
 
         {
-            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            let manager =
+                SegmentManager::new(config.clone(), storage.clone(), TEST_LAYOUT).unwrap();
             manager
                 .add_segment(create_info("segment_000000", 100))
                 .unwrap();
@@ -1019,7 +992,7 @@ mod tests {
         write("vector_index.hnsw");
         write("not_a_segment.hnsw");
 
-        let _manager = SegmentManager::new(config, storage.clone()).unwrap();
+        let _manager = SegmentManager::new(config, storage.clone(), TEST_LAYOUT).unwrap();
         assert!(storage.file_exists("segment_000000.hnsw"));
         assert!(storage.file_exists("segment_000000.hnsw.f32"));
         assert!(!storage.file_exists("segment_000042.hnsw"), "orphan swept");
@@ -1030,16 +1003,63 @@ mod tests {
         assert!(storage.file_exists("not_a_segment.hnsw"), "foreign spared");
     }
 
-    /// #879/#882: deleting a segment's files removes the rerank sidecar
-    /// along with the index file — but never a `.delmap`: the deletion
-    /// bitmap is index-level, and a legacy-migrated segment shares the
-    /// index's name (#882), so touching it would destroy live deletion
-    /// state.
+    /// #889: a distinct layout (Flat-shaped: no sidecars, a different
+    /// primary/tmp suffix) sweeps its own orphans and spares foreign/HNSW
+    /// files — proving the layout parameterization, not just the HNSW
+    /// default, actually drives the sweep.
+    #[test]
+    fn test_cleanup_orphans_respects_a_different_layout() {
+        const FLAT_LAYOUT: SegmentFileLayout = SegmentFileLayout {
+            primary: ".flat",
+            sidecars: &[],
+            tmp: ".flat.tmp",
+        };
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        let write = |name: &str| {
+            let mut out = storage.create_output(name).unwrap();
+            std::io::Write::write_all(&mut out, b"x").unwrap();
+            out.close().unwrap();
+        };
+
+        {
+            let manager =
+                SegmentManager::new(config.clone(), storage.clone(), FLAT_LAYOUT).unwrap();
+            manager
+                .add_segment(create_info("segment_000000", 100))
+                .unwrap();
+        }
+        // Registered segment's file: must survive.
+        write("segment_000000.flat");
+        // An orphaned Flat segment (a torn flush): must be swept.
+        write("segment_000042.flat");
+        write("segment_000042.flat.tmp");
+        // Foreign / other-index-type files: must never be touched, even
+        // though they share the `segment_NNNNNN` numbering shape.
+        write("segment_000099.hnsw");
+        write("vector_index.flat");
+
+        let _manager = SegmentManager::new(config, storage.clone(), FLAT_LAYOUT).unwrap();
+        assert!(storage.file_exists("segment_000000.flat"));
+        assert!(!storage.file_exists("segment_000042.flat"), "orphan swept");
+        assert!(!storage.file_exists("segment_000042.flat.tmp"));
+        assert!(
+            storage.file_exists("segment_000099.hnsw"),
+            "a different index type's segment file must never be swept by this layout"
+        );
+        assert!(storage.file_exists("vector_index.flat"), "foreign spared");
+    }
+
+    /// #879/#882: deleting a segment's files removes its sidecars along
+    /// with the primary file — but never a `.delmap`: the deletion bitmap
+    /// is index-level, and a legacy-migrated segment shares the index's
+    /// name (#882), so touching it would destroy live deletion state.
     #[test]
     fn test_delete_segment_files_includes_sidecars() {
         let config = SegmentManagerConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = SegmentManager::new(config, storage.clone()).unwrap();
+        let manager = SegmentManager::new(config, storage.clone(), TEST_LAYOUT).unwrap();
 
         for name in [
             "segment_000001.hnsw",
@@ -1070,7 +1090,7 @@ mod tests {
     fn test_add_segment_fills_metadata() {
         let config = SegmentManagerConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = SegmentManager::new(config, storage.clone()).unwrap();
+        let manager = SegmentManager::new(config, storage.clone(), TEST_LAYOUT).unwrap();
 
         {
             let mut out = storage.create_output("segment_000000.hnsw").unwrap();
@@ -1114,7 +1134,7 @@ mod tests {
         };
 
         // We use a temporary config for the manager
-        let manager = SegmentManager::new(config, storage).unwrap();
+        let manager = SegmentManager::new(config, storage, TEST_LAYOUT).unwrap();
 
         // 1. Add segments (not enough for merge)
         manager.add_segment(create_info("1", 100)).unwrap();

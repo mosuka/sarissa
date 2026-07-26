@@ -20,8 +20,9 @@ use laurus::vector::core::quantization::QuantizationMethod;
 use laurus::vector::index::VectorIndex;
 use laurus::vector::index::config::HnswIndexConfig;
 use laurus::vector::index::field::{FieldSearchInput, VectorFieldReader, VectorFieldWriter};
+use laurus::vector::index::hnsw;
 use laurus::vector::index::hnsw::HnswIndex;
-use laurus::vector::index::hnsw::segment::manager::{SegmentManager, SegmentManagerConfig};
+use laurus::vector::index::segment::manager::{SegmentManager, SegmentManagerConfig};
 use laurus::vector::index::segmented_field::SegmentedVectorField;
 use laurus::vector::index::storage::VectorStorage;
 use laurus::vector::store::request::QueryVector;
@@ -55,7 +56,11 @@ fn segmented_field(
         min_vectors_per_segment: 1,
         ..Default::default()
     };
-    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+    let manager = Arc::new(SegmentManager::new(
+        manager_config,
+        storage.clone(),
+        hnsw::segment::LAYOUT,
+    )?);
     let field =
         SegmentedVectorField::create("embedding", field_config(4), manager.clone(), storage, None)?;
     Ok((field, manager))
@@ -229,7 +234,11 @@ async fn partial_merge_preserves_newest_wins_ordering() -> Result<(), Box<dyn st
         min_vectors_per_segment: 1,
         ..Default::default()
     };
-    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+    let manager = Arc::new(SegmentManager::new(
+        manager_config,
+        storage.clone(),
+        hnsw::segment::LAYOUT,
+    )?);
     let field =
         SegmentedVectorField::create("embedding", field_config(4), manager.clone(), storage, None)?;
 
