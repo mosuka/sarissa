@@ -27,6 +27,7 @@ pub mod quantized_segment;
 pub mod quantized_storage;
 pub mod rerank_sidecar;
 pub mod rerank_storage;
+pub mod segment;
 pub mod segmented_field;
 pub mod storage;
 pub mod wal;

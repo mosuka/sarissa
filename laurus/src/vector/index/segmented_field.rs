@@ -17,10 +17,11 @@ use crate::vector::index::field::{
 };
 use crate::vector::index::hnsw::reader::HnswIndexReader;
 use crate::vector::index::hnsw::searcher::HnswSearcher;
-use crate::vector::index::hnsw::segment::manager::{ManagedSegmentInfo, SegmentManager};
-use crate::vector::index::hnsw::segment::merge_engine::{MergeConfig, MergeEngine};
-use crate::vector::index::hnsw::segment::reader_cache::SegmentedReaderCache;
+use crate::vector::index::hnsw::segment::merge_engine::MergeEngine;
 use crate::vector::index::hnsw::writer::HnswIndexWriter;
+use crate::vector::index::segment::manager::{ManagedSegmentInfo, SegmentManager};
+use crate::vector::index::segment::merge::MergeConfig;
+use crate::vector::index::segment::reader_cache::SegmentedReaderCache;
 use crate::vector::search::searcher::{
     VectorIndexQuery, VectorIndexQueryParams, VectorIndexSearcher,
 };
@@ -69,7 +70,7 @@ pub struct SegmentedVectorField {
     /// Invalidated by [`Self::perform_merge_with_policy`] when source
     /// segments are removed as part of a merge. Issue
     /// [#660](https://github.com/mosuka/laurus/issues/660).
-    pub reader_cache: Arc<SegmentedReaderCache>,
+    pub reader_cache: Arc<SegmentedReaderCache<HnswIndexReader>>,
 }
 
 impl SegmentedVectorField {
@@ -153,14 +154,14 @@ impl SegmentedVectorField {
 
     /// Trigger a background merge of segments using various policies.
     pub fn perform_merge(&self) -> Result<()> {
-        let policy = crate::vector::index::hnsw::segment::merge_policy::SimpleMergePolicy::new();
+        let policy = crate::vector::index::segment::merge_policy::SimpleMergePolicy::new();
         self.perform_merge_with_policy(&policy)
     }
 
     /// Trigger a merge with a specific policy.
     pub fn perform_merge_with_policy(
         &self,
-        policy: &dyn crate::vector::index::hnsw::segment::merge_policy::MergePolicy,
+        policy: &dyn crate::vector::index::segment::merge_policy::MergePolicy,
     ) -> Result<()> {
         if let Some(mut candidate) = self.segment_manager.check_merge(policy) {
             // Close generation gaps in the candidate (Issue #880): the merged
@@ -397,7 +398,7 @@ impl VectorFieldWriter for SegmentedVectorField {
     }
 
     async fn optimize(&self) -> Result<()> {
-        let policy = crate::vector::index::hnsw::segment::merge_policy::ForceMergePolicy::new();
+        let policy = crate::vector::index::segment::merge_policy::ForceMergePolicy::new();
         self.perform_merge_with_policy(&policy)
     }
 }
@@ -709,7 +710,7 @@ mod tests {
     use super::*;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::core::field::HnswOption;
-    use crate::vector::index::hnsw::segment::manager::SegmentManagerConfig;
+    use crate::vector::index::segment::manager::SegmentManagerConfig;
     use crate::vector::store::request::QueryVector;
 
     fn field_with_bitmap() -> (
@@ -726,6 +727,7 @@ mod tests {
                     ..Default::default()
                 },
                 storage.clone(),
+                crate::vector::index::hnsw::segment::LAYOUT,
             )
             .unwrap(),
         );

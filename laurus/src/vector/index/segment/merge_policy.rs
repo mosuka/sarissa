@@ -4,7 +4,7 @@
 
 use std::fmt::Debug;
 
-use crate::vector::index::hnsw::segment::manager::{ManagedSegmentInfo, SegmentManagerConfig};
+use crate::vector::index::segment::manager::{ManagedSegmentInfo, SegmentManagerConfig};
 
 /// Trait for merge policies.
 pub trait MergePolicy: Debug + Send + Sync {
@@ -185,7 +185,7 @@ impl MergePolicy for ForceMergePolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::index::hnsw::segment::manager::ManagedSegmentInfo;
+    use crate::vector::index::segment::manager::ManagedSegmentInfo;
 
     fn create_info(id: &str, count: u64) -> ManagedSegmentInfo {
         ManagedSegmentInfo {
