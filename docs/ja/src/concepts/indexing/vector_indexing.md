@@ -504,18 +504,19 @@ search の独立 budget）や 4 bit PQ variant でこの gap を埋める方向�
 | Flat | `.flat` | 生ベクトルとメタデータ |
 | IVF | `.ivf` | クラスタセントロイド、割り当て済みベクトル、メタデータ |
 
-Flat と IVF はコミットのたびに書き直される単一ファイルにデータを格納します。
-HNSW はデフォルトで **segment-per-commit** レイアウトを使用します（下記参照）。
-単一ファイルの monolithic レイアウトは、インデックスを直接利用する場合に
-`HnswIndexConfig { segmented: false, .. }` で引き続き選択できます。
+3つのインデックスタイプはすべてデフォルトで **segment-per-commit** レイアウトを
+使用します（下記参照）。単一ファイルの monolithic レイアウトは、インデックスを
+直接利用する場合に `{Flat,Hnsw,Ivf}IndexConfig { segmented: false, .. }` で
+引き続き選択できます。
 
-### segment-per-commit レイアウト（HNSW、デフォルト）
+### segment-per-commit レイアウト（3タイプ共通のデフォルト）
 
-[#634](https://github.com/mosuka/laurus/issues/634) 以降、HNSW の各コミットは
-**新規追加ベクトルのみ**を不変の `segment_NNNNNN.hnsw` ファイルとして seal し、
-原子的・チェックサム付きの `segments.json` manifest に登録します —
+[#634](https://github.com/mosuka/laurus/issues/634)（HNSW）および
+[#889](https://github.com/mosuka/laurus/issues/889)（Flat・IVF）以降、各コミットは
+**新規追加ベクトルのみ**を不変の `segment_NNNNNN.{hnsw,flat,ivf}` ファイルとして
+seal し、原子的・チェックサム付きの `segments.json` manifest に登録します —
 コミットあたりのコストは O(インデックス) から O(新規ドキュメント) に下がり、
-既存コーパスの再量子化も発生しません。
+既存セグメントの全面的な作り直しも発生しません。
 
 - **検索**は sealed セグメント群を（新しい世代から順に）fan-out し、
   同一ドキュメントの複製を newest-wins マスキングで重複排除します。
@@ -526,19 +527,49 @@ HNSW はデフォルトで **segment-per-commit** レイアウトを使用しま
 - **マージ**: 世代連続・サイズ類似の tiered マージポリシーがインジェストの
   進行に応じてセグメント列を集約し（各ベクトルの生涯書き直し回数は
   O(log N)）、`optimize()` は全セグメントを 1 つに force-merge します。
+  IVF のマージはセグメントごとの cluster ID を引き継ごうとしません
+  （セグメントをまたいだ意味を持たないため）— 重複排除済みの生存ベクトルを
+  平坦化し、union サイズに応じて適応的に再計算した cluster 数で centroid を
+  ゼロから再学習します。Flat には f32 rerank サイドカーによるフォールバックが
+  ないため、マージのたびに dequantize → scalar quantization パラメータの
+  再学習 → requantize が発生し、HNSW/IVF のほぼロスレスな再量子化経路とは
+  異なり、マージを重ねるごとにわずかな量子化ドリフトが蓄積します。
+- **セグメントごとの学習**: HNSW のグラフと IVF の centroid はいずれも
+  セグメントごとに独立して構築されます（IVF はスキーマの `n_clusters` を
+  上限としてセグメント自身のサイズに適応した cluster 数を学習します）。
+  検索はセグメントごとに fan-out して top-k をマージするため、
+  どちらのインデックスタイプもセグメント間の合意は不要です。
 - **削除**は論理削除です。インデックスレベルの bitmap（`{name}.delmap`）を
   すべてのセグメントリーダーが参照し、マージ時に物理回収されます。
-- **移行**はゼロコピーです。既存の monolithic `.hnsw` は初回オープン時に
-  そのまま最初のセグメントとして登録されます — manifest への 1 書き込みのみで、
-  データ移動はありません。
+- **移行**はゼロコピーです。既存の monolithic セグメントファイルは初回
+  オープン時にそのまま最初のセグメントとして登録されます — manifest への
+  1書き込みのみで、データ移動はありません。
 - **耐久性**: セグメントファイルと manifest は temp ファイル + fsync +
   原子的 rename で書かれ、manifest はカバー対象の状態がすべて durable に
   なった後にのみ公開される WAL checkpoint を保持します —
   [永続化](../../laurus/persistence.md)を参照。
 
-### コミット跨ぎの writer 保持（monolithic レイアウト）
+### コミット跨ぎの writer 保持（monolithic レイアウトのみ）
 
-monolithic レイアウトの HNSW では、ストアは writer を**コミットを跨いで**キャッシュし続けます（Issue #864）。コミット直後の writer のメモリ内状態は、たった今書き出したファイルと等価であるため、コミット後最初の upsert はストレージから `.hnsw` 全体をリロード（+ 全 dequantize）する代わりに、その場で writer を拡張します — コミットの多いインジェストでは、このリロードがサイクルあたり O(インデックスサイズ) のコストでした。ただし、writer の**裏で**インデックスが書き換えられる場合 — コミット中の auto-compaction 発火、または明示的な `optimize()` — はキャッシュを破棄します。どちらも fresh writer 経由でファイルを再構築して deletion bitmap をクリアするため、stale な保持 writer は回収済みベクトルを書き戻してしまうからです。また、コミットが途中で失敗した場合も writer とディスクの一致が不明になるため破棄します。副次効果として、保留変更のない保持 writer はインデックス書き出し自体をスキップするため、変更なしの `commit()` は `.hnsw` への書き込みコストがゼロになります。Flat と IVF は同じ不変条件の監査が済むまで、従来のコミット時破棄の挙動を維持します。
+writer の保持は **monolithic** レイアウト（`segmented: false`）にのみ
+適用されます。segmented な writer は常に空のバッファから始まるため、
+保持すべき状態がそもそも存在しません。monolithic レイアウトの HNSW では、
+ストアは writer を**コミットを跨いで**キャッシュし続けます（Issue #864）。
+コミット直後の writer のメモリ内状態は、たった今書き出したファイルと等価で
+あるため、コミット後最初の upsert はストレージから `.hnsw` 全体をリロード
+（+ 全 dequantize）する代わりに、その場で writer を拡張します —
+コミットの多いインジェストでは、このリロードがサイクルあたり O(インデックス
+サイズ) のコストでした。ただし、writer の**裏で**インデックスが書き換えられる
+場合 — コミット中の auto-compaction 発火、または明示的な `optimize()` —
+はキャッシュを破棄します。どちらも fresh writer 経由でファイルを再構築して
+deletion bitmap をクリアするため、stale な保持 writer は回収済みベクトルを
+書き戻してしまうからです。また、コミットが途中で失敗した場合も writer と
+ディスクの一致が不明になるため破棄します。副次効果として、保留変更のない
+保持 writer はインデックス書き出し自体をスキップするため、変更なしの
+`commit()` は `.hnsw` への書き込みコストがゼロになります。monolithic の
+Flat と IVF は従来のコミット時破棄の挙動を維持しており、同じ不変条件の
+監査はまだ済んでいません — 現在この経路に到達するには segmented デフォルトを
+明示的にオプトアウトする必要があります。
 
 ## コード例
 

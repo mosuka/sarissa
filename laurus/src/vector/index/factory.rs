@@ -338,7 +338,14 @@ mod tests {
 
     #[test]
     fn test_vector_index_stats() {
-        let config = VectorIndexTypeConfig::default();
+        // Pinned to the monolithic layout (Issue #907 audit): `stats().last_modified`
+        // tracks a real timestamp only for the monolithic `IndexMetadata`; the
+        // segmented layout (the default since #907) hardcodes it to 0, since a
+        // multi-segment manifest has no single natural "last modified" moment.
+        let config = VectorIndexTypeConfig::Flat(FlatIndexConfig {
+            segmented: false,
+            ..Default::default()
+        });
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let index = VectorIndexFactory::create(storage, "test_index", config).unwrap();

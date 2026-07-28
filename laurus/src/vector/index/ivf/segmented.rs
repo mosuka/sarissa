@@ -33,12 +33,12 @@
 //! This is a first-time implementation for IVF — the monolithic
 //! [`super::IvfIndex`] has no soft-delete/compaction wiring at all.
 //!
-//! [`IvfIndexConfig::segmented`] defaults to `false` (unlike HNSW's `true`
-//! since #882): IVF's segmented layout has not yet had the same production
-//! exercise, so it ships behind the flag until a follow-up flips the
-//! default (Issue #889 PR-7). A legacy monolithic index is migrated
-//! zero-copy on first open with the flag on (its `.ivf` becomes segment 0
-//! of the manifest, no data movement).
+//! [`IvfIndexConfig::segmented`] defaults to `true` (Issue #907, mirroring
+//! HNSW's own #882 flip): this is now the default IVF layout, with the
+//! monolithic single-file layout still available via `segmented: false`. A
+//! legacy monolithic index is migrated zero-copy on first open with the
+//! flag on (its `.ivf` becomes segment 0 of the manifest, no data
+//! movement).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
