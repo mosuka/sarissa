@@ -527,18 +527,20 @@ search budget) and / or a 4-bit PQ variant to close the gap.
 | Flat | `.flat` | Raw vectors and metadata |
 | IVF | `.ivf` | Cluster centroids, assigned vectors, and metadata |
 
-Flat and IVF store their data in a single file that is rewritten on every
-commit. HNSW uses the **segment-per-commit** layout by default (see below);
-the monolithic single-file layout remains available via
-`HnswIndexConfig { segmented: false, .. }` for direct index users.
+All three index types default to the **segment-per-commit** layout (see
+below); the monolithic single-file layout remains available via
+`{Flat,Hnsw,Ivf}IndexConfig { segmented: false, .. }` for direct index
+users.
 
-### Segment-per-commit layout (HNSW, default)
+### Segment-per-commit layout (default for all three index types)
 
-Since [#634](https://github.com/mosuka/laurus/issues/634), each HNSW commit
-seals only the **newly added vectors** as an immutable
-`segment_NNNNNN.hnsw` file and registers it in an atomic, checksummed
-`segments.json` manifest — the per-commit cost drops from O(index) to
-O(new documents), with no re-quantization of the existing corpus:
+Since [#634](https://github.com/mosuka/laurus/issues/634) (HNSW) and
+[#889](https://github.com/mosuka/laurus/issues/889) (Flat and IVF), each
+commit seals only the **newly added vectors** as an immutable
+`segment_NNNNNN.{hnsw,flat,ivf}` file and registers it in an atomic,
+checksummed `segments.json` manifest — the per-commit cost drops from
+O(index) to O(new documents), with no full-corpus rework for the existing
+segments:
 
 - **Search** fans out over the sealed segments (newest generation first)
   and deduplicates same-document copies with newest-wins masking, so a
@@ -549,34 +551,50 @@ O(new documents), with no re-quantization of the existing corpus:
 - **Merging**: a tiered, generation-contiguous merge policy collapses
   size-similar segment runs as ingest proceeds (each vector is rewritten
   O(log N) times over its lifetime), and `optimize()` force-merges
-  everything into one segment.
+  everything into one segment. IVF's merge does not try to reconcile
+  per-segment cluster ids (they carry no cross-segment meaning): it
+  flattens the deduplicated survivors and retrains centroids from scratch
+  over the merged union, with the cluster count re-derived adaptively for
+  the union's size. Flat has no f32 rerank sidecar to fall back on, so each
+  merge dequantizes, retrains scalar-quantization parameters, and
+  requantizes — a small amount of quantization drift accumulates across
+  merges, unlike HNSW's/IVF's lossless-ish requantization path.
+- **Per-segment training**: HNSW's graphs and IVF's centroids are both
+  built independently per segment — IVF adapts its cluster count to each
+  segment's own size (capped by the schema's `n_clusters`) rather than
+  training a fixed count regardless of how many vectors landed in that
+  commit. No cross-segment agreement is needed for either index type,
+  since search fans out per segment and merges top-k results.
 - **Deletions** are logical: an index-level bitmap (`{name}.delmap`) is
   consulted by every segment reader and physically reclaimed by merges.
-- **Migration** is zero-copy: an existing monolithic `.hnsw` is registered
-  verbatim as the first segment on first open — one manifest write, no
-  data movement.
+- **Migration** is zero-copy: an existing monolithic segment file is
+  registered verbatim as the first segment on first open — one manifest
+  write, no data movement.
 - **Durability**: segment files and the manifest are written via
   temp-file + fsync + atomic rename, and the manifest carries the WAL
   checkpoint published only after all covered state is durable — see
   [Persistence](../../laurus/persistence.md).
 
-### Writer retention across commits (monolithic layout)
+### Writer retention across commits (monolithic layout only)
 
-For the monolithic HNSW layout, the store keeps its writer cached **across
-commits** (Issue #864):
-after a commit the writer's in-memory state is equivalent to the file it just
-wrote, so the first upsert after a commit extends it in place instead of
-reloading (and dequantizing) the whole `.hnsw` from storage — under
-commit-heavy ingest that reload was O(index size) per cycle. The cache is
-dropped whenever the index is rewritten *behind* the writer — auto-compaction
-firing inside a commit, or an explicit `optimize()` — because both rebuild the
-file through a fresh writer and clear the deletion bitmap, and a stale
-retained writer would write the reclaimed vectors back — and whenever a
-commit fails partway, where the writer/disk agreement is unknown. As a bonus,
-a retained writer with no pending changes skips the index rewrite entirely,
-so a no-change `commit()` costs no `.hnsw` write at all. Flat and IVF keep
-the previous drop-on-commit behavior until they are audited for the same
-invariants.
+Retention only applies to the **monolithic** layout (`segmented: false`);
+a segmented writer always starts from an empty buffer, so there is nothing
+to retain. For the monolithic HNSW layout, the store keeps its writer
+cached **across commits** (Issue #864): after a commit the writer's
+in-memory state is equivalent to the file it just wrote, so the first
+upsert after a commit extends it in place instead of reloading (and
+dequantizing) the whole `.hnsw` from storage — under commit-heavy ingest
+that reload was O(index size) per cycle. The cache is dropped whenever the
+index is rewritten *behind* the writer — auto-compaction firing inside a
+commit, or an explicit `optimize()` — because both rebuild the file
+through a fresh writer and clear the deletion bitmap, and a stale retained
+writer would write the reclaimed vectors back — and whenever a commit
+fails partway, where the writer/disk agreement is unknown. As a bonus, a
+retained writer with no pending changes skips the index rewrite entirely,
+so a no-change `commit()` costs no `.hnsw` write at all. The monolithic
+Flat and IVF layouts keep the previous drop-on-commit behavior, unaudited
+for the same invariants — reaching for that code path today requires
+opting out of the segmented default explicitly.
 
 ## Code Example
 

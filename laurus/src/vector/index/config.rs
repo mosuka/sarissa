@@ -321,11 +321,14 @@ pub struct FlatIndexConfig {
 
     /// Whether this index uses the segment-per-commit layout (Issue #889).
     ///
-    /// Mirrors [`HnswIndexConfig::segmented`]. Defaults to `false` — unlike
-    /// HNSW (where the flag flipped to `true` in #882 after the design was
-    /// proven in production), Flat's segmented layout ships behind the flag
-    /// until it has had the same real-world exercise.
-    #[serde(default)]
+    /// Mirrors [`HnswIndexConfig::segmented`]. Defaults to `true` (Issue
+    /// #907, mirroring HNSW's own #882 flip): Flat's segmented layout
+    /// shipped behind this flag in #904 and, once proven, the default
+    /// flipped the same way HNSW's did. A config serialized before this
+    /// field existed still deserializes to `true` (`default_segmented`),
+    /// so persisted configs from before #904 pick up the new layout on
+    /// next open rather than silently staying monolithic.
+    #[serde(default = "default_segmented")]
     pub segmented: bool,
 
     /// Automatically compact (purge logically deleted vectors) on commit
@@ -399,7 +402,7 @@ impl Default for FlatIndexConfig {
             rerank_storage: None,
             merge_factor: 10,
             max_segments: 100,
-            segmented: false,
+            segmented: true,
             auto_compaction: false,
             compaction_threshold: default_compaction_threshold(),
             embedder: default_embedder(),
@@ -712,10 +715,11 @@ pub struct IvfIndexConfig {
 
     /// Whether this index uses the segment-per-commit layout (Issue #889).
     ///
-    /// Mirrors [`FlatIndexConfig::segmented`]. Defaults to `false` — IVF's
-    /// segmented layout ships behind the flag until it has had the same
-    /// real-world exercise HNSW's had since #882.
-    #[serde(default)]
+    /// Mirrors [`FlatIndexConfig::segmented`]. Defaults to `true` (Issue
+    /// #907, mirroring HNSW's own #882 flip): IVF's segmented layout
+    /// shipped behind this flag in #906 and, once proven, the default
+    /// flipped the same way HNSW's and Flat's did.
+    #[serde(default = "default_segmented")]
     pub segmented: bool,
 
     /// Automatically compact (purge logically deleted vectors) on commit
@@ -759,7 +763,7 @@ impl Default for IvfIndexConfig {
             rerank_storage: None,
             merge_factor: 10,
             max_segments: 100,
-            segmented: false,
+            segmented: true,
             auto_compaction: false,
             compaction_threshold: default_compaction_threshold(),
             embedder: default_embedder(),

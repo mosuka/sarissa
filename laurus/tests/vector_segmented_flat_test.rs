@@ -593,10 +593,12 @@ fn append_only_segment_count_is_bounded_by_auto_merge() {
     }
 }
 
-/// serde behavior of the (still-off-by-default) flag — a config missing
-/// the field deserializes to `false`; an explicit `true` is preserved.
+/// serde behavior of the (now on-by-default, Issue #907) flag — a config
+/// missing the field deserializes to `true`; an explicit `false` is
+/// preserved.
 #[test]
-fn segmented_flag_serde_default_and_explicit_true() {
+fn segmented_flag_serde_default_and_explicit_false() {
+    // A pre-#907 config = today's config with the `segmented` key removed.
     let mut value: serde_json::Value = serde_json::to_value(FlatIndexConfig::default()).unwrap();
     value
         .as_object_mut()
@@ -605,20 +607,19 @@ fn segmented_flag_serde_default_and_explicit_true() {
         .expect("the flag must serialize");
     let config: FlatIndexConfig = serde_json::from_value(value).unwrap();
     assert!(
-        !config.segmented,
-        "a config serialized before the field existed must open monolithic \
-         (Flat's segmented default is false, unlike HNSW's)"
+        config.segmented,
+        "a config serialized before the field existed must open segmented (#907)"
     );
 
-    let explicit_true = serde_json::to_string(&FlatIndexConfig {
-        segmented: true,
+    let explicit_false = serde_json::to_string(&FlatIndexConfig {
+        segmented: false,
         ..FlatIndexConfig::default()
     })
     .unwrap();
-    let config: FlatIndexConfig = serde_json::from_str(&explicit_true).unwrap();
+    let config: FlatIndexConfig = serde_json::from_str(&explicit_false).unwrap();
     assert!(
-        config.segmented,
-        "an explicit `segmented: true` must be preserved"
+        !config.segmented,
+        "an explicit `segmented: false` must be preserved"
     );
 }
 
