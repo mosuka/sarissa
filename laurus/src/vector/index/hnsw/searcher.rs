@@ -765,8 +765,14 @@ impl HnswSearcher {
         }
 
         // 3. Search at layer 0 with ef_search
-        let mut candidates = BinaryHeap::new(); // Min-heap (nearest first)
-        let mut found = BinaryHeap::new(); // Max-heap (furthest first)
+        // Issue #680: pre-size both heaps instead of growing geometrically
+        // from empty on every query. `found` never holds more than
+        // `ef_search + 1` entries (pushed then immediately popped back down
+        // once it overflows, below); `candidates` has no hard cap, but stays
+        // in the same order of magnitude in practice, so the same estimate
+        // is used for both.
+        let mut candidates = BinaryHeap::with_capacity(ef_search * 2); // Min-heap (nearest first)
+        let mut found = BinaryHeap::with_capacity(ef_search * 2); // Max-heap (furthest first)
 
         // A node enters the result heap only if it satisfies the admission
         // predicate; the frontier (`candidates`) always expands through every
