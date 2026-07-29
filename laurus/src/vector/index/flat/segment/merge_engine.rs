@@ -72,8 +72,6 @@ impl MergeEngine {
         let start_time = crate::util::time::Timer::now();
 
         let segments_merged = segments.len() as u32;
-        #[allow(unused_assignments)]
-        let mut vectors_merged = 0;
         let mut deletions_removed = 0;
         let mut duplicates_removed = 0u64;
 
@@ -112,6 +110,8 @@ impl MergeEngine {
         }
 
         // 2. Write to new segment.
+        let vectors_merged = all_vectors.len() as u64;
+        let total_size = vectors_merged * 128; // Dummy estimate; measured from storage by `add_segment`.
         let mut writer = FlatIndexWriter::with_storage(
             self.index_config.clone(),
             self.writer_config.clone(),
@@ -119,12 +119,14 @@ impl MergeEngine {
             self.storage.clone(),
         )?;
 
-        writer.add_vectors(all_vectors.clone())?;
+        // Issue #636: move instead of clone -- `all_vectors` is not read
+        // again after this call, and merges are routine under
+        // segment-per-commit's tiered policy rather than rare full
+        // rewrites, so the clone's peak-memory doubling recurs on every
+        // merge instead of occasionally.
+        writer.add_vectors(all_vectors)?;
         writer.finalize()?;
         writer.write()?;
-
-        vectors_merged = all_vectors.len() as u64;
-        let total_size = vectors_merged * 128; // Dummy estimate; measured from storage by `add_segment`.
 
         let merge_time_ms = start_time.elapsed_ms();
 
