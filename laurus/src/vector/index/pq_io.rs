@@ -22,6 +22,7 @@ use std::io::{Read, Write};
 use crate::error::Result;
 use crate::vector::core::quantization::{PqParams, QuantizationMethod, VectorQuantizer, pq_decode};
 use crate::vector::core::vector::Vector;
+use crate::vector::index::pq_codebook::SharedPqCodebook;
 
 /// Bytes consumed by the per-vector codes (everything after the
 /// field_name string ends). Equal to `m`.
@@ -35,31 +36,56 @@ pub(super) const fn pq_record_payload_size(m: u16) -> usize {
     m as usize
 }
 
-/// Train a PQ codebook on the given vectors and encode each one.
+/// Encode `vectors` against a PQ codebook, either training a fresh one
+/// or reusing a pre-trained [`SharedPqCodebook`] (Issue #631).
 ///
 /// Returns `(params, codebook, codes)` where `codes` is one
 /// `Vec<u8>` of length `params.m` per input vector, in the same order
 /// as the input slice. The caller pairs each entry back with its
 /// `(doc_id, field_name)` triple before writing.
 ///
+/// # Arguments
+///
+/// * `vectors` - The vectors to encode.
+/// * `dim` - Original vector dimension.
+/// * `subvector_count` - PQ `m` (must divide `dim`).
+/// * `shared` - When `Some`, skip training entirely and encode against
+///   this pre-trained codebook via [`VectorQuantizer::from_pq_codebook`]
+///   (Issue #631 — training a fresh codebook on every segment/merge
+///   costs multiple seconds and recurs at every tier of the
+///   segment-per-commit merge hierarchy). When `None`, train a fresh
+///   codebook on `vectors` as before.
+///
 /// # Errors
 ///
-/// Forwards any error from [`VectorQuantizer::train`] /
-/// [`VectorQuantizer::quantize`] (e.g. empty input, dimension
-/// mismatch, non-finite values, `dim % m != 0`).
+/// * Forwards [`SharedPqCodebook::validate_for`]'s error if `shared`'s
+///   geometry does not match `dim`/`subvector_count`.
+/// * Otherwise forwards any error from [`VectorQuantizer::train`] /
+///   [`VectorQuantizer::quantize`] (e.g. empty input, dimension
+///   mismatch, non-finite values, `dim % m != 0`).
 pub(super) fn quantize_segment_pq(
     vectors: &[Vector],
     dim: usize,
     subvector_count: usize,
+    shared: Option<&SharedPqCodebook>,
 ) -> Result<(PqParams, Vec<f32>, Vec<Vec<u8>>)> {
-    let mut quantizer = VectorQuantizer::new(
-        QuantizationMethod::ProductQuantization { subvector_count },
-        dim,
-    );
-    quantizer.train(vectors)?;
+    let quantizer = match shared {
+        Some(cb) => {
+            cb.validate_for(dim, subvector_count)?;
+            VectorQuantizer::from_pq_codebook(dim, cb.params, cb.codebook.clone())?
+        }
+        None => {
+            let mut quantizer = VectorQuantizer::new(
+                QuantizationMethod::ProductQuantization { subvector_count },
+                dim,
+            );
+            quantizer.train(vectors)?;
+            quantizer
+        }
+    };
     let (params, codebook_slice) = quantizer
         .pq_state()
-        .expect("PQ quantizer trained successfully implies pq_state is set");
+        .expect("PQ quantizer is trained or built from an existing codebook, so pq_state is set");
     let params = *params;
     let codebook: Vec<f32> = codebook_slice.to_vec();
     let codes: Vec<Vec<u8>> = vectors
@@ -109,7 +135,7 @@ mod tests {
             vec_of(&[-10.0, -10.0, -20.0, -20.0]),
             vec_of(&[10.1, 10.1, 20.1, 20.1]),
         ];
-        let (params, codebook, codes) = quantize_segment_pq(&vectors, 4, 2).unwrap();
+        let (params, codebook, codes) = quantize_segment_pq(&vectors, 4, 2, None).unwrap();
         assert_eq!(params.m, 2);
         assert_eq!(params.k, 256);
         assert_eq!(params.sub_dim, 2);
@@ -126,7 +152,7 @@ mod tests {
             vec_of(&[10.0, 10.0, 20.0, 20.0]),
             vec_of(&[-10.0, -10.0, -20.0, -20.0]),
         ];
-        let (params, codebook, codes) = quantize_segment_pq(&vectors, 4, 2).unwrap();
+        let (params, codebook, codes) = quantize_segment_pq(&vectors, 4, 2, None).unwrap();
 
         let mut buf = Vec::new();
         for c in &codes {
@@ -152,5 +178,42 @@ mod tests {
     fn payload_size_equals_m() {
         assert_eq!(pq_record_payload_size(0), 0);
         assert_eq!(pq_record_payload_size(16), 16);
+    }
+
+    /// Issue #631: encoding against a pre-trained [`SharedPqCodebook`]
+    /// must produce byte-identical output to training a fresh codebook
+    /// on the exact same corpus -- the strongest cheap correctness
+    /// check available, since `pq_train_codebook` is deterministic
+    /// (seeded k-means).
+    #[test]
+    fn shared_codebook_produces_byte_identical_codes_to_fresh_training() {
+        let mut state: u64 = 0x1234_5678_9ABC_DEF0;
+        let vectors: Vec<Vector> = (0..300)
+            .map(|_| {
+                let data: Vec<f32> = (0..32)
+                    .map(|_| {
+                        state = state
+                            .wrapping_mul(6_364_136_223_846_793_005)
+                            .wrapping_add(1_442_695_040_888_963_407);
+                        ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+                    })
+                    .collect();
+                Vector::new(data)
+            })
+            .collect();
+
+        let (trained_params, trained_codebook, trained_codes) =
+            quantize_segment_pq(&vectors, 32, 4, None).unwrap();
+
+        let shared = crate::vector::index::pq_codebook::SharedPqCodebook {
+            params: trained_params,
+            codebook: trained_codebook.clone(),
+        };
+        let (shared_params, shared_codebook, shared_codes) =
+            quantize_segment_pq(&vectors, 32, 4, Some(&shared)).unwrap();
+
+        assert_eq!(shared_params, trained_params);
+        assert_eq!(shared_codebook, trained_codebook);
+        assert_eq!(shared_codes, trained_codes);
     }
 }

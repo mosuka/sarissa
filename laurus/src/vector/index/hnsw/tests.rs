@@ -597,6 +597,144 @@ fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
     Ok(())
 }
 
+/// Issue #631: a segment below `PQ_MIN_TRAIN_VECTORS` (256) normally
+/// degrades to Scalar8Bit (nothing to train k-means on) -- but when a
+/// shared codebook is configured there is nothing to train either way,
+/// so the degradation rationale no longer applies and the segment
+/// should stay Product Quantization, encoding directly against the
+/// shared codebook.
+#[test]
+fn shared_pq_codebook_keeps_small_segment_on_pq() -> Result<()> {
+    use crate::vector::core::quantization::QuantizationMethod;
+    use crate::vector::index::pq_codebook::train_and_write_pq_codebook;
+    use crate::vector::index::storage::VectorStorage;
+
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+
+    // Train the shared codebook on a representative sample well above the
+    // min-train threshold, entirely separate from the tiny corpus the
+    // segment itself will hold.
+    let mut state: u64 = 0xABCD_EF01_2345_6789;
+    let training_sample: Vec<Vector> = (0..300)
+        .map(|_| {
+            let data: Vec<f32> = (0..4)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+                })
+                .collect();
+            Vector::new(data)
+        })
+        .collect();
+    train_and_write_pq_codebook(
+        storage.as_ref(),
+        "shared.pqcb",
+        4,
+        2,
+        false,
+        &training_sample,
+    )?;
+
+    let mut config = HnswIndexConfig {
+        dimension: 4,
+        m: 8,
+        ef_construction: 50,
+        distance_metric: DistanceMetric::Euclidean,
+        quantization_method: QuantizationMethod::ProductQuantization { subvector_count: 2 },
+        pq_codebook_path: Some("shared.pqcb".to_string()),
+        ..Default::default()
+    };
+    config.resolve_pq_codebook(storage.as_ref())?;
+    assert!(
+        config.pq_codebook.is_some(),
+        "the shared codebook must resolve from the file just written"
+    );
+
+    let index = HnswIndex::create(storage.clone(), "small_segment", config)?;
+    let mut writer = index.writer()?;
+    // Only 10 vectors -- far below PQ_MIN_TRAIN_VECTORS (256).
+    let vectors: Vec<_> = (0..10u64)
+        .map(|i| {
+            (
+                i + 1,
+                "embedding".to_string(),
+                Vector::new(vec![i as f32, i as f32, i as f32 * 2.0, i as f32 * 2.0]),
+            )
+        })
+        .collect();
+    writer.build(vectors)?;
+    writer.finalize()?;
+    writer.commit()?;
+
+    let reader = index.reader()?;
+    let hnsw_reader = reader
+        .as_any()
+        .downcast_ref::<HnswIndexReader>()
+        .expect("HnswIndex::reader() always returns an HnswIndexReader");
+    assert!(
+        matches!(hnsw_reader.vectors(), VectorStorage::OwnedPq(_)),
+        "a 10-vector segment with a shared codebook configured must stay \
+         Product Quantization, not degrade to Scalar8Bit"
+    );
+    Ok(())
+}
+
+/// Issue #631: a `pq_codebook_path` naming a file that has not been
+/// trained yet must not block opening the index (the schema may be
+/// created before `laurus train pq-codebook` runs) -- but `write()`
+/// must fail loudly, with the exact command to fix it, rather than
+/// silently falling back to per-segment training (which would defeat
+/// the point of configuring a shared codebook at all).
+#[test]
+fn missing_shared_pq_codebook_is_lenient_at_open_but_errors_at_write() -> Result<()> {
+    use crate::vector::core::quantization::QuantizationMethod;
+
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let mut config = HnswIndexConfig {
+        dimension: 4,
+        m: 8,
+        ef_construction: 50,
+        distance_metric: DistanceMetric::Euclidean,
+        quantization_method: QuantizationMethod::ProductQuantization { subvector_count: 2 },
+        pq_codebook_path: Some("not-yet-trained.pqcb".to_string()),
+        ..Default::default()
+    };
+    // Lenient at open: no file exists yet, but resolution must not error.
+    config.resolve_pq_codebook(storage.as_ref())?;
+    assert!(config.pq_codebook.is_none());
+
+    let index = HnswIndex::create(storage.clone(), "no_codebook_yet", config)?;
+    let mut writer = index.writer()?;
+    let vectors: Vec<_> = (0..300u64)
+        .map(|i| {
+            (
+                i + 1,
+                "embedding".to_string(),
+                Vector::new(vec![i as f32, i as f32, i as f32 * 2.0, i as f32 * 2.0]),
+            )
+        })
+        .collect();
+    writer.build(vectors)?;
+    writer.finalize()?;
+
+    // A path is configured but never resolved to an actual codebook --
+    // `write()` must fail loudly (naming the configured path and the fix)
+    // rather than silently falling back to training a fresh codebook,
+    // which would defeat the point of configuring a shared codebook.
+    let err = writer.write().expect_err(
+        "write() must reject a configured-but-unresolved pq_codebook_path instead of \
+         silently training a fresh codebook",
+    );
+    let message = err.to_string();
+    assert!(
+        message.contains("not-yet-trained.pqcb"),
+        "error must name the configured path, got: {message}"
+    );
+    Ok(())
+}
+
 /// Regression / parity test for Issue #644: HNSW `ef_search` must honour
 /// the per-query override and the schema-level default, instead of being
 /// permanently capped at the historical `50` constant.
