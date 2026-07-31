@@ -599,7 +599,11 @@ impl HnswIndexWriter {
         // back to f32 for the writer's in-memory state — the on-disk
         // form is rebuilt from scratch in `write()` once add_vector /
         // delete_document calls have replayed.
-        let header = VectorSegmentHeader::read_from(&mut input)?;
+        // Issue #921: pass the bytes physically left in the file so the
+        // header's PQ codebook allocation is bounded before it reserves.
+        let header_available =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        let header = VectorSegmentHeader::read_from(&mut input, header_available)?;
 
         // Read quantized vectors and dequantize back to f32 for the
         // in-memory writer state. The dequantized values are a lossy

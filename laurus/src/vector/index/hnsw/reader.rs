@@ -545,7 +545,11 @@ impl HnswIndexReader {
         // handled here; Lazy mode silently degrades PQ to "not
         // supported" because the OnDemand path's offsets table only
         // carries Scalar8Bit params today.
-        let header = VectorSegmentHeader::read_from(&mut input)?;
+        // Issue #921: pass the bytes physically left in the file so the
+        // header's PQ codebook allocation is bounded before it reserves.
+        let header_available =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        let header = VectorSegmentHeader::read_from(&mut input, header_available)?;
 
         // Graph-block parser, version-dispatched (Issue #686). The graph
         // physically trails the records, so by the time each quant branch

@@ -250,7 +250,8 @@ async fn test_pq_quantizer_honored_through_engine_commit() {
     // 4. The header must report ProductQuantization (quant_kind = 2). The
     //    default Scalar8Bit would report quant_kind = 1 and fail here, so this
     //    catches a regression that drops `quantizer` from `from_hnsw_option`.
-    let header = VectorSegmentHeader::read_from(&mut input).unwrap();
+    let available = input.size().unwrap() - input.stream_position().unwrap();
+    let header = VectorSegmentHeader::read_from(&mut input, available).unwrap();
     match header.quant {
         QuantHeader::ProductQuantization { params, .. } => {
             assert_eq!(

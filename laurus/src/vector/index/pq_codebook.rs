@@ -37,9 +37,12 @@ const PQ_CODEBOOK_FOOTER_MAGIC: u32 = 0x5051_4342;
 /// Footer size in bytes: magic (`u32`) + CRC-32 (`u32`).
 const FOOTER_SIZE: usize = 8;
 
-/// Byte length of the fixed PQ header prefix this module reads before
-/// trusting any length it declares: the 16-byte [`VectorSegmentHeader`]
-/// fixed header plus the 8-byte `m`/`k`/`sub_dim`/padding block.
+/// Byte length of the fixed PQ header prefix (the 16-byte
+/// [`VectorSegmentHeader`] fixed header plus the 8-byte
+/// `m`/`k`/`sub_dim`/padding block). The truncation test uses it to cut
+/// a file mid-codebook; the allocation bound itself lives inside
+/// [`VectorSegmentHeader::read_from`] since Issue #921.
+#[cfg(test)]
 const PQ_HEADER_PREFIX_SIZE: usize = 24;
 
 /// A trained PQ codebook loaded from (or about to be persisted to) a
@@ -132,14 +135,14 @@ pub fn write_pq_codebook(
 ///
 /// # Allocation safety
 ///
-/// The full header parse (which allocates the `codebook: Vec<f32>`
-/// buffer internally) trusts its own `m`/`k`/`sub_dim` fields, which
-/// are not yet integrity-checked at that point — mirroring the
-/// `rerank_sidecar` module's Issue #791 guard, this function first
-/// reads only the small fixed prefix, computes the codebook's declared
-/// byte size from it, and rejects the file as corrupted *before*
-/// calling into the real parse if that declared size cannot fit in the
-/// file's actual on-disk length.
+/// The codebook allocation inside the header parse is bounded against
+/// `file_size` by [`VectorSegmentHeader::read_from`] itself (Issue
+/// #921) — a header whose `m`/`sub_dim` declare more codebook entries
+/// than the file can physically hold is rejected as corrupted before
+/// anything is reserved. (This function originally carried its own
+/// prefix-peek pre-check because `read_from` had no budget parameter;
+/// #921 moved the bound inside, protecting every `.hnsw` PQ segment
+/// too, so the bespoke guard is gone.)
 ///
 /// # Errors
 ///
@@ -149,40 +152,8 @@ pub fn write_pq_codebook(
 /// * Any I/O error from `storage`.
 pub fn read_pq_codebook(storage: &dyn Storage, name: &str) -> Result<SharedPqCodebook> {
     let file_size = storage.file_size(name)?;
-
-    let declared = {
-        let mut input = storage.open_input(name)?;
-        let mut prefix = [0u8; PQ_HEADER_PREFIX_SIZE];
-        input.read_exact(&mut prefix)?;
-        let m = u16::from_le_bytes([prefix[16], prefix[17]]);
-        let k = u16::from_le_bytes([prefix[18], prefix[19]]);
-        let sub_dim = u16::from_le_bytes([prefix[20], prefix[21]]);
-        PqParams::new(m, k, sub_dim).map_err(|e| {
-            LaurusError::index(format!(
-                "shared PQ codebook '{name}' has invalid params: {e}"
-            ))
-        })?
-    };
-    let min_total = (PQ_HEADER_PREFIX_SIZE as u64)
-        .checked_add(declared.codebook_byte_size() as u64)
-        .and_then(|n| n.checked_add(FOOTER_SIZE as u64))
-        .ok_or_else(|| {
-            LaurusError::index(format!(
-                "shared PQ codebook '{name}' declared size overflows u64: file is corrupted"
-            ))
-        })?;
-    if min_total > file_size {
-        return Err(LaurusError::index(format!(
-            "shared PQ codebook '{name}' declares a {}-byte codebook but the file is \
-             only {file_size} bytes: file is corrupted",
-            declared.codebook_byte_size()
-        )));
-    }
-
-    // Bounded: re-parse for real now that `file_size` has confirmed the
-    // declared codebook fits.
     let mut crc_reader = CrcReader::new(storage.open_input(name)?);
-    let header = VectorSegmentHeader::read_from(&mut crc_reader)
+    let header = VectorSegmentHeader::read_from(&mut crc_reader, file_size)
         .map_err(|e| LaurusError::index(format!("shared PQ codebook '{name}': {e}")))?;
     let (params, codebook) = match header.quant {
         QuantHeader::ProductQuantization { params, codebook } => (params, codebook),
