@@ -385,7 +385,7 @@ WASM バインディングは `Geo3dDistanceQuery` / `Geo3dBoundingBoxQuery` /
 
 バイナリデータフィールドを追加します。
 
-#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?)`
+#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?, pqCodebookPath?)`
 
 HNSW ベクトルインデックスフィールドを追加します。
 
@@ -395,6 +395,7 @@ HNSW ベクトルインデックスフィールドを追加します。
 - `quantizer`: `"scalar_8bit"`（デフォルト）または `"product_quantization"`（`subvectorCount` が必須）
 - `subvectorCount`: PQ サブベクトル数。`dimension` を割り切れる値を指定します
 - `rerankStorage`: 省略（デフォルト）するか、`"f32"` を指定して完全精度のリランクサイドカーを保存します
+- `pqCodebookPath`: 省略（デフォルト）するか、segment 間で再利用する共有 PQ codebook のストレージ相対ファイル名（Issue #631）を指定します（segment ごとの学習の代替）
 
 #### `addFlatField(name, dimension, distance?, embedder?)`
 
@@ -411,6 +412,7 @@ IVF ベクトルインデックスフィールドを追加します。
 
 - `quantizer` — `"scalar_8bit"`（デフォルト、4 倍圧縮）または高圧縮率の `"product_quantization"`。Product quantization では `subvectorCount`（`dimension` を割り切れる値）が必須です。
 - `rerankStorage` — `"f32"` を指定すると完全精度の `*.hnsw.f32` サイドカーを書き出し、厳密な Stage-2 リランクを有効化します。省略すると int8 のみのセグメントを維持します。
+- `pqCodebookPath` — 共有 PQ codebook のストレージ相対ファイル名（Issue #631）。`laurus train pq-codebook` CLI コマンドで一度だけ学習します。`quantizer: "product_quantization"` との組み合わせでのみ意味を持ち、以後の commit は segment ごとの k-means 再学習の代わりに学習済み codebook で encode します。省略すると segment ごとの学習を維持します。
 
 #### `addAnalyzer(name, analyzer)`
 

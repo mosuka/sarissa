@@ -288,6 +288,12 @@ impl WasmSchema {
     /// * `rerankStorage` - Stage-2 rerank sidecar — omitted (default) keeps
     ///   the int8-only segment, "f32" stores full-precision vectors in a
     ///   `*.hnsw.f32` sidecar for exact rerank distances.
+    /// * `pqCodebookPath` - Storage-relative file name of a shared PQ
+    ///   codebook (Issue #631), trained once via the
+    ///   `laurus train pq-codebook` CLI command. Only meaningful when
+    ///   `quantizer` is "product_quantization"; commits then encode against
+    ///   the pre-trained codebook instead of re-training k-means per
+    ///   segment. Omitted (default) keeps per-segment training.
     #[wasm_bindgen(js_name = "addHnswField")]
     #[allow(clippy::too_many_arguments)]
     pub fn add_hnsw_field(
@@ -302,6 +308,7 @@ impl WasmSchema {
         quantizer: Option<String>,
         subvector_count: Option<u32>,
         rerank_storage: Option<String>,
+        pq_codebook_path: Option<String>,
     ) -> Result<(), JsValue> {
         let opt = HnswOption {
             dimension: dimension as usize,
@@ -312,6 +319,7 @@ impl WasmSchema {
             quantizer: parse_quantizer(quantizer.as_deref(), subvector_count.map(|v| v as usize))?,
             rerank_storage: parse_rerank_storage(rerank_storage.as_deref())?,
             embedder,
+            pq_codebook_path,
             ..Default::default()
         };
         self.inner.fields.insert(name, FieldOption::Hnsw(opt));

@@ -384,7 +384,7 @@ above.
 
 Add a binary data field.
 
-#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?)`
+#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?, pqCodebookPath?)`
 
 Add an HNSW vector index field.
 
@@ -397,6 +397,9 @@ Add an HNSW vector index field.
 - `subvectorCount`: number of PQ sub-vectors; must divide `dimension`
 - `rerankStorage`: omit (default) or `"f32"` to store a full-precision
   rerank sidecar
+- `pqCodebookPath`: omit (default) or the storage-relative file name of
+  a shared PQ codebook (Issue #631) to reuse across segments instead of
+  per-segment training
 
 #### `addFlatField(name, dimension, distance?, embedder?)`
 
@@ -413,6 +416,7 @@ Add an IVF vector index field.
 
 - `quantizer` — `"scalar_8bit"` (default, 4× compression) or `"product_quantization"` for higher compression. Product quantization requires `subvectorCount` (must divide `dimension`).
 - `rerankStorage` — set to `"f32"` to write a full-precision `*.hnsw.f32` sidecar enabling exact Stage-2 rerank; omit to keep the int8-only segment.
+- `pqCodebookPath` — storage-relative file name of a shared PQ codebook (Issue #631), trained once via the `laurus train pq-codebook` CLI command. Only meaningful with `quantizer: "product_quantization"`; commits then encode against the pre-trained codebook instead of re-training k-means per segment. Omit to keep per-segment training.
 
 #### `addAnalyzer(name, analyzer)`
 

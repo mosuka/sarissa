@@ -373,6 +373,12 @@ impl RbSchema {
     ///   - `rerank_storage:` (String, optional): Stage-2 rerank sidecar —
     ///     omitted (default) keeps the int8-only segment, "f32" stores
     ///     full-precision vectors in a `*.hnsw.f32` sidecar for exact rerank.
+    ///   - `pq_codebook_path:` (String, optional): Storage-relative file
+    ///     name of a shared PQ codebook (Issue #631), trained once via the
+    ///     `laurus train pq-codebook` CLI command. Only meaningful with
+    ///     `quantizer:` "product_quantization"; commits then encode against
+    ///     the pre-trained codebook instead of re-training k-means per
+    ///     segment. Omitted (default) keeps per-segment training.
     fn add_hnsw_field(&self, args: &[Value]) -> Result<(), Error> {
         let args = scan_args::<(String, usize), (), (), (), RHash, ()>(args)?;
         let (name, dimension) = args.required;
@@ -388,6 +394,7 @@ impl RbSchema {
                 Option<String>,
                 Option<usize>,
                 Option<String>,
+                Option<String>,
             ),
             (),
         >(
@@ -402,6 +409,7 @@ impl RbSchema {
                 "quantizer",
                 "subvector_count",
                 "rerank_storage",
+                "pq_codebook_path",
             ],
         )?;
         let (
@@ -413,6 +421,7 @@ impl RbSchema {
             quantizer,
             subvector_count,
             rerank_storage,
+            pq_codebook_path,
         ) = kwargs.optional;
         let distance_str = distance.as_deref().unwrap_or("cosine");
         let opt = HnswOption {
@@ -424,6 +433,7 @@ impl RbSchema {
             quantizer: parse_quantizer(quantizer.as_deref(), subvector_count)?,
             rerank_storage: parse_rerank_storage(rerank_storage.as_deref())?,
             embedder: embedder.flatten(),
+            pq_codebook_path,
             ..Default::default()
         };
         self.inner

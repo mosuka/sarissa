@@ -159,7 +159,7 @@ Laurus::Schema.new
 | `add_geo_field(name, stored: true, indexed: true)` | Geographic coordinate field (lat/lon). |
 | `add_geo3d_field(name, stored: true, indexed: true)` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
 | `add_datetime_field(name, stored: true, indexed: true)` | UTC datetime field. |
-| `add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, quantizer: nil, subvector_count: nil, rerank_storage: nil, embedder: nil)` | HNSW approximate nearest-neighbor vector field. |
+| `add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, quantizer: nil, subvector_count: nil, rerank_storage: nil, embedder: nil, pq_codebook_path: nil)` | HNSW approximate nearest-neighbor vector field. |
 | `add_flat_field(name, dimension, distance: "cosine", embedder: nil)` | Flat (brute-force) vector field. |
 | `add_ivf_field(name, dimension, distance: "cosine", n_clusters: 100, n_probe: 1, embedder: nil)` | IVF approximate nearest-neighbor vector field. |
 
@@ -167,6 +167,7 @@ Laurus::Schema.new
 
 - `quantizer` — `"scalar_8bit"` (default, 4× compression) or `"product_quantization"` for higher compression. Product quantization requires `subvector_count` (must divide `dimension`).
 - `rerank_storage` — set to `"f32"` to write a full-precision `*.hnsw.f32` sidecar enabling exact Stage-2 rerank; omit to keep the int8-only segment.
+- `pq_codebook_path` — storage-relative file name of a shared PQ codebook (Issue #631), trained once via the `laurus train pq-codebook` CLI command. Only meaningful with `quantizer: "product_quantization"`; commits then encode against the pre-trained codebook instead of re-training k-means per segment. Omit to keep per-segment training.
 
 ### Other methods
 
