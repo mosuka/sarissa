@@ -149,7 +149,11 @@ impl IvfIndexReader {
         // rejected with IncompatibleFormat.
         // Matched by reference so `header` (version + field dictionary,
         // Issue #633) stays alive for the record parse below.
-        let header = VectorSegmentHeader::read_from(&mut input)?;
+        // Issue #921: pass the bytes physically left in the file so the
+        // header's PQ codebook allocation is bounded before it reserves.
+        let header_available =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        let header = VectorSegmentHeader::read_from(&mut input, header_available)?;
         let params = match &header.quant {
             QuantHeader::Scalar8Bit(p) => *p,
             QuantHeader::ProductQuantization { .. } => {

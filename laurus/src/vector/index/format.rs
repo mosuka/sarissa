@@ -75,6 +75,13 @@ use crate::vector::core::quantization::{PqParams, ScalarQuantParams};
 /// 4-byte ASCII magic at offset 0 of every quantized vector segment.
 pub const VECTOR_SEGMENT_MAGIC: [u8; 4] = *b"LVS1";
 
+/// Bytes [`VectorSegmentHeader::read_from`] has consumed by the time a PQ
+/// branch sizes its codebook: the 16-byte fixed header (magic + version +
+/// quant_kind + reserved) plus the 8-byte `m`/`k`/`sub_dim`/padding block.
+/// Subtracted from the caller-supplied `available` budget so the codebook
+/// allocation bound (Issue #921) compares against the bytes truly left.
+const PQ_PREFIX_SIZE: u64 = 24;
+
 /// Lowest header format version this build can read (and the version
 /// legacy Flat/IVF segments were written with).
 ///
@@ -123,7 +130,8 @@ pub mod quant_kind {
     pub const NONE: u16 = 0;
     /// Per-segment global affine 8-bit scalar quantization. Stage 1.
     pub const SCALAR_8BIT: u16 = 1;
-    /// Product quantization. Stage 3 — reader returns NotImplemented.
+    /// Product quantization (Issue #481 Stage 3). The metadata block
+    /// carries `m`/`k`/`sub_dim` plus the inline codebook.
     pub const PRODUCT_QUANTIZATION: u16 = 2;
     /// FastScan Product Quantization (K=16 4-bit codes + SIMD LUT
     /// distance). Issue [#695](https://github.com/mosuka/laurus/issues/695)
@@ -419,6 +427,17 @@ impl VectorSegmentHeader {
 
     /// Read and validate the header (fixed portion + quant metadata).
     ///
+    /// # Arguments
+    ///
+    /// * `reader` - Stream positioned at the start of the `LVS1` header.
+    /// * `available` - Bytes the file can still supply from the current
+    ///   position (typically `file_size - stream_position`), used to
+    ///   bound the PQ codebook allocation against ground truth before
+    ///   `Vec::with_capacity` (Issue #921, generalizing #806): the
+    ///   header's `m`/`sub_dim` are unverified `u16`s, and a flipped
+    ///   byte could otherwise request a ~4 TB allocation that aborts
+    ///   the process via `handle_alloc_error`.
+    ///
     /// # Errors
     ///
     /// * [`LaurusError::IncompatibleFormat`] if the magic does not
@@ -428,10 +447,11 @@ impl VectorSegmentHeader {
     /// * [`LaurusError::IncompatibleFormat`] if the version is outside
     ///   the supported `CURRENT_VERSION..=MAX_SUPPORTED_VERSION` range
     ///   or if `quant_kind` is the reserved value 0.
-    /// * [`LaurusError::NotImplemented`] if `quant_kind` is the
-    ///   Product-Quantization value (2) — reserved for Stage 3.
+    /// * [`LaurusError::Index`] if a PQ / PQ FastScan codebook declares
+    ///   more entries than `available` bytes can physically hold — the
+    ///   segment is corrupted (Issue #921).
     /// * [`LaurusError::Io`] for any underlying read failure.
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
+    pub fn read_from<R: Read>(reader: &mut R, available: u64) -> Result<Self> {
         let mut magic = [0u8; 4];
         reader.read_exact(&mut magic)?;
         if magic != VECTOR_SEGMENT_MAGIC {
@@ -485,6 +505,17 @@ impl VectorSegmentHeader {
                     LaurusError::IncompatibleFormat(format!("invalid PQ params: {e}"))
                 })?;
                 let codebook_len = params.codebook_len();
+                // Issue #921: `m`/`sub_dim` are unverified u16s straight
+                // off disk; bound the codebook allocation against the
+                // bytes the file actually has left (the fixed prefix +
+                // PQ params block consumed so far is PQ_PREFIX_SIZE)
+                // before reserving anything.
+                crate::vector::index::alloc_bounds::checked_capacity(
+                    codebook_len,
+                    4,
+                    available.saturating_sub(PQ_PREFIX_SIZE),
+                    "vector segment PQ codebook length",
+                )?;
                 let mut codebook = Vec::with_capacity(codebook_len);
                 let mut fbuf = [0u8; 4];
                 for _ in 0..codebook_len {
@@ -513,6 +544,13 @@ impl VectorSegmentHeader {
                     )));
                 }
                 let codebook_len = params.codebook_len();
+                // Issue #921: same allocation bound as the PQ branch above.
+                crate::vector::index::alloc_bounds::checked_capacity(
+                    codebook_len,
+                    4,
+                    available.saturating_sub(PQ_PREFIX_SIZE),
+                    "vector segment PQ FastScan codebook length",
+                )?;
                 let mut codebook = Vec::with_capacity(codebook_len);
                 let mut fbuf = [0u8; 4];
                 for _ in 0..codebook_len {
@@ -834,7 +872,7 @@ mod tests {
         assert_eq!(buf.len(), FIXED_HEADER_SIZE + SCALAR_8BIT_METADATA_SIZE);
 
         let mut cursor = Cursor::new(&buf);
-        let parsed = VectorSegmentHeader::read_from(&mut cursor).unwrap();
+        let parsed = VectorSegmentHeader::read_from(&mut cursor, buf.len() as u64).unwrap();
         assert_eq!(parsed, header);
     }
 
@@ -851,7 +889,7 @@ mod tests {
         );
 
         let mut cursor = Cursor::new(&buf);
-        let parsed = VectorSegmentHeader::read_from(&mut cursor).unwrap();
+        let parsed = VectorSegmentHeader::read_from(&mut cursor, buf.len() as u64).unwrap();
         assert_eq!(parsed.version, VERSION_ORDINAL_GRAPH);
         assert_eq!(parsed, header);
     }
@@ -864,7 +902,7 @@ mod tests {
         header.write_to(&mut buf).unwrap();
 
         let mut cursor = Cursor::new(&buf);
-        let err = VectorSegmentHeader::read_from(&mut cursor).unwrap_err();
+        let err = VectorSegmentHeader::read_from(&mut cursor, buf.len() as u64).unwrap_err();
         assert!(
             err.to_string().contains("unsupported vector segment"),
             "unexpected error: {err}"
@@ -894,7 +932,7 @@ mod tests {
             );
 
             let mut cursor = Cursor::new(&buf);
-            let parsed = VectorSegmentHeader::read_from(&mut cursor).unwrap();
+            let parsed = VectorSegmentHeader::read_from(&mut cursor, buf.len() as u64).unwrap();
             assert_eq!(parsed.field_dict, dict);
             assert_eq!(parsed, header);
         }
@@ -907,7 +945,8 @@ mod tests {
         header.write_to(&mut buf).unwrap();
         assert_eq!(buf.len(), 24, "v1 SQ header must stay 24 bytes");
         assert_eq!(header.serialized_size(), 24);
-        let parsed = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap();
+        let parsed =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap();
         assert!(parsed.field_dict.is_empty());
     }
 
@@ -920,7 +959,8 @@ mod tests {
         header.write_to(&mut buf).unwrap();
         buf.truncate(buf.len() - 3); // cut into the dict entry
 
-        let err = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap_err();
+        let err =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         assert!(matches!(err, LaurusError::Io(_)), "got: {err:?}");
     }
 
@@ -1060,7 +1100,7 @@ mod tests {
             0x00, 0x00, 0x40, 0x40, // 3.0
         ];
         let mut cursor = Cursor::new(&f32_bytes[..]);
-        let err = VectorSegmentHeader::read_from(&mut cursor).unwrap_err();
+        let err = VectorSegmentHeader::read_from(&mut cursor, f32_bytes.len() as u64).unwrap_err();
         match err {
             LaurusError::IncompatibleFormat(msg) => {
                 assert!(msg.contains("LVS1"), "message should mention LVS1");
@@ -1084,7 +1124,8 @@ mod tests {
         buf.extend_from_slice(&0.0_f32.to_le_bytes());
         buf.extend_from_slice(&1.0_f32.to_le_bytes());
 
-        let err = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap_err();
+        let err =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         match err {
             LaurusError::IncompatibleFormat(msg) => {
                 assert!(msg.contains("99"), "message should mention the version");
@@ -1101,8 +1142,65 @@ mod tests {
         buf.extend_from_slice(&quant_kind::NONE.to_le_bytes());
         buf.extend_from_slice(&[0u8; 8]);
 
-        let err = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap_err();
+        let err =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         assert!(matches!(err, LaurusError::IncompatibleFormat(_)));
+    }
+
+    /// Issue #921: a corrupted PQ header whose `m`/`sub_dim` declare a
+    /// codebook far larger than the file must be rejected as corruption
+    /// *before* the codebook `Vec` is reserved — previously this
+    /// requested a ~4 TB allocation and aborted the process via
+    /// `handle_alloc_error` instead of returning a clean error.
+    #[test]
+    fn oversized_pq_codebook_declaration_is_rejected_cleanly() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"LVS1");
+        buf.extend_from_slice(&CURRENT_VERSION.to_le_bytes());
+        buf.extend_from_slice(&quant_kind::PRODUCT_QUANTIZATION.to_le_bytes());
+        buf.extend_from_slice(&[0u8; 8]);
+        // m = 65535, k = 256, sub_dim = 65535 → ~1.1e12 codebook f32s
+        // (~4 TB) declared by a 24-byte file.
+        buf.extend_from_slice(&u16::MAX.to_le_bytes());
+        buf.extend_from_slice(&256u16.to_le_bytes());
+        buf.extend_from_slice(&u16::MAX.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+
+        let err =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
+        match err {
+            LaurusError::Index(msg) => {
+                assert!(msg.contains("corrupted"), "corruption must be named: {msg}");
+            }
+            other => panic!("expected LaurusError::Index, got {other:?}"),
+        }
+    }
+
+    /// Issue #921: the FastScan PQ branch shares the same codebook
+    /// allocation bound as the 8-bit PQ branch above.
+    #[cfg(feature = "pq-fastscan")]
+    #[test]
+    fn oversized_pq_fastscan_codebook_declaration_is_rejected_cleanly() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"LVS1");
+        buf.extend_from_slice(&CURRENT_VERSION.to_le_bytes());
+        buf.extend_from_slice(&quant_kind::PRODUCT_QUANTIZATION_FASTSCAN.to_le_bytes());
+        buf.extend_from_slice(&[0u8; 8]);
+        // k must be 16 for FastScan; m/sub_dim maxed out still declare
+        // a ~256 GB codebook this 24-byte file cannot hold.
+        buf.extend_from_slice(&u16::MAX.to_le_bytes());
+        buf.extend_from_slice(&16u16.to_le_bytes());
+        buf.extend_from_slice(&u16::MAX.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+
+        let err =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
+        match err {
+            LaurusError::Index(msg) => {
+                assert!(msg.contains("corrupted"), "corruption must be named: {msg}");
+            }
+            other => panic!("expected LaurusError::Index, got {other:?}"),
+        }
     }
 
     fn sample_pq_params() -> PqParams {
@@ -1141,7 +1239,8 @@ mod tests {
             FIXED_HEADER_SIZE + PQ_FIXED_METADATA_SIZE + 4 * 256 * 2 * 4
         );
 
-        let parsed = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap();
+        let parsed =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap();
         assert_eq!(parsed, header);
     }
 
@@ -1191,7 +1290,8 @@ mod tests {
         buf.extend_from_slice(&256u16.to_le_bytes());
         buf.extend_from_slice(&2u16.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
-        let err = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap_err();
+        let err =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         assert!(matches!(err, LaurusError::IncompatibleFormat(_)));
     }
 
@@ -1203,7 +1303,8 @@ mod tests {
         buf.extend_from_slice(&999u16.to_le_bytes()); // unknown
         buf.extend_from_slice(&[0u8; 8]);
 
-        let err = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap_err();
+        let err =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         match err {
             LaurusError::IncompatibleFormat(msg) => {
                 assert!(msg.contains("999"));
@@ -1216,7 +1317,8 @@ mod tests {
     fn truncated_header_returns_io_error() {
         // Magic only, no version → reader hits EOF on the version read.
         let buf = b"LVS1".to_vec();
-        let err = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap_err();
+        let err =
+            VectorSegmentHeader::read_from(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         assert!(matches!(err, LaurusError::Io(_)));
     }
 

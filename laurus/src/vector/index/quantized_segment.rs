@@ -151,14 +151,24 @@ impl QuantizedSegmentVectors {
     /// Read a segment from `reader`. Self-describing: `dim` and
     /// `vector_count` are recovered from the on-disk prefix.
     ///
+    /// # Arguments
+    ///
+    /// * `reader` - Stream positioned at the start of the segment.
+    /// * `available` - Bytes the source can still supply (the file or
+    ///   buffer length), bounding the header's PQ codebook allocation
+    ///   and this segment's record-data allocation against ground truth
+    ///   (Issue #921 / #806).
+    ///
     /// # Errors
     ///
     /// * Forwards any error from [`VectorSegmentHeader::read_from`]
-    ///   (incompatible magic / version / quant_kind).
+    ///   (incompatible magic / version / quant_kind, oversized codebook).
+    /// * [`crate::error::LaurusError::Index`] if the declared record
+    ///   data cannot fit in `available` bytes (corruption).
     /// * Returns [`crate::error::LaurusError::Io`] for any underlying
     ///   read failure (EOF, etc.).
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
-        let header = VectorSegmentHeader::read_from(reader)?;
+    pub fn read_from<R: Read>(reader: &mut R, available: u64) -> Result<Self> {
+        let header = VectorSegmentHeader::read_from(reader, available)?;
         // Stage 3 (PQ) segments are handled by a separate code path
         // (see `crate::vector::index::pq_segment`); this Stage 1
         // helper only reads Scalar8Bit segments.
@@ -188,7 +198,16 @@ impl QuantizedSegmentVectors {
         let dim = u32::from_le_bytes(dim_bytes) as usize;
         let vector_count = u32::from_le_bytes(count_bytes) as usize;
 
+        // Issue #921: `dim`/`vector_count` are unverified u32s; bound the
+        // data buffer against the source's real length before allocating
+        // (the header + prefix already consumed can only make the true
+        // remainder smaller, so `available` is a safe upper bound).
         let total = vector_count.saturating_mul(Self::record_size(dim));
+        crate::vector::index::alloc_bounds::checked_len(
+            total,
+            available,
+            "quantized segment data size",
+        )?;
         let mut data = vec![0u8; total];
         reader.read_exact(&mut data)?;
 
@@ -273,7 +292,7 @@ mod tests {
         assert_eq!(buf.len(), original.serialized_size());
 
         let mut cursor = Cursor::new(&buf);
-        let recovered = QuantizedSegmentVectors::read_from(&mut cursor).unwrap();
+        let recovered = QuantizedSegmentVectors::read_from(&mut cursor, buf.len() as u64).unwrap();
         assert_eq!(recovered.dim, original.dim);
         assert_eq!(recovered.vector_count, original.vector_count);
         assert_eq!(recovered.params, original.params);
@@ -285,7 +304,7 @@ mod tests {
         // Build a buffer that LOOKS like raw f32 vectors (no LVS1 header).
         let raw: Vec<u8> = (0..16).flat_map(|i: u8| [i, 0, 0, 0]).collect();
         let mut cursor = Cursor::new(&raw);
-        let err = QuantizedSegmentVectors::read_from(&mut cursor).unwrap_err();
+        let err = QuantizedSegmentVectors::read_from(&mut cursor, raw.len() as u64).unwrap_err();
         match err {
             crate::error::LaurusError::IncompatibleFormat(msg) => {
                 assert!(msg.contains("LVS1"), "msg: {msg}");
@@ -305,7 +324,8 @@ mod tests {
         // Truncate the last vector record.
         let truncated_len = buf.len() - QuantizedSegmentVectors::record_size(dim) / 2;
         buf.truncate(truncated_len);
-        let err = QuantizedSegmentVectors::read_from(&mut Cursor::new(&buf)).unwrap_err();
+        let err = QuantizedSegmentVectors::read_from(&mut Cursor::new(&buf), buf.len() as u64)
+            .unwrap_err();
         assert!(matches!(err, crate::error::LaurusError::Io(_)));
     }
 
@@ -334,7 +354,7 @@ mod tests {
         assert_eq!(buf.len(), 32);
 
         let mut cursor = Cursor::new(&buf);
-        let recovered = QuantizedSegmentVectors::read_from(&mut cursor).unwrap();
+        let recovered = QuantizedSegmentVectors::read_from(&mut cursor, buf.len() as u64).unwrap();
         assert_eq!(recovered.vector_count, 0);
         assert_eq!(recovered.dim, dim);
         assert_eq!(recovered.data, Vec::<u8>::new());
@@ -352,7 +372,7 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         seg.write_to(&mut buf).unwrap();
         let mut cursor = Cursor::new(&buf);
-        let recovered = QuantizedSegmentVectors::read_from(&mut cursor).unwrap();
+        let recovered = QuantizedSegmentVectors::read_from(&mut cursor, buf.len() as u64).unwrap();
 
         // Pick query = vectors[0] (so cosine distance to vectors[0]
         // should be ~ 0, modulo quantization noise).
