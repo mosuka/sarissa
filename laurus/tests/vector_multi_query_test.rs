@@ -67,6 +67,7 @@ async fn setup_store(dimension: usize) -> laurus::vector::VectorStore {
                 quantizer: Default::default(),
                 rerank_storage: None,
                 embedder: None,
+                pq_codebook_path: None,
             })),
             lexical: None,
         },

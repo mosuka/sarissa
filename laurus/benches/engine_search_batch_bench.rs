@@ -119,6 +119,7 @@ fn build_vector_engine_with_corpus(rt: &Runtime) -> (Arc<Engine>, TempDir) {
         quantizer: Default::default(),
         rerank_storage: None,
         embedder: None,
+        pq_codebook_path: None,
     };
     let config = Schema::builder()
         .add_field("vec", FieldOption::Hnsw(hnsw))

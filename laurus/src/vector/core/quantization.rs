@@ -49,13 +49,15 @@ pub enum QuantizationMethod {
     /// f32; ≈ 2× search latency improvement at recall ≥ 0.95.
     #[default]
     Scalar8Bit,
-    /// Product quantization. **Stage 3 of Issue #481 — currently
-    /// returns [`LaurusError::NotImplemented`].** The variant is kept
-    /// in the enum so callers (CLI / proto / bindings) can pre-select
-    /// it and surface a clear error until the implementation lands.
+    /// Product quantization (Stage 3 of Issue #481). Supported by the
+    /// HNSW index; Flat / IVF return [`LaurusError::NotImplemented`]
+    /// at write time. The codebook (`subvector_count × 256` centroids)
+    /// is trained per segment by default, or trained once and shared
+    /// across segments via `HnswOption::pq_codebook_path` /
+    /// `Engine::train_pq_codebook` (Issue #631).
     ProductQuantization {
-        /// Number of sub-vectors. Stage-3 implementation will use this
-        /// to derive the codebook layout.
+        /// Number of sub-vectors; must evenly divide the vector
+        /// dimension. Derives the codebook layout.
         subvector_count: usize,
     },
     /// FastScan product quantization (K=16 4-bit codes + SIMD LUT

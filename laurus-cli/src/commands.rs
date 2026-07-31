@@ -12,6 +12,7 @@
 //! - [`repl`] - Interactive Read-Eval-Print Loop session.
 //! - [`search`] - One-shot search query execution.
 //! - [`serve`] - gRPC (and optional HTTP gateway) server.
+//! - [`train`] - Train auxiliary index structures (shared PQ codebook).
 
 pub mod add;
 pub mod bulk;
@@ -24,3 +25,4 @@ pub mod put;
 pub mod repl;
 pub mod search;
 pub mod serve;
+pub mod train;

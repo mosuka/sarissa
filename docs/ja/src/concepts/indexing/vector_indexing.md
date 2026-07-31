@@ -209,7 +209,7 @@ ground truth に対して Recall@10 ≥ 0.95 — recall テスト
 | 方式 | Enum バリアント | 説明 | メモリ削減率 |
 | :--- | :--- | :--- | :--- |
 | **スカラー 8 ビット** *(デフォルト)* | `Scalar8Bit` | per-segment global affine による `u8` 量子化 | 約 4 倍 |
-| **プロダクト量子化** *(予約)* | `ProductQuantization { subvector_count }` | Issue #481 Stage 3 — 現状 `NotImplemented` | 約 16-64 倍 |
+| **プロダクト量子化** | `ProductQuantization { subvector_count }` | Issue #481 Stage 3 — `M × 256` centroid の codebook（segment ごとに学習、または `pq_codebook_path` で[一度だけ学習して共有](#共有-pq-codebookissue-631)）、各ベクトルを `M` バイトで保存 | 約 16-64 倍（HNSW のみ） |
 
 ```rust
 use laurus::vector::HnswOption;
@@ -447,13 +447,69 @@ codebook を学習できません。そのようなセグメントは **Scalar8B
 種別で透過的にディスパッチします）。セグメントが成長するか、より大きな
 セグメントへマージされれば、次の書き込みで設定どおり PQ が学習されます。
 `subvector_count` が `dimension` を割り切る検証はセグメントサイズに
-かかわらず常に適用されます。
+かかわらず常に適用されます。なお、
+[共有 codebook](#共有-pq-codebookissue-631) を設定した場合はこの
+フォールバックも最小サイズも適用されません — セグメントごとの学習が
+発生しないため、小さな per-commit セグメントもそのまま PQ を維持します。
 
 `subvector_count` は `dimension` を割り切る値を選択。 `dim = 128`
 での候補: `M ∈ {8, 16, 32}`（sub_dim 16 / 8 / 4）。 `M` を大きく
 すると compression は下がるが recall は上がります。 Issue #481
 Stage 3 は 8 bit（K = 256）のみを ship、 on-disk format は
 将来の 4 bit（K = 16）variant 用に枠を予約しています。
+
+#### 共有 PQ codebook（Issue #631）
+
+デフォルトでは segment の書き込みごとに codebook をゼロから学習
+します — segment-per-commit レイアウト（#634/#889）では、この数秒
+オーダーの k-means コストが **commit と merge のたびに**繰り返され
+ます。 FAISS / Lucene99 の前例に倣い、 codebook を代表サンプルで
+**一度だけ**学習して以後のすべての segment 書き込みで再利用でき、
+encode はテーブル参照だけになります（2,048〜8,192 ベクトルで
+インライン学習比 約 91-92% 高速の実測値）。
+
+有効化はフィールドに codebook ファイル名を設定して学習するだけです:
+
+```toml
+[fields.embedding.Hnsw]
+dimension = 128
+pq_codebook_path = "embedding.pqcb"
+
+[fields.embedding.Hnsw.quantizer.ProductQuantization]
+subvector_count = 32
+```
+
+```shell
+laurus train pq-codebook --field embedding --input vectors.jsonl --update-schema
+```
+
+またはプログラムから
+[`Engine::train_pq_codebook`](https://docs.rs/laurus/latest/laurus/struct.Engine.html)
+（`engine.train_pq_codebook("embedding", &vectors, None)`）を使い
+ます。学習は同期・CPU-bound で、代表的なベクトル数千件で十分です
+（全コーパスは不要）。
+
+セマンティクス:
+
+- **segment format は不変。** 共有 codebook も従来どおり各 segment
+  header にインライン埋め込みされるため、共有 codebook の segment と
+  インライン学習の segment はマイグレーション無しで共存でき、生成
+  される code は同一サンプルでインライン学習した場合と
+  **byte-identical** です。
+- codebook ファイルは **index open 時に一度だけ**解決されます。
+  エンジンを開いたまま再学習しても mid-session で hot-swap されません
+  （意図的な仕様 — 1 セッションの commit 間で codebook が変わっては
+  ならないため）。新しいファイルは再オープンで反映されます。
+- **失敗ポリシー — 無言のフォールバック無し。** `pq_codebook_path` が
+  設定済みで未学習の場合、 open は lenient（学習前にスキーマを作成
+  できる）ですが、 encode が必要な commit は実行すべき学習コマンドを
+  示すエラーで失敗します。ファイルは存在するが破損・ジオメトリ不一致の
+  場合は open 時にエラーです。 laurus が per-segment 学習へ無言で
+  フォールバックすることはありません — 数秒オーダーの学習コストへの
+  見えない回帰は本機能の意義を損なうためです。
+- Cosine メトリックのフィールドでは、 writer がインデックス時に行う
+  L2 正規化と同じ正規化を学習サンプルにも適用し、 codebook の基底を
+  常に一致させます（#794 の罠への対処）。
 
 #### on-disk format
 

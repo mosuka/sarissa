@@ -148,6 +148,7 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             embedder: o.embedder.clone().unwrap_or_default(),
             default_ef_search: o.default_ef_search.map(|v| v as u32),
             rerank_storage: o.rerank_storage.map(|k| rerank_storage_to_proto(k) as i32),
+            pq_codebook_path: o.pq_codebook_path.clone(),
         })),
         FieldOption::Flat(o) => Some(Opt::Flat(v1::FlatOption {
             dimension: o.dimension as u32,
@@ -232,6 +233,10 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
             } else {
                 Some(o.embedder.clone())
             },
+            // An explicitly empty path would configure a codebook that can
+            // never exist; normalize to "unset" (same defensive convention
+            // as `embedder` above).
+            pq_codebook_path: o.pq_codebook_path.clone().filter(|p| !p.is_empty()),
         })),
         Some(Opt::Flat(o)) => Some(FieldOption::Flat(FlatOption {
             dimension: o.dimension as usize,
@@ -894,6 +899,81 @@ mod tests {
                     h.quantizer,
                     QuantizationMethod::ProductQuantization { subvector_count: 4 }
                 );
+            }
+            other => panic!("expected FieldOption::Hnsw, got {other:?}"),
+        }
+    }
+
+    /// Issue #631: an HNSW field's `pq_codebook_path` survives a proto
+    /// round-trip (so a shared PQ codebook can be configured over gRPC),
+    /// and an unset value stays `None`.
+    #[test]
+    fn hnsw_pq_codebook_path_round_trips_through_proto() {
+        let schema = Schema::builder()
+            .add_field(
+                "embedding",
+                FieldOption::Hnsw(HnswOption {
+                    dimension: 8,
+                    quantizer: QuantizationMethod::ProductQuantization { subvector_count: 4 },
+                    pq_codebook_path: Some("embedding.pqcb".to_string()),
+                    ..Default::default()
+                }),
+            )
+            .add_field(
+                "plain",
+                FieldOption::Hnsw(HnswOption {
+                    dimension: 8,
+                    ..Default::default()
+                }),
+            )
+            .build();
+
+        let proto = to_proto(&schema);
+        match proto
+            .fields
+            .get("embedding")
+            .and_then(|f| f.option.as_ref())
+        {
+            Some(v1::field_option::Option::Hnsw(h)) => {
+                assert_eq!(
+                    h.pq_codebook_path.as_deref(),
+                    Some("embedding.pqcb"),
+                    "to_proto must serialize pq_codebook_path"
+                );
+            }
+            other => panic!("expected proto Hnsw option, got {other:?}"),
+        }
+
+        let back = from_proto(&proto).expect("from_proto must succeed");
+        match back.fields.get("embedding") {
+            Some(FieldOption::Hnsw(h)) => {
+                assert_eq!(h.pq_codebook_path.as_deref(), Some("embedding.pqcb"));
+            }
+            other => panic!("expected FieldOption::Hnsw, got {other:?}"),
+        }
+        match back.fields.get("plain") {
+            Some(FieldOption::Hnsw(h)) => {
+                assert_eq!(h.pq_codebook_path, None, "unset must stay None");
+            }
+            other => panic!("expected FieldOption::Hnsw, got {other:?}"),
+        }
+
+        // An explicitly empty proto string names a codebook that can never
+        // exist — from_proto must normalize it to "unset".
+        let mut degenerate = proto.clone();
+        if let Some(v1::field_option::Option::Hnsw(h)) = degenerate
+            .fields
+            .get_mut("embedding")
+            .and_then(|f| f.option.as_mut())
+        {
+            h.pq_codebook_path = Some(String::new());
+        } else {
+            panic!("embedding must be an Hnsw proto option");
+        }
+        let back = from_proto(&degenerate).expect("from_proto must succeed");
+        match back.fields.get("embedding") {
+            Some(FieldOption::Hnsw(h)) => {
+                assert_eq!(h.pq_codebook_path, None, "empty must normalize to None");
             }
             other => panic!("expected FieldOption::Hnsw, got {other:?}"),
         }

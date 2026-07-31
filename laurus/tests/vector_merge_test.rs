@@ -44,6 +44,7 @@ async fn test_segmented_field_manual_merge() -> Result<(), Box<dyn std::error::E
             quantizer: Default::default(),
             rerank_storage: None,
             embedder: None,
+            pq_codebook_path: None,
         })),
         lexical: None,
     };
@@ -135,6 +136,7 @@ async fn segmented_field_reader_cache_reuses_and_invalidates()
             quantizer: Default::default(),
             rerank_storage: None,
             embedder: None,
+            pq_codebook_path: None,
         })),
         lexical: None,
     };
@@ -619,6 +621,7 @@ fn cosine_field(
             quantizer: Default::default(),
             rerank_storage: None,
             embedder: None,
+            pq_codebook_path: None,
         })),
         lexical: None,
     };

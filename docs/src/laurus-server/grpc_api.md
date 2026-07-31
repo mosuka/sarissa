@@ -100,7 +100,7 @@ Each `FieldOption` is a `oneof` with one of the following field types:
 
 | Lexical Fields | Vector Fields |
 | :--- | :--- |
-| `TextOption` (`indexed`, `stored`, `term_vectors`, `analyzer`) | `HnswOption` (`dimension`, `distance`, `m`, `ef_construction`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`) |
+| `TextOption` (`indexed`, `stored`, `term_vectors`, `analyzer`) | `HnswOption` (`dimension`, `distance`, `m`, `ef_construction`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`, `pq_codebook_path`) |
 | `IntegerOption` (`indexed`, `stored`, `multi_valued`) | `FlatOption` (`dimension`, `distance`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`) |
 | `FloatOption` (`indexed`, `stored`, `multi_valued`) | `IvfOption` (`dimension`, `distance`, `n_clusters`, `n_probe`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`) |
 | `BooleanOption` (`indexed`, `stored`) | |
@@ -113,11 +113,13 @@ The `embedder` field in vector options specifies the name of an embedder defined
 
 **Distance metrics:** `COSINE`, `EUCLIDEAN`, `MANHATTAN`, `DOT_PRODUCT`, `ANGULAR`
 
-**Quantization methods:** `SCALAR_8BIT` (default), `PRODUCT_QUANTIZATION` (reserved for Issue #481 Stage 3, currently `Unimplemented`).
+**Quantization methods:** `SCALAR_8BIT` (default), `PRODUCT_QUANTIZATION` (Issue #481 Stage 3; supported by the HNSW index — Flat / IVF reject it at write time).
 
 `NONE` (no quantization) was removed in Issue #481 Stage 1. The proto enum value `0` (`QUANTIZATION_METHOD_NONE`) is kept as a wire-compat reservation; if the server receives it, it falls back to `SCALAR_8BIT` via `Default::default()`.
 
 **Rerank storage:** the optional `rerank_storage` field (enum `RerankStorageKind`: `UNSPECIFIED` = no sidecar, `F32`) enables the Stage-2 rerank sidecar (Issue #481 / #793). When set to `F32` on an HNSW field, commit writes an extra full-precision `.hnsw.f32` sidecar so searches that set `rerank_factor` rescore int8 candidates against the original vectors. Omitting the field (or `UNSPECIFIED`) keeps Stage-1 int8-only ranking. The field is also carried on `FlatOption` / `IvfOption` for schema round-tripping, but those indexes do not emit a sidecar yet.
+
+**Shared PQ codebook:** the optional `pq_codebook_path` field on `HnswOption` (Issue #631) names a storage-relative shared PQ codebook file, trained once via the `laurus train pq-codebook` CLI command. Segments are then encoded against the pre-trained codebook instead of re-training k-means on every commit and merge. Only meaningful with a `PRODUCT_QUANTIZATION` quantizer; when set but not yet trained, commits fail with an error naming the training command (no silent fallback to per-segment training). Unset keeps per-segment training.
 
 **QuantizationConfig structure:**
 

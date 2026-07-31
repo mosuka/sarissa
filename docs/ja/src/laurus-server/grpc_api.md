@@ -100,7 +100,7 @@ message AnalyzerDefinition {
 
 | Lexical フィールド | Vector フィールド |
 | :--- | :--- |
-| `TextOption` (`indexed`, `stored`, `term_vectors`, `analyzer`) | `HnswOption` (`dimension`, `distance`, `m`, `ef_construction`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`) |
+| `TextOption` (`indexed`, `stored`, `term_vectors`, `analyzer`) | `HnswOption` (`dimension`, `distance`, `m`, `ef_construction`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`, `pq_codebook_path`) |
 | `IntegerOption` (`indexed`, `stored`, `multi_valued`) | `FlatOption` (`dimension`, `distance`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`) |
 | `FloatOption` (`indexed`, `stored`, `multi_valued`) | `IvfOption` (`dimension`, `distance`, `n_clusters`, `n_probe`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`) |
 | `BooleanOption` (`indexed`, `stored`) | |
@@ -113,11 +113,13 @@ message AnalyzerDefinition {
 
 **距離メトリクス:** `COSINE`, `EUCLIDEAN`, `MANHATTAN`, `DOT_PRODUCT`, `ANGULAR`
 
-**量子化手法:** `SCALAR_8BIT`（デフォルト）, `PRODUCT_QUANTIZATION`（Issue #481 Stage 3 で予約、現状 `Unimplemented`）
+**量子化手法:** `SCALAR_8BIT`（デフォルト）, `PRODUCT_QUANTIZATION`（Issue #481 Stage 3。HNSW インデックスがサポート — Flat / IVF は書き込み時に拒否）
 
 `NONE`（量子化なし）は Issue #481 Stage 1 で廃止されました。proto enum 値 0（`QUANTIZATION_METHOD_NONE`）は wire 互換のため予約されていますが、サーバ側で受信すると `Default::default()`（`SCALAR_8BIT`）にフォールバックします。
 
 **Rerank storage:** オプションの `rerank_storage` フィールド（enum `RerankStorageKind`: `UNSPECIFIED` = サイドカーなし、`F32`）は Stage-2 rerank サイドカー（Issue #481 / #793）を有効化します。HNSW フィールドで `F32` を設定すると、commit 時に完全精度の `.hnsw.f32` サイドカーを追加で書き出し、`rerank_factor` を指定した検索が int8 候補を元のベクトルで再スコアします。フィールドを省略（または `UNSPECIFIED`）すると Stage-1 の int8 のみのランキングになります。スキーマの round-trip 整合のため `FlatOption` / `IvfOption` にも保持されますが、これらのインデックスはまだサイドカーを出力しません。
+
+**共有 PQ codebook:** `HnswOption` のオプションフィールド `pq_codebook_path`（Issue #631）は、`laurus train pq-codebook` CLI コマンドで一度だけ学習するストレージ相対の共有 PQ codebook ファイルを指定します。設定すると segment は commit / merge のたびに k-means を再学習する代わりに、学習済み codebook で encode されます。`PRODUCT_QUANTIZATION` quantizer との組み合わせでのみ意味を持ち、設定済みで未学習の場合、commit は学習コマンドを示すエラーで失敗します（per-segment 学習への無言のフォールバック無し）。未設定なら per-segment 学習のままです。
 
 **QuantizationConfig 構造:**
 

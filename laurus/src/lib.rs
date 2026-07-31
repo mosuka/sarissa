@@ -85,6 +85,7 @@ pub use engine::CommitPolicy;
 pub use engine::Engine;
 pub use engine::EngineBuilder;
 pub use engine::EngineStats;
+pub use engine::PqCodebookInfo;
 pub use engine::query::UnifiedQueryParser;
 pub use engine::schema::analyzer::{
     AnalyzerDefinition, AnalyzerSpec, BuiltinAnalyzerSpec, CharFilterConfig, TokenFilterConfig,

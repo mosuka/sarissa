@@ -60,6 +60,7 @@ fn hnsw(dimension: usize) -> FieldOption {
         quantizer: Default::default(),
         rerank_storage: None,
         embedder: None,
+        pq_codebook_path: None,
     })
 }
 

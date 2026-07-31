@@ -25,6 +25,7 @@ use crate::lexical::store::config::LexicalIndexConfig;
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
 use crate::store::log::{DocumentLog, LogEntry, WalSyncPolicy};
+use crate::vector::core::vector::Vector;
 use crate::vector::store::VectorStore;
 use crate::vector::store::config::VectorIndexConfig;
 
@@ -96,6 +97,28 @@ pub struct EngineStats {
     /// Per-field vector statistics, keyed by field name.
     /// Empty when the schema contains no vector fields.
     pub vector_fields: HashMap<String, crate::vector::index::field::VectorFieldStats>,
+}
+
+/// Summary of a shared PQ codebook produced by
+/// [`Engine::train_pq_codebook`] (Issue #631).
+#[derive(Debug, Clone)]
+pub struct PqCodebookInfo {
+    /// Storage-relative file name the codebook was written to, inside the
+    /// engine's vector storage namespace (e.g. `"embedding.pqcb"`). This is
+    /// the value the field's
+    /// [`HnswOption::pq_codebook_path`](crate::vector::core::field::HnswOption::pq_codebook_path)
+    /// must be set to for subsequent commits to pick the codebook up.
+    pub path: String,
+    /// Number of sub-vectors (`m`) the codebook was trained for.
+    pub subvector_count: usize,
+    /// Centroids per sub-vector (`k`, currently always `256`).
+    pub centroids: usize,
+    /// Sub-vector dimension (`dimension / subvector_count`).
+    pub sub_dimension: usize,
+    /// Original vector dimension the codebook encodes.
+    pub dimension: usize,
+    /// Number of vectors the codebook was trained on.
+    pub training_vectors: usize,
 }
 
 /// Background timer that periodically forces the WAL durable under a
@@ -1745,6 +1768,113 @@ impl Engine {
     /// Returns an error if building the vector searcher (reader load) fails.
     pub fn warmup(&self) -> Result<()> {
         self.vector.warmup()
+    }
+
+    /// Train a shared PQ codebook for `field` and persist it into the
+    /// engine's vector storage namespace (Issue #631).
+    ///
+    /// The codebook is trained once on `vectors` and then reused by every
+    /// segment write instead of re-running k-means on every commit and
+    /// merge. Training is synchronous and CPU-bound (like
+    /// [`stats`](Self::stats) / [`warmup`](Self::warmup)); expect seconds
+    /// for thousands of training vectors.
+    ///
+    /// The codebook file is picked up when the index is (re)opened with the
+    /// field's
+    /// [`HnswOption::pq_codebook_path`](crate::vector::core::field::HnswOption::pq_codebook_path)
+    /// naming it — an engine instance that is already open does **not** hot-swap
+    /// codebooks mid-flight (intentional: a codebook must not change between
+    /// the commits of one session). Train first, then open the engine that
+    /// will ingest.
+    ///
+    /// When the field's distance metric is Cosine, the training set is
+    /// L2-normalized before k-means so the codebook matches the normalized
+    /// vectors the writer encodes (the #794 basis-mismatch trap).
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Schema field to train for. Must be an HNSW vector field
+    ///   configured with
+    ///   [`QuantizationMethod::ProductQuantization`](crate::vector::core::quantization::QuantizationMethod::ProductQuantization).
+    /// * `vectors` - Training vectors; each must have the field's configured
+    ///   dimension. A representative sample of the corpus (thousands of
+    ///   vectors) is enough — the full corpus is not required.
+    /// * `output` - Optional storage-relative file name override. `None`
+    ///   writes to the field's configured `pq_codebook_path`, falling back
+    ///   to the default `"{field}.pqcb"`. Pass `Some` to train a new
+    ///   codebook alongside a live one (e.g. `"embedding.v2.pqcb"`) and
+    ///   flip the schema afterwards.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::LaurusError::invalid_argument`] when `field`
+    /// is not in the schema, is not an HNSW field, or does not use PQ
+    /// quantization; forwards
+    /// [`train_and_write_pq_codebook`](crate::vector::index::pq_codebook::train_and_write_pq_codebook)'s
+    /// errors for an empty/mis-dimensioned training set or storage I/O
+    /// failures.
+    pub fn train_pq_codebook(
+        &self,
+        field: &str,
+        vectors: &[Vector],
+        output: Option<&str>,
+    ) -> Result<PqCodebookInfo> {
+        use crate::vector::core::distance::DistanceMetric;
+        use crate::vector::core::quantization::QuantizationMethod;
+        use crate::vector::index::pq_codebook::{
+            default_codebook_name, train_and_write_pq_codebook,
+        };
+
+        let (dimension, subvector_count, normalize, configured_path) = {
+            let schema = self.schema.read();
+            let Some(option) = schema.fields.get(field) else {
+                return Err(crate::error::LaurusError::invalid_argument(format!(
+                    "cannot train a PQ codebook: field '{field}' is not defined in the schema"
+                )));
+            };
+            let schema::FieldOption::Hnsw(o) = option else {
+                return Err(crate::error::LaurusError::invalid_argument(format!(
+                    "cannot train a PQ codebook: field '{field}' is not an HNSW vector field \
+                     (shared PQ codebooks are HNSW-only)"
+                )));
+            };
+            let QuantizationMethod::ProductQuantization { subvector_count } = o.quantizer else {
+                return Err(crate::error::LaurusError::invalid_argument(format!(
+                    "cannot train a PQ codebook: field '{field}' does not use \
+                     ProductQuantization (quantizer is {:?})",
+                    o.quantizer
+                )));
+            };
+            (
+                o.dimension,
+                subvector_count,
+                o.distance == DistanceMetric::Cosine,
+                o.pq_codebook_path.clone(),
+            )
+        };
+
+        let name = output
+            .map(str::to_string)
+            .or(configured_path)
+            .unwrap_or_else(|| default_codebook_name(field));
+
+        let codebook = train_and_write_pq_codebook(
+            self.vector.storage().as_ref(),
+            &name,
+            dimension,
+            subvector_count,
+            normalize,
+            vectors,
+        )?;
+
+        Ok(PqCodebookInfo {
+            path: name,
+            subvector_count: codebook.params.m as usize,
+            centroids: codebook.params.k as usize,
+            sub_dimension: codebook.params.sub_dim as usize,
+            dimension,
+            training_vectors: vectors.len(),
+        })
     }
 
     /// Search the index.

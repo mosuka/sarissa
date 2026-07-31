@@ -87,6 +87,7 @@ fn make_config() -> VectorIndexConfig {
                 quantizer: Default::default(),
                 rerank_storage: None,
                 embedder: None,
+                pq_codebook_path: None,
             })),
             lexical: None,
         },

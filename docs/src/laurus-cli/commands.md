@@ -397,6 +397,54 @@ laurus --index-dir ./my_index commit
 
 ---
 
+## `train`
+
+### `train pq-codebook`
+
+Train a **shared PQ codebook** for an HNSW vector field (Issue #631).
+The codebook is trained once on a representative sample and then reused
+by every subsequent commit and merge, instead of re-training k-means
+per segment — commits on PQ fields get dramatically faster, and even
+tiny per-commit segments stay on PQ.
+
+```bash
+laurus train pq-codebook --field <FIELD> --input <JSONL> \
+    [--sample-size <N>] [--output <NAME>] [--update-schema]
+```
+
+| Argument | Description |
+| :--- | :--- |
+| `--field` | The HNSW vector field to train for. Must be configured with a `ProductQuantization` quantizer. |
+| `--input` | JSONL training file — the same `{"id": "...", "document": {"fields": {...}}}` shape as `put docs` / `add docs`. The field value must be a pre-computed `Vector` (embedder-generated input is not supported). |
+| `--sample-size` | Use only the first N vectors of the file (deterministic). Omit to use all of them; thousands of representative vectors are enough. |
+| `--output` | Storage-relative codebook file name. Defaults to the field's configured `pq_codebook_path`, else `{field}.pqcb`. Use to train a v2 codebook alongside a live one. |
+| `--update-schema` | Rewrite `schema.toml` so the field's `pq_codebook_path` names the trained file. |
+
+Commits use the codebook only when the schema's `pq_codebook_path`
+names it (see [Schema Format](schema_format.md#product-quantization-hnsw-only)) —
+pass `--update-schema` to set it as part of training. A commit made
+while `pq_codebook_path` is set but the codebook has not been trained
+yet fails with an error naming this command; there is no silent
+fallback to per-segment training. The codebook is picked up when the
+index is opened, so train **before** the ingesting `add` / `put` /
+`commit` invocation (each CLI invocation opens the index fresh, so any
+subsequent command sees it).
+
+**Example:**
+
+```bash
+cat > train.jsonl <<'JSONL'
+{"id": "t1", "document": {"fields": {"embedding": {"Vector": [0.1, 0.2, 0.3, 0.4]}}}}
+{"id": "t2", "document": {"fields": {"embedding": {"Vector": [0.5, 0.6, 0.7, 0.8]}}}}
+JSONL
+laurus train pq-codebook --field embedding --input train.jsonl --update-schema
+# Training PQ codebook for field 'embedding' on 2 vectors...
+# Trained codebook 'embedding.pqcb' (m = 2, k = 256, sub_dim = 2, dimension = 4) from 2 vectors.
+# Updated schema.toml: embedding.pq_codebook_path = "embedding.pqcb".
+```
+
+---
+
 ## `search`
 
 Execute a search query using the [Query DSL](../concepts/query_dsl.md).

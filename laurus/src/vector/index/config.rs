@@ -687,6 +687,11 @@ impl HnswIndexConfig {
             quantization_method: opt.quantizer,
             rerank_storage: opt.rerank_storage,
             normalize_vectors: opt.distance == DistanceMetric::Cosine,
+            // Issue #631: carry the schema-level shared-codebook file name;
+            // `resolve_pq_codebook` (called at index open, in
+            // `VectorIndexFactory::dispatch_hnsw`) turns it into the loaded
+            // `pq_codebook` Arc.
+            pq_codebook_path: opt.pq_codebook_path.clone(),
             ..Self::default()
         }
     }
@@ -885,6 +890,7 @@ mod tests {
             quantizer: quantization::QuantizationMethod::ProductQuantization { subvector_count: 4 },
             rerank_storage: Some(RerankStorageKind::F32),
             embedder: Some("my-embedder".to_string()),
+            pq_codebook_path: Some("embedding.pqcb".to_string()),
         };
 
         let config = HnswIndexConfig::from_hnsw_option(&opt);
@@ -900,6 +906,9 @@ mod tests {
             quantization::QuantizationMethod::ProductQuantization { subvector_count: 4 }
         );
         assert_eq!(config.rerank_storage, Some(RerankStorageKind::F32));
+        // Issue #631: the shared-codebook file name must be carried so
+        // `resolve_pq_codebook` can load it at index open.
+        assert_eq!(config.pq_codebook_path, Some("embedding.pqcb".to_string()));
         // Issue #794: normalize_vectors is derived from the metric — this
         // option is Euclidean, so it must NOT be normalized.
         assert!(!config.normalize_vectors);

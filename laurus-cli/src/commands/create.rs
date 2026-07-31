@@ -371,6 +371,7 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
     let m = prompt_usize("M (max connections per node)", 16)?;
     let ef_construction = prompt_usize("ef_construction", 200)?;
     let quantizer = prompt_quantization_method(dimension)?;
+    let pq_codebook_path = prompt_pq_codebook_path(&quantizer)?;
     let rerank_storage = prompt_rerank_storage()?;
 
     Ok(FieldOption::Hnsw(HnswOption {
@@ -383,6 +384,7 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
         quantizer,
         rerank_storage,
         embedder: None,
+        pq_codebook_path,
     }))
 }
 
@@ -391,9 +393,11 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
 /// Default = Scalar8Bit (Stage 1, 4x compression, recall ~0.95).
 /// Optional Product Quantization (Stage 3, Issue #481) requires the
 /// user to pick an `M` that divides the vector dimension; the
-/// codebook is trained per segment with K = 256 centroids per
-/// sub-vector. PQ delivers 8-19x compression at the cost of recall —
-/// usually paired with rerank storage to compensate.
+/// codebook uses K = 256 centroids per sub-vector and is either
+/// trained per segment (the default) or trained once and shared
+/// across segments via `pq_codebook_path` / `laurus train
+/// pq-codebook` (Issue #631). PQ delivers 8-19x compression at the
+/// cost of recall — usually paired with rerank storage to compensate.
 fn prompt_quantization_method(
     dimension: usize,
 ) -> Result<laurus::vector::core::quantization::QuantizationMethod> {
@@ -427,6 +431,30 @@ fn prompt_quantization_method(
             Ok(QuantizationMethod::ProductQuantization { subvector_count })
         }
     }
+}
+
+/// Prompt for an optional shared PQ codebook file name (Issue #631).
+///
+/// Only asked when the quantizer is Product Quantization; empty input
+/// (the default) keeps per-segment training. When set, commits refuse
+/// to encode until `laurus train pq-codebook` has trained the named
+/// codebook — there is no silent fallback to per-segment training.
+fn prompt_pq_codebook_path(
+    quantizer: &laurus::vector::core::quantization::QuantizationMethod,
+) -> Result<Option<String>> {
+    use laurus::vector::core::quantization::QuantizationMethod;
+    if !matches!(quantizer, QuantizationMethod::ProductQuantization { .. }) {
+        return Ok(None);
+    }
+    let path: String = Input::new()
+        .with_prompt(
+            "Shared PQ codebook file (train once via `laurus train pq-codebook`; \
+             empty = train per segment)",
+        )
+        .allow_empty(true)
+        .default(String::new())
+        .interact_text()?;
+    Ok(if path.is_empty() { None } else { Some(path) })
 }
 
 /// Prompt the user to optionally enable Stage 2 rerank storage
