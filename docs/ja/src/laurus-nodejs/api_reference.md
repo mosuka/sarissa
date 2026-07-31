@@ -202,7 +202,7 @@ class Schema {
 | `addGeoField(name, stored?, indexed?)` | 地理座標フィールド。 |
 | `addGeo3dField(name, stored?, indexed?)` | 3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は [Geo3d の概念](../concepts/geo3d.md)。 |
 | `addDatetimeField(name, stored?, indexed?)` | UTC 日時フィールド。 |
-| `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?)` | HNSW ベクトルフィールド。 |
+| `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?, pqCodebookPath?)` | HNSW ベクトルフィールド。 |
 | `addFlatField(name, dimension, distance?, embedder?)` | Flat（全探索）ベクトルフィールド。 |
 | `addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)` | IVF ベクトルフィールド。 |
 | `addEmbedder(name, config)` | 名前付き Embedder を登録。 |
@@ -216,6 +216,7 @@ class Schema {
 
 - `quantizer` — `"scalar_8bit"`（デフォルト、4 倍圧縮）または高圧縮率の `"product_quantization"`。Product quantization では `subvectorCount`（`dimension` を割り切れる値）が必須です。
 - `rerankStorage` — `"f32"` を指定すると完全精度の `*.hnsw.f32` サイドカーを書き出し、厳密な Stage-2 リランクを有効化します。省略すると int8 のみのセグメントを維持します。
+- `pqCodebookPath` — 共有 PQ codebook のストレージ相対ファイル名（Issue #631）。`laurus train pq-codebook` CLI コマンドで一度だけ学習します。`quantizer: "product_quantization"` との組み合わせでのみ意味を持ち、以後の commit は segment ごとの k-means 再学習の代わりに学習済み codebook で encode します。省略すると segment ごとの学習を維持します。
 
 #### Dynamic field policy（動的フィールドポリシー）
 

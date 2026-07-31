@@ -287,6 +287,12 @@ impl PhpSchema {
     /// * `rerank_storage` - Stage-2 rerank sidecar — omitted (default) keeps
     ///   the int8-only segment, "f32" stores full-precision vectors in a
     ///   `*.hnsw.f32` sidecar for exact rerank distances.
+    /// * `pq_codebook_path` - Storage-relative file name of a shared PQ
+    ///   codebook (Issue #631), trained once via the
+    ///   `laurus train pq-codebook` CLI command. Only meaningful when
+    ///   `quantizer` is "product_quantization"; commits then encode against
+    ///   the pre-trained codebook instead of re-training k-means per
+    ///   segment. Omitted (default) keeps per-segment training.
     #[php(defaults(m = 16, ef_construction = 200))]
     #[allow(clippy::too_many_arguments)]
     pub fn add_hnsw_field(
@@ -301,6 +307,7 @@ impl PhpSchema {
         quantizer: Option<String>,
         subvector_count: Option<i64>,
         rerank_storage: Option<String>,
+        pq_codebook_path: Option<String>,
     ) -> PhpResult<()> {
         let dist_str = distance.unwrap_or_else(|| "cosine".to_string());
         let opt = HnswOption {
@@ -312,6 +319,7 @@ impl PhpSchema {
             quantizer: parse_quantizer(quantizer.as_deref(), subvector_count.map(|v| v as usize))?,
             rerank_storage: parse_rerank_storage(rerank_storage.as_deref())?,
             embedder,
+            pq_codebook_path,
             ..Default::default()
         };
         self.inner

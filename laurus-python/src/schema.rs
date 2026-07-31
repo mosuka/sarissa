@@ -316,7 +316,13 @@ impl PySchema {
     ///         in a `*.hnsw.f32` sidecar for exact rerank distances.
     ///     embedder: Optional embedder name registered via `add_embedder`.
     ///         When set, text payloads are automatically embedded by the Rust engine.
-    #[pyo3(signature = (name, dimension, *, distance="cosine", m=16, ef_construction=200, default_ef_search=None, quantizer=None, subvector_count=None, rerank_storage=None, embedder=None))]
+    ///     pq_codebook_path: Storage-relative file name of a shared PQ
+    ///         codebook (Issue #631), trained once via the
+    ///         `laurus train pq-codebook` CLI command. Only meaningful with
+    ///         `quantizer="product_quantization"`; commits then encode
+    ///         against the pre-trained codebook instead of re-training
+    ///         k-means per segment. None (default) keeps per-segment training.
+    #[pyo3(signature = (name, dimension, *, distance="cosine", m=16, ef_construction=200, default_ef_search=None, quantizer=None, subvector_count=None, rerank_storage=None, embedder=None, pq_codebook_path=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn add_hnsw_field(
         &mut self,
@@ -330,6 +336,7 @@ impl PySchema {
         subvector_count: Option<usize>,
         rerank_storage: Option<String>,
         embedder: Option<String>,
+        pq_codebook_path: Option<String>,
     ) -> PyResult<()> {
         let opt = HnswOption {
             dimension,
@@ -340,6 +347,7 @@ impl PySchema {
             quantizer: parse_quantizer(quantizer.as_deref(), subvector_count)?,
             rerank_storage: parse_rerank_storage(rerank_storage.as_deref())?,
             embedder,
+            pq_codebook_path,
             ..Default::default()
         };
         self.inner
