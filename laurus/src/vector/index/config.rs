@@ -534,6 +534,31 @@ pub struct HnswIndexConfig {
     #[serde(default = "default_compaction_threshold")]
     pub compaction_threshold: f64,
 
+    /// Storage-relative file name of a pre-trained, shared PQ codebook
+    /// (Issue #631), e.g. `"embedding.pqcb"`.
+    ///
+    /// `None` (the default) keeps today's behavior: every segment's
+    /// `write()` trains its own PQ codebook from scratch. When set,
+    /// [`Self::resolve_pq_codebook`] loads the file once at index-open
+    /// time into [`Self::pq_codebook`]; `write()` then encodes against
+    /// that codebook instead of training, which is the actual point of
+    /// this field (PQ training is a multi-second cost that otherwise
+    /// recurs at every segment flush and every merge tier). Ignored
+    /// (not yet resolvable) until `hnsw/writer.rs` reads it in Issue
+    /// #631 PR-1.
+    #[serde(default)]
+    pub pq_codebook_path: Option<String>,
+
+    /// The resolved shared PQ codebook, loaded from
+    /// [`Self::pq_codebook_path`] by [`Self::resolve_pq_codebook`].
+    ///
+    /// Not serialized (mirrors [`Self::embedder`]): this is runtime
+    /// state resolved once per index instance, not part of the
+    /// persisted schema. Retraining the codebook file on disk does not
+    /// affect an already-open index; reopen to pick up the change.
+    #[serde(skip)]
+    pub pq_codebook: Option<Arc<crate::vector::index::pq_codebook::SharedPqCodebook>>,
+
     /// Embedder for converting text/images to vectors.
     ///
     /// This embedder is used when documents contain text or image fields that need to be
@@ -573,6 +598,8 @@ impl Default for HnswIndexConfig {
             max_segments: 100,
             auto_compaction: false,
             compaction_threshold: default_compaction_threshold(),
+            pq_codebook_path: None,
+            pq_codebook: None,
             embedder: default_embedder(),
         }
     }
@@ -596,6 +623,11 @@ impl std::fmt::Debug for HnswIndexConfig {
             .field("max_segments", &self.max_segments)
             .field("auto_compaction", &self.auto_compaction)
             .field("compaction_threshold", &self.compaction_threshold)
+            .field("pq_codebook_path", &self.pq_codebook_path)
+            .field(
+                "pq_codebook",
+                &self.pq_codebook.as_ref().map(|cb| cb.params),
+            )
             .field("embedder", &self.embedder.name())
             .finish()
     }
@@ -657,6 +689,44 @@ impl HnswIndexConfig {
             normalize_vectors: opt.distance == DistanceMetric::Cosine,
             ..Self::default()
         }
+    }
+
+    /// Resolve [`Self::pq_codebook_path`] into [`Self::pq_codebook`], if set.
+    ///
+    /// A no-op when `pq_codebook_path` is `None`. When set but the file
+    /// does not exist yet — the schema names a codebook that has not
+    /// been trained — this is *also* a no-op (lenient at open):
+    /// `hnsw/writer.rs`'s `write()` is what hard-errors instead, only
+    /// once a commit actually needs to encode against the missing
+    /// codebook. Erroring here would make `create`/`open` fail for a
+    /// schema whose codebook has not been trained yet, an unbreakable
+    /// ordering deadlock against a `train` step that itself needs an
+    /// open index (Issue #631).
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - The vector index's storage namespace to load the
+    ///   codebook file from (the same namespace `write()` will later
+    ///   read segment files from).
+    ///
+    /// # Errors
+    ///
+    /// Forwards [`crate::vector::index::pq_codebook::read_pq_codebook`]'s
+    /// error when the file exists but is corrupted or declares a
+    /// geometry `write()` cannot use — both fail loudly rather than
+    /// silently falling back to per-segment training, since an
+    /// invisible regression to the multi-second training cost would
+    /// defeat the point of this feature.
+    pub fn resolve_pq_codebook(&mut self, storage: &dyn crate::storage::Storage) -> Result<()> {
+        let Some(path) = &self.pq_codebook_path else {
+            return Ok(());
+        };
+        if !storage.file_exists(path) {
+            return Ok(());
+        }
+        let codebook = crate::vector::index::pq_codebook::read_pq_codebook(storage, path)?;
+        self.pq_codebook = Some(Arc::new(codebook));
+        Ok(())
     }
 }
 

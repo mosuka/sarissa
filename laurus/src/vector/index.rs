@@ -15,6 +15,7 @@ pub mod format;
 pub mod hnsw;
 pub mod io;
 pub mod ivf;
+pub mod pq_codebook;
 pub mod pq_fastscan_avx2;
 #[cfg(feature = "pq-fastscan")]
 pub mod pq_fastscan_io;
@@ -258,11 +259,19 @@ impl ManagedVectorIndex {
     /// * `storage` - Storage backend (MemoryStorage, FileStorage, etc.)
     /// * `path` - Base path/name for the index files
     pub fn new(
-        config: VectorIndexTypeConfig,
+        mut config: VectorIndexTypeConfig,
         storage: Arc<dyn Storage>,
         path: impl Into<String>,
     ) -> Result<Self> {
         let path = path.into();
+        // Resolve a configured shared PQ codebook (Issue #631) before
+        // constructing the writer -- mirrors `factory.rs`'s
+        // `dispatch_hnsw` resolution point for the `VectorIndexFactory`
+        // path; this constructor is the other (bench/direct-use) path
+        // into an HNSW writer.
+        if let VectorIndexTypeConfig::HNSW(hnsw_config) = &mut config {
+            hnsw_config.resolve_pq_codebook(storage.as_ref())?;
+        }
         // Create builder based on config type
         let builder: Box<dyn VectorIndexWriter> = match &config {
             VectorIndexTypeConfig::Flat(flat_config) => {

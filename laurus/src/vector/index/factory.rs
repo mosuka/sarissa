@@ -149,10 +149,17 @@ impl VectorIndexFactory {
     fn dispatch_hnsw(
         storage: Arc<dyn Storage>,
         name: &str,
-        hnsw_config: crate::vector::index::config::HnswIndexConfig,
+        mut hnsw_config: crate::vector::index::config::HnswIndexConfig,
         open_only: bool,
     ) -> Result<Box<dyn VectorIndex>> {
         use crate::vector::index::hnsw::segmented::SegmentedHnswIndex;
+
+        // Resolve a configured shared PQ codebook (Issue #631) once here,
+        // the single choke point both the segmented and monolithic HNSW
+        // paths go through — every writer built from this config (and,
+        // for the segmented path, the merge engine, which clones this same
+        // config) picks up the resolved `Arc` for free.
+        hnsw_config.resolve_pq_codebook(storage.as_ref())?;
 
         if hnsw_config.segmented {
             let index = SegmentedHnswIndex::open_or_create(storage, name, hnsw_config)?;

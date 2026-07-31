@@ -1750,12 +1750,19 @@ impl VectorIndexWriter for HnswIndexWriter {
         // a merged (large) segment picks PQ back up automatically. Empty
         // segments keep the configured method's header for uniform
         // dispatch.
+        //
+        // This guard does not apply when a shared PQ codebook (Issue #631)
+        // is configured: nothing is trained in that case, so the
+        // degenerate-codebook rationale above does not hold, and small
+        // segment-per-commit flushes can stay PQ instead of degrading to
+        // Scalar8Bit.
+        let has_shared_pq_codebook = self.index_config.pq_codebook.is_some();
         let effective_quantization = {
             use crate::vector::core::quantization::QuantizationMethod as Qm;
             let n = f32_vectors.len();
             match self.index_config.quantization_method {
                 Qm::ProductQuantization { subvector_count }
-                    if n > 0 && n < PQ_MIN_TRAIN_VECTORS =>
+                    if n > 0 && n < PQ_MIN_TRAIN_VECTORS && !has_shared_pq_codebook =>
                 {
                     // The fallback must not skip config validation: an
                     // invalid PQ geometry (subvector_count not dividing the
@@ -1832,11 +1839,36 @@ impl VectorIndexWriter for HnswIndexWriter {
                         .with_field_dict(field_dict.clone())
                         .write_to(&mut output)?;
                 } else {
+                    // Issue #631: a configured-but-unresolved shared
+                    // codebook (the path was set, but no file existed
+                    // there when the index was opened) must fail loudly
+                    // here rather than silently falling through to
+                    // per-segment training below -- an invisible
+                    // regression to the multi-second training cost would
+                    // defeat the entire point of configuring a shared
+                    // codebook. This is the ONLY place in the writer that
+                    // can catch it: `resolve_pq_codebook` (index-open
+                    // time) is deliberately lenient about a not-yet-
+                    // trained codebook, since erroring there would make
+                    // `create`/`open` fail for a schema whose codebook
+                    // simply hasn't been trained yet.
+                    if self.index_config.pq_codebook_path.is_some()
+                        && self.index_config.pq_codebook.is_none()
+                    {
+                        return Err(LaurusError::InvalidOperation(format!(
+                            "HNSW field configures pq_codebook_path = {:?} but no codebook \
+                             has been trained there yet; train one first (e.g. `laurus train \
+                             pq-codebook`) before committing, or clear pq_codebook_path to use \
+                             per-segment training",
+                            self.index_config.pq_codebook_path.as_deref().unwrap_or_default()
+                        )));
+                    }
                     let (params, codebook, codes) =
                         crate::vector::index::pq_io::quantize_segment_pq(
                             &f32_vectors,
                             self.index_config.dimension,
                             subvector_count,
+                            self.index_config.pq_codebook.as_deref(),
                         )?;
                     VectorSegmentHeader::product_quantization(params, codebook)
                         .with_version(VERSION_FIELD_DICT)
