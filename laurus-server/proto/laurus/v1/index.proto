@@ -224,6 +224,13 @@ message HnswOption {
   // `rerank_factor` rescore against full-precision vectors. Unset (or
   // `UNSPECIFIED`) keeps Stage-1 int8-only ranking.
   optional RerankStorageKind rerank_storage = 9;
+  // Storage-relative file name of a shared PQ codebook (Issue #631).
+  // Only meaningful with a ProductQuantization quantizer: segments are
+  // encoded against the named pre-trained codebook (see the
+  // `laurus train pq-codebook` CLI command) instead of re-training
+  // k-means on every commit and merge. Unset keeps per-segment
+  // training.
+  optional string pq_codebook_path = 10;
 }
 
 message FlatOption {

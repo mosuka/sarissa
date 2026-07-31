@@ -651,6 +651,14 @@ fn json_to_hnsw_option(json: &Value) -> Result<v1::HnswOption, String> {
             .map(|n| n as u32),
         // Issue #793: optional Stage-2 rerank sidecar storage.
         rerank_storage: json_to_rerank_storage(json),
+        // Issue #631: optional shared PQ codebook file name. An explicitly
+        // empty string would configure a codebook that can never exist;
+        // treat it as unset.
+        pq_codebook_path: json
+            .get("pq_codebook_path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
     })
 }
 
@@ -718,6 +726,9 @@ fn hnsw_option_to_json(opt: &v1::HnswOption) -> Value {
     }
     if let Some(s) = opt.rerank_storage.and_then(rerank_storage_to_json) {
         obj["rerank_storage"] = json!(s);
+    }
+    if let Some(path) = &opt.pq_codebook_path {
+        obj["pq_codebook_path"] = json!(path);
     }
     obj
 }
@@ -1272,6 +1283,42 @@ mod tests {
         let schema = json_to_proto_schema(&json).unwrap();
         assert_eq!(schema.fields.len(), 2);
         assert_eq!(schema.default_fields, vec!["title"]);
+    }
+
+    /// Issue #631: `pq_codebook_path` survives the HTTP gateway's
+    /// JSON -> proto -> JSON round-trip, and an absent key stays absent.
+    #[test]
+    fn test_hnsw_pq_codebook_path_round_trips_through_json() {
+        let json = json!({
+            "dimension": 32,
+            "distance": "euclidean",
+            "quantizer": { "product_quantization": { "subvector_count": 4 } },
+            "pq_codebook_path": "embedding.pqcb"
+        });
+        let opt = json_to_hnsw_option(&json).unwrap();
+        assert_eq!(opt.pq_codebook_path.as_deref(), Some("embedding.pqcb"));
+
+        let back = hnsw_option_to_json(&opt);
+        assert_eq!(
+            back.get("pq_codebook_path").and_then(|v| v.as_str()),
+            Some("embedding.pqcb")
+        );
+
+        // Absent in JSON -> absent in proto -> no key in the JSON view.
+        let plain = json_to_hnsw_option(&json!({ "dimension": 32 })).unwrap();
+        assert_eq!(plain.pq_codebook_path, None);
+        assert!(
+            hnsw_option_to_json(&plain)
+                .get("pq_codebook_path")
+                .is_none(),
+            "an unset pq_codebook_path must not emit a key"
+        );
+
+        // An explicitly empty string names a codebook that can never exist —
+        // treat it as unset.
+        let empty =
+            json_to_hnsw_option(&json!({ "dimension": 32, "pq_codebook_path": "" })).unwrap();
+        assert_eq!(empty.pq_codebook_path, None, "empty must normalize to None");
     }
 
     #[test]

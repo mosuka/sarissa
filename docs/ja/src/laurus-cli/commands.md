@@ -393,6 +393,54 @@ laurus --index-dir ./my_index commit
 
 ---
 
+## `train`
+
+### `train pq-codebook`
+
+HNSW ベクトルフィールド用の**共有 PQ codebook** を学習します
+（Issue #631）。codebook を代表サンプルで一度だけ学習し、以後の
+commit と merge のすべてで再利用します — segment ごとの k-means
+再学習が無くなるため PQ フィールドの commit は大幅に高速化し、
+小さな per-commit segment も PQ を維持します。
+
+```bash
+laurus train pq-codebook --field <FIELD> --input <JSONL> \
+    [--sample-size <N>] [--output <NAME>] [--update-schema]
+```
+
+| 引数 | 説明 |
+| :--- | :--- |
+| `--field` | 学習対象の HNSW ベクトルフィールド。`ProductQuantization` quantizer が設定されている必要があります。 |
+| `--input` | JSONL 学習ファイル — `put docs` / `add docs` と同じ `{"id": "...", "document": {"fields": {...}}}` 形式。フィールド値は事前計算済み `Vector` である必要があります（embedder 生成の入力は未対応）。 |
+| `--sample-size` | ファイルの先頭 N 件のみを使用（決定的）。省略時は全件を使用。代表的なベクトル数千件で十分です。 |
+| `--output` | ストレージ相対の codebook ファイル名。デフォルトはフィールドの `pq_codebook_path`、未設定なら `{field}.pqcb`。稼働中の codebook の横に v2 を学習する場合に使用。 |
+| `--update-schema` | フィールドの `pq_codebook_path` が学習済みファイルを指すよう `schema.toml` を書き換えます。 |
+
+commit が codebook を使うのは、スキーマの `pq_codebook_path` が
+そのファイルを指している場合のみです（[スキーマ形式](schema_format.md#product-quantization-hnsw-のみ)
+参照）— 学習と同時に設定するには `--update-schema` を渡してください。
+`pq_codebook_path` が設定済みで codebook が未学習のまま commit
+すると、本コマンドを示すエラーで失敗します（per-segment 学習への
+無言のフォールバックはありません）。codebook は index open 時に
+読み込まれるため、ingest する `add` / `put` / `commit` の**前に**
+学習してください（CLI は呼び出しごとに index を開き直すため、
+以後のコマンドはすべて反映済みです）。
+
+**例:**
+
+```bash
+cat > train.jsonl <<'JSONL'
+{"id": "t1", "document": {"fields": {"embedding": {"Vector": [0.1, 0.2, 0.3, 0.4]}}}}
+{"id": "t2", "document": {"fields": {"embedding": {"Vector": [0.5, 0.6, 0.7, 0.8]}}}}
+JSONL
+laurus train pq-codebook --field embedding --input train.jsonl --update-schema
+# Training PQ codebook for field 'embedding' on 2 vectors...
+# Trained codebook 'embedding.pqcb' (m = 2, k = 256, sub_dim = 2, dimension = 4) from 2 vectors.
+# Updated schema.toml: embedding.pq_codebook_path = "embedding.pqcb".
+```
+
+---
+
 ## `search`
 
 [Query DSL](../concepts/query_dsl.md) を使用して検索クエリを実行します。

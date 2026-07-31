@@ -65,6 +65,7 @@ fn active_field_with(count: usize) -> SegmentedVectorField {
             quantizer: Default::default(),
             rerank_storage: None,
             embedder: None,
+            pq_codebook_path: None,
         })),
         lexical: None,
     };

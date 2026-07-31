@@ -199,6 +199,25 @@ pub struct HnswOption {
     /// When set, the engine automatically embeds input using the named embedder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedder: Option<String>,
+    /// Storage-relative file name of a shared PQ codebook (Issue #631).
+    ///
+    /// Only meaningful when [`Self::quantizer`] is
+    /// [`quantization::QuantizationMethod::ProductQuantization`]. When set,
+    /// segment writes encode against the named pre-trained codebook
+    /// (trained once via `Engine::train_pq_codebook` / the
+    /// `laurus train pq-codebook` CLI command) instead of re-running
+    /// k-means from scratch on every commit and merge. The segment
+    /// format is unchanged: the shared codebook is still embedded
+    /// inline in each segment header, so old and new segments coexist.
+    ///
+    /// When the named file does not exist yet, opening the index stays
+    /// lenient but a commit that needs to encode hard-errors with the
+    /// training command to run — there is no silent fallback to
+    /// per-segment training.
+    ///
+    /// `None` (the default) keeps per-segment inline training.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_codebook_path: Option<String>,
 }
 
 impl Default for HnswOption {
@@ -213,6 +232,7 @@ impl Default for HnswOption {
             quantizer: quantization::QuantizationMethod::Scalar8Bit,
             rerank_storage: None,
             embedder: None,
+            pq_codebook_path: None,
         }
     }
 }
@@ -470,4 +490,32 @@ fn default_distance_metric() -> DistanceMetric {
 
 fn default_weight() -> f32 {
     1.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Issue #631: `pq_codebook_path` must survive a serde round-trip, and
+    /// a schema written before the field existed must still deserialize
+    /// (backward compatibility via `#[serde(default)]`).
+    #[test]
+    fn hnsw_option_pq_codebook_path_round_trips_and_defaults() {
+        let opt = HnswOption {
+            pq_codebook_path: Some("embedding.pqcb".to_string()),
+            ..HnswOption::default()
+        };
+        let json = serde_json::to_string(&opt).unwrap();
+        let back: HnswOption = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.pq_codebook_path, Some("embedding.pqcb".to_string()));
+
+        // A pre-#631 schema (no such key) still parses, defaulting to None.
+        let legacy: HnswOption = serde_json::from_str(r#"{"dimension": 8}"#).unwrap();
+        assert_eq!(legacy.pq_codebook_path, None);
+
+        // `None` must not serialize a key at all, so freshly written
+        // schemas stay readable by pre-#631 binaries.
+        let default_json = serde_json::to_string(&HnswOption::default()).unwrap();
+        assert!(!default_json.contains("pq_codebook_path"));
+    }
 }

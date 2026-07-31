@@ -184,6 +184,7 @@ base_weight = 1.0
 | `base_weight` | `float` | `1.0` | ハイブリッド検索のスコア融合における重み |
 | `quantizer` | `object` | `"Scalar8Bit"` | 量子化方式（[量子化](#量子化)を参照）。必須。デフォルトは Issue #481 Stage 1 で導入された int8 形式を保つ。 |
 | `rerank_storage` | `string` | *（省略）* | Stage 2 rerank sidecar（[Rerank Storage](#rerank-storage)）。`"F32"` でフィールド単位の f32 sidecar を有効化し、検索時に int8 候補を元のベクトルで再スコアできるようにする。省略すると Stage 1 int8-only の挙動を維持。 |
+| `pq_codebook_path` | `string` | *（省略）* | 共有 PQ codebook のストレージ相対ファイル名（Issue #631）。`ProductQuantization` quantizer との組み合わせでのみ意味を持つ。`laurus train pq-codebook` で学習すると、以後の commit は segment ごとの k-means 再学習の代わりにこの codebook で encode する。設定済みで未学習の場合、commit は明示的にエラーになる（無言のフォールバック無し）。省略すると segment ごとに学習。 |
 
 **チューニングガイドライン:**
 
@@ -274,16 +275,22 @@ distance = "Cosine"
 # quantizer = "Scalar8Bit"  # デフォルトのため省略可
 ```
 
-### Product Quantization（予約）
+### Product Quantization（HNSW のみ）
 
-Issue #481 Stage 3 で実装予定。現状 writer / searcher が選択時に
-`NotImplemented` を返します。Stage 3 着地後に追加の TOML 変更なしで
-オプトインできるよう、変種は予約してあります。
+Issue #481 Stage 3。各ベクトルを、sub-vector ごとに 256 centroid を
+持つ codebook への 1 バイトの centroid index × `subvector_count` 個
+として保存します（約 16-64 倍の圧縮）。HNSW index がサポートし、
+Flat / IVF は書き込み時に拒否します。recall 回復のため
+[Rerank Storage](#rerank-storage) との併用を推奨します。
 
 ```toml
 [fields.embedding.Hnsw]
 dimension = 384
 distance = "Cosine"
+# 任意（Issue #631）: `laurus train pq-codebook` で codebook を一度
+# だけ学習し、commit / merge ごとの k-means 再学習の代わりに
+# segment 間で共有する。
+pq_codebook_path = "embedding.pqcb"
 
 [fields.embedding.Hnsw.quantizer.ProductQuantization]
 subvector_count = 48
@@ -292,6 +299,16 @@ subvector_count = 48
 | オプション | 型 | 説明 |
 | :--- | :--- | :--- |
 | `subvector_count` | `integer` | サブベクトルの数。`dimension` を均等に割り切れる必要があります。 |
+
+デフォルトでは codebook は segment ごとに学習されます（256 ベクトル
+未満の segment は `Scalar8Bit` にフォールバック）。`pq_codebook_path`
+を設定すると segment は共有の学習済み codebook で encode されます:
+commit は大幅に高速化し、小さな per-commit segment も PQ を維持
+します — ただし codebook の学習前に commit すると、実行すべき
+`laurus train pq-codebook` コマンドを示すエラーで失敗します
+（per-segment 学習への無言のフォールバックはありません）。学習
+ワークフローは [`train` コマンド](commands.md#train) を参照して
+ください。
 
 > **破壊的変更（Issue #481 Stage 1）:** `quantizer` を「なし」に
 > 設定するスキーマはもはや有効ではありません。Stage 1 より前の

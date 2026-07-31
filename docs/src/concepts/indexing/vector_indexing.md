@@ -209,7 +209,7 @@ recall test at `laurus/tests/vector_recall_test.rs`).
 | Method | Enum Variant | Description | Memory Reduction |
 | :--- | :--- | :--- | :--- |
 | **Scalar 8-bit** *(default)* | `Scalar8Bit` | Per-segment global affine quantization to `u8` | ~4x |
-| **Product Quantization** | `ProductQuantization { subvector_count }` | Stage 3 of #481 — per-segment codebook of `M × 256` centroids, each vector stored as `M` bytes | ~16-64x (HNSW-only) |
+| **Product Quantization** | `ProductQuantization { subvector_count }` | Stage 3 of #481 — codebook of `M × 256` centroids (trained per segment, or [trained once and shared](#shared-pq-codebook-issue-631) via `pq_codebook_path`), each vector stored as `M` bytes | ~16-64x (HNSW-only) |
 
 ```rust
 use laurus::vector::HnswOption;
@@ -476,7 +476,64 @@ instead (the `LVS1` header is self-describing, so readers dispatch on
 the stored kind transparently); once the segment grows — or is merged
 into a larger one — the next write trains PQ as configured. The
 `subvector_count`-divides-`dimension` validation still applies
-regardless of segment size.
+regardless of segment size. Neither the fallback nor the minimum
+applies when a [shared codebook](#shared-pq-codebook-issue-631) is
+configured: nothing is trained per segment in that case, so even tiny
+per-commit segments stay on PQ.
+
+#### Shared PQ codebook (Issue #631)
+
+By default every segment write trains its own codebook from scratch —
+a multi-second k-means cost that recurs on **every commit and every
+merge** under the segment-per-commit layout (#634/#889). Following the
+FAISS / Lucene99 precedent, a codebook can instead be trained **once**
+on a representative sample and reused by every subsequent segment
+write, reducing the encode step to a table lookup (measured ~91-92%
+faster than inline training at 2 048-8 192 vectors).
+
+Enable it by naming a codebook file on the field and training it:
+
+```toml
+[fields.embedding.Hnsw]
+dimension = 128
+pq_codebook_path = "embedding.pqcb"
+
+[fields.embedding.Hnsw.quantizer.ProductQuantization]
+subvector_count = 32
+```
+
+```shell
+laurus train pq-codebook --field embedding --input vectors.jsonl --update-schema
+```
+
+or programmatically via
+[`Engine::train_pq_codebook`](https://docs.rs/laurus/latest/laurus/struct.Engine.html)
+(`engine.train_pq_codebook("embedding", &vectors, None)`). Training is
+CPU-bound and synchronous; thousands of representative vectors are
+enough — the full corpus is not required.
+
+Semantics:
+
+- **The segment format is unchanged.** The shared codebook is still
+  embedded inline in each segment header, so shared-codebook and
+  inline-trained segments coexist with no migration, and the codes are
+  **byte-identical** to what inline training on the same sample would
+  produce.
+- The codebook file is resolved **once, at index open**. Retraining
+  while an engine is open does not hot-swap the codebook mid-session
+  (intentional — a codebook must not change between the commits of one
+  session); reopen the engine to pick up a new file.
+- **Failure policy — no silent fallback.** A configured but
+  not-yet-trained `pq_codebook_path` is lenient at open (so a schema
+  can be created before training), but a commit that needs to encode
+  hard-errors with the training command to run. A present but
+  corrupt or geometry-mismatched file errors at open. Laurus never
+  silently falls back to per-segment training — an invisible
+  regression to the multi-second training cost would defeat the
+  feature.
+- Cosine-metric fields L2-normalize the training sample the same way
+  the writer normalizes indexed vectors, so the codebook basis always
+  matches (the #794 trap).
 
 #### On-disk format
 

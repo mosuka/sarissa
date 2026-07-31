@@ -102,6 +102,7 @@ fn build_store_with_dataset(dimension: usize, n: usize) -> laurus::vector::Vecto
                     quantizer: Default::default(),
                     rerank_storage: None,
                     embedder: None,
+                    pq_codebook_path: None,
                 })),
                 lexical: None,
             },

@@ -184,6 +184,7 @@ base_weight = 1.0
 | `base_weight` | `float` | `1.0` | Scoring weight in hybrid search fusion |
 | `quantizer` | `object` | `"Scalar8Bit"` | Quantization method (see [Quantization](#quantization)). Mandatory; default keeps the int8 format introduced in Issue #481 Stage 1. |
 | `rerank_storage` | `string` | *(omit)* | Optional Stage 2 rerank sidecar (see [Rerank Storage](#rerank-storage)). `"F32"` enables a per-field f32 sidecar so search can rescore int8 candidates against the original vectors. Omit to keep Stage 1 int8-only behavior. |
+| `pq_codebook_path` | `string` | *(omit)* | Storage-relative file name of a shared PQ codebook (Issue #631); only meaningful with a `ProductQuantization` quantizer. Train it with `laurus train pq-codebook`; commits then encode against it instead of re-training k-means per segment. When set but not yet trained, commits fail loudly (no silent fallback). Omit to train per segment. |
 
 **Tuning guidelines:**
 
@@ -274,17 +275,22 @@ distance = "Cosine"
 # quantizer = "Scalar8Bit"  # implicit default; can be omitted
 ```
 
-### Product Quantization (reserved)
+### Product Quantization (HNSW-only)
 
-Reserved for Issue #481 Stage 3. Currently the writer / searcher
-return `NotImplemented` if selected; the variant is kept here so
-schemas can pre-declare without further TOML changes once Stage 3
-lands.
+Issue #481 Stage 3. Stores each vector as `subvector_count` one-byte
+centroid indexes against a codebook of 256 centroids per sub-vector
+(~16-64x compression). Supported by the HNSW index; Flat / IVF reject
+it at write time. Usually paired with
+[Rerank Storage](#rerank-storage) to recover recall.
 
 ```toml
 [fields.embedding.Hnsw]
 dimension = 384
 distance = "Cosine"
+# Optional (Issue #631): train the codebook once with
+# `laurus train pq-codebook` and share it across segments instead of
+# re-training k-means on every commit and merge.
+pq_codebook_path = "embedding.pqcb"
 
 [fields.embedding.Hnsw.quantizer.ProductQuantization]
 subvector_count = 48
@@ -293,6 +299,15 @@ subvector_count = 48
 | Option | Type | Description |
 | :--- | :--- | :--- |
 | `subvector_count` | `integer` | Number of subvectors. Must evenly divide `dimension`. |
+
+By default the codebook is trained per segment (segments with fewer
+than 256 vectors fall back to `Scalar8Bit`). With `pq_codebook_path`
+set, segments encode against the shared pre-trained codebook instead:
+commits get dramatically faster, and even tiny per-commit segments
+stay on PQ — but a commit before the codebook has been trained fails
+with an error naming the `laurus train pq-codebook` command to run
+(never a silent fallback to per-segment training). See the
+[`train` command](commands.md#train) for the training workflow.
 
 > **Breaking change (Issue #481 Stage 1):** schemas that explicitly
 > set `quantizer` to a "none" value are no longer valid. Existing

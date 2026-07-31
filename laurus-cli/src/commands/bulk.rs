@@ -37,6 +37,9 @@ struct BulkEntry {
 
 /// Parse one JSONL line into an `(id, document)` pair.
 ///
+/// Shared with the `train pq-codebook` command (Issue #631), which reads
+/// the same JSONL shape and extracts the training vectors from one field.
+///
 /// # Arguments
 ///
 /// * `line` - The raw line content (must not be blank).
@@ -46,7 +49,7 @@ struct BulkEntry {
 ///
 /// Returns an error naming the line when the JSON does not parse into a
 /// `{"id", "document"}` entry.
-fn parse_entry(line: &str, line_no: usize) -> Result<(String, Document)> {
+pub(crate) fn parse_entry(line: &str, line_no: usize) -> Result<(String, Document)> {
     let entry: BulkEntry = serde_json::from_str(line)
         .with_context(|| format!("line {line_no}: failed to parse JSONL entry"))?;
     Ok((entry.id, entry.document))

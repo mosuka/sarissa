@@ -41,6 +41,8 @@ pub enum Command {
     Delete(DeleteCommand),
     /// Commit pending changes.
     Commit,
+    /// Train an auxiliary index structure (e.g. a shared PQ codebook).
+    Train(TrainCommand),
     /// Execute a search query.
     Search(SearchCommand),
     /// Start an interactive REPL session.
@@ -229,6 +231,52 @@ pub enum DeleteResource {
         /// The name of the field to delete.
         #[arg(long)]
         name: String,
+    },
+}
+
+// --- Train ---
+
+/// CLI arguments for the `train` subcommand.
+///
+/// Holds the target structure to train (currently only a shared PQ
+/// codebook, Issue #631).
+#[derive(Parser)]
+pub struct TrainCommand {
+    #[command(subcommand)]
+    pub resource: TrainResource,
+}
+
+#[derive(Subcommand)]
+pub enum TrainResource {
+    /// Train a shared PQ codebook for an HNSW vector field (Issue #631).
+    ///
+    /// Reads training vectors from a JSONL file (the same
+    /// `{"id": "...", "document": {"fields": {...}}}` shape as `put docs` /
+    /// `add docs`; the field value must be a pre-computed `Vector`) and
+    /// persists the codebook into the index's vector storage. Subsequent
+    /// commits encode segments against it instead of re-training k-means
+    /// per segment — provided the schema's `pq_codebook_path` names the
+    /// trained file (pass --update-schema to set it automatically).
+    PqCodebook {
+        /// The HNSW vector field to train for. Must be configured with
+        /// ProductQuantization.
+        #[arg(long)]
+        field: String,
+        /// Path to the JSONL training file.
+        #[arg(long)]
+        input: std::path::PathBuf,
+        /// Use only the first N vectors of the file (deterministic;
+        /// omit to use all of them).
+        #[arg(long)]
+        sample_size: Option<usize>,
+        /// Storage-relative codebook file name (defaults to the field's
+        /// configured pq_codebook_path, else "{field}.pqcb").
+        #[arg(long)]
+        output: Option<String>,
+        /// Rewrite schema.toml so the field's pq_codebook_path names the
+        /// trained file.
+        #[arg(long, default_value_t = false)]
+        update_schema: bool,
     },
 }
 

@@ -1755,8 +1755,15 @@ impl VectorIndexWriter for HnswIndexWriter {
         // is configured: nothing is trained in that case, so the
         // degenerate-codebook rationale above does not hold, and small
         // segment-per-commit flushes can stay PQ instead of degrading to
-        // Scalar8Bit.
-        let has_shared_pq_codebook = self.index_config.pq_codebook.is_some();
+        // Scalar8Bit. A configured-but-unresolved `pq_codebook_path` (set
+        // in the schema, but not trained yet) must ALSO skip the guard —
+        // otherwise a small flush would silently degrade to Scalar8Bit
+        // here instead of reaching the loud "train one first" error in
+        // the PQ arm below, hiding the missing-codebook misconfiguration
+        // exactly when it is cheapest to surface (#918's failure policy:
+        // no silent fallback).
+        let has_shared_pq_codebook =
+            self.index_config.pq_codebook.is_some() || self.index_config.pq_codebook_path.is_some();
         let effective_quantization = {
             use crate::vector::core::quantization::QuantizationMethod as Qm;
             let n = f32_vectors.len();

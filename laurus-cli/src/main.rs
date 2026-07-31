@@ -24,9 +24,12 @@ use anyhow::Result;
 use clap::Parser;
 
 use crate::cli::{
-    AddResource, Cli, Command, CreateResource, DeleteResource, GetResource, McpCommand, PutResource,
+    AddResource, Cli, Command, CreateResource, DeleteResource, GetResource, McpCommand,
+    PutResource, TrainResource,
 };
-use crate::commands::{add, bulk, commit, create, delete, get, mcp, put, repl, search, serve};
+use crate::commands::{
+    add, bulk, commit, create, delete, get, mcp, put, repl, search, serve, train,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -88,6 +91,25 @@ async fn main() -> Result<()> {
             DeleteResource::Field { name } => delete::run_field(&name, &index_dir).await,
         },
         Command::Commit => commit::run(&index_dir).await,
+        Command::Train(cmd) => match cmd.resource {
+            TrainResource::PqCodebook {
+                field,
+                input,
+                sample_size,
+                output,
+                update_schema,
+            } => {
+                train::run_pq_codebook(
+                    &field,
+                    &input,
+                    sample_size,
+                    output.as_deref(),
+                    update_schema,
+                    &index_dir,
+                )
+                .await
+            }
+        },
         Command::Search(cmd) => search::run(cmd, &index_dir, format).await,
         Command::Repl => repl::run(&index_dir, format).await,
         Command::Serve(cmd) => serve::run(cmd, &index_dir).await,
