@@ -1090,6 +1090,24 @@ impl HnswIndexReader {
         &self.vectors
     }
 
+    /// Iterate the interned `(doc_id, field_name)` records without
+    /// materializing a `String` per record (Issue #672).
+    ///
+    /// The trait-level [`VectorIndexReader::vector_ids`] must rehydrate
+    /// owned `String`s at every call (its signature predates the #633
+    /// interning); callers that already hold a concrete
+    /// `HnswIndexReader` — e.g. the warmup page-fault pass — can borrow
+    /// the dictionary-backed names instead.
+    ///
+    /// # Returns
+    ///
+    /// An iterator over `(doc_id, &field_name)` in record order.
+    pub(crate) fn interned_vector_ids(&self) -> impl Iterator<Item = (u64, &str)> {
+        self.vector_ids
+            .iter()
+            .map(|&(id, fid)| (id, &*self.field_dict[fid as usize]))
+    }
+
     /// Borrow the optional Stage 2 rerank storage pool.
     ///
     /// Returns `Some(_)` only when this reader was loaded against a

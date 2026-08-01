@@ -330,7 +330,10 @@ impl VectorIndexSearcher for IvfSearcher {
         if let Some(ref field_name) = request.field_name {
             Ok(self.index_reader.doc_ids_for_field(field_name).len() as u64)
         } else {
-            Ok(self.index_reader.vector_ids()?.len() as u64)
+            // Issue #672: `vector_ids()` materializes a String per record
+            // just to be counted; `vector_count()` is the same number (one
+            // entry per (doc, field) record) with no allocation.
+            Ok(self.index_reader.vector_count() as u64)
         }
     }
 }

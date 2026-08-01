@@ -438,7 +438,10 @@ impl VectorIndexSearcher for HnswSearcher {
         if let Some(ref field_name) = request.field_name {
             Ok(self.index_reader.doc_ids_for_field(field_name).len() as u64)
         } else {
-            Ok(self.index_reader.vector_ids()?.len() as u64)
+            // Issue #672: `vector_ids()` materializes a String per record
+            // just to be counted; `vector_count()` is the same number (one
+            // entry per (doc, field) record) with no allocation.
+            Ok(self.index_reader.vector_count() as u64)
         }
     }
 
@@ -468,10 +471,11 @@ impl VectorIndexSearcher for HnswSearcher {
         }
         // Read every stored vector so its backing page is faulted in. The
         // accumulator (kept live via `black_box`) stops the loop from being
-        // optimised away as dead code.
+        // optimised away as dead code. The interned iterator (#672) avoids
+        // materializing one `String` per record just to name the field.
         let mut acc = 0u64;
-        for (doc_id, field) in reader.vector_ids()? {
-            if let Ok(Some(vector)) = reader.get_vector(doc_id, &field)
+        for (doc_id, field) in reader.interned_vector_ids() {
+            if let Ok(Some(vector)) = reader.get_vector(doc_id, field)
                 && let Some(first) = vector.data.first()
             {
                 acc = acc.wrapping_add(first.to_bits() as u64);

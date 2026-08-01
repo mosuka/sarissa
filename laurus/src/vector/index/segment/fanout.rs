@@ -549,21 +549,29 @@ impl VectorIndexSearcher for SegmentFanoutSearcher {
         // Count distinct live `(doc_id, field)` keys across segments with
         // the same newest-wins masking as `search`, excluding soft-deleted
         // docs.
+        //
+        // Issue #672: iterate per field through `doc_ids_for_field` (an
+        // O(1) `Arc` clone on every reader type, #405) instead of
+        // `vector_ids()`, whose trait-boundary rehydration materializes a
+        // fresh `String` per record on every call — a full-corpus
+        // allocation per segment per count query. `field_names()` is
+        // dictionary-backed and tiny on all three readers.
         let mut count = 0u64;
         for (idx, reader) in self.readers.iter().enumerate() {
-            for (doc_id, field) in reader.vector_ids()? {
-                if let Some(ref field_name) = request.field_name
-                    && &field != field_name
-                {
-                    continue;
-                }
-                if let Some(bitmap) = &self.bitmap
-                    && bitmap.is_deleted(doc_id)
-                {
-                    continue;
-                }
-                if !self.shadowed(idx, doc_id, &field) {
-                    count += 1;
+            let fields: Vec<String> = match request.field_name {
+                Some(ref field_name) => vec![field_name.clone()],
+                None => reader.field_names()?,
+            };
+            for field in &fields {
+                for &doc_id in reader.doc_ids_for_field(field).iter() {
+                    if let Some(bitmap) = &self.bitmap
+                        && bitmap.is_deleted(doc_id)
+                    {
+                        continue;
+                    }
+                    if !self.shadowed(idx, doc_id, field) {
+                        count += 1;
+                    }
                 }
             }
         }
