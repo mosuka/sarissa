@@ -325,9 +325,111 @@ impl SegmentFanoutSearcher {
             .iter()
             .any(|r| r.contains_vector(doc_id, field))
     }
-}
 
-impl SegmentFanoutSearcher {
+    /// Probe one segment: run the expanding-refill loop (#883) and drop
+    /// newest-wins-shadowed hits (#880).
+    ///
+    /// Over-fetch per segment: containment masking drops shadowed hits
+    /// AFTER the per-segment top-k, so stale copies would otherwise
+    /// consume result slots (#880). Start at 2x for the common case; if
+    /// masking dropped this segment below the requested limit AND the pass
+    /// was truncated at the budget (i.e. live hits may sit below the cut
+    /// behind a band of masked stale copies), EXPAND the budget
+    /// geometrically and re-query until enough live hits survive or the
+    /// segment is exhausted (#883). A fixed multiplier cannot bound recall
+    /// against an arbitrarily deep stale band — the true nearest neighbour
+    /// could sit below any constant cut — so the budget doubles each round.
+    /// Bounded: top_k reaches the segment size in O(log n) queries, and
+    /// the common (no-pollution) case stops after one pass.
+    ///
+    /// After the refill loop the surviving hits are rescored on the
+    /// shared dequantized-f32 basis (Issue #927, see
+    /// [`Self::rescore_on_shared_basis`]) unless the segment's scores
+    /// already sit on the exact f32 rerank basis, and `min_similarity`
+    /// is re-applied to the final scores.
+    ///
+    /// Entirely self-contained per segment (the concrete searcher is built
+    /// here, masking reads only immutable newer readers), so `search` can
+    /// run one probe per worker thread (#926).
+    ///
+    /// # Arguments
+    ///
+    /// * `idx` - Index of the segment's reader (newest-first ordering).
+    /// * `request` - The original query; its `top_k` is replaced by the
+    ///   expanding budget internally.
+    /// * `limit` - The caller-requested `top_k`.
+    /// * `metric` - The index's distance metric.
+    /// * `prepared_query` - The raw query prepared once per search
+    ///   (shared read-only across worker threads).
+    ///
+    /// # Returns
+    ///
+    /// The segment's surviving (unmasked, comparably-scored) hits and
+    /// the number of candidates its probes examined.
+    fn probe_segment(
+        &self,
+        idx: usize,
+        request: &VectorIndexQuery,
+        limit: usize,
+        metric: DistanceMetric,
+        prepared_query: &crate::vector::core::distance::PreparedQuery<'_>,
+    ) -> Result<(
+        Vec<crate::vector::search::searcher::VectorIndexQueryResult>,
+        usize,
+    )> {
+        let searcher = (self.make_searcher)(self.readers[idx].clone())?;
+
+        let mut probe = request.clone();
+        probe.params.top_k = limit.saturating_mul(2);
+        let mut candidates_examined = 0usize;
+        // Whether this segment's scores are already on the exact f32
+        // rerank basis (Issue #481 Stage 2) — comparable across
+        // segments and MORE precise than the dequantized rescore, so
+        // the #927 rescore below must not overwrite them. Stamped by
+        // the per-segment searcher; constant across refill rounds
+        // (same segment, same sidecar).
+        let mut exact_basis = false;
+        let mut kept = loop {
+            let results = searcher.search(&probe)?;
+            candidates_examined += results.candidates_examined;
+            exact_basis |= results
+                .query_metadata
+                .get(crate::vector::search::searcher::SCORE_BASIS_METADATA_KEY)
+                .is_some_and(|v| v == crate::vector::search::searcher::SCORE_BASIS_F32_RERANK);
+            let returned = results.results.len();
+            let kept: Vec<_> = results
+                .results
+                .into_iter()
+                .filter(|hit| !self.shadowed(idx, hit.doc_id, &hit.field_name))
+                .collect();
+
+            // Enough live hits survived masking, or the segment returned
+            // fewer than requested (nothing deeper to fetch) — done.
+            if kept.len() >= limit || returned < probe.params.top_k {
+                break kept;
+            }
+            let next = probe.params.top_k.saturating_mul(2);
+            if next == probe.params.top_k {
+                break kept; // budget saturated (overflow guard)
+            }
+            probe.params.top_k = next;
+        };
+
+        // Issue #927: overwrite the segment-local scores with the
+        // shared-basis ones, then re-apply `min_similarity` on the
+        // final scores — the per-segment filter ran on local scores,
+        // which clamping can only inflate (clamped distance ≤ true
+        // distance), so it never dropped a hit the shared basis would
+        // keep; the inverse (an inflated score sneaking past the
+        // threshold) is corrected here. Skipped when the segment's
+        // scores already sit on the exact f32 rerank basis — a MORE
+        // precise shared basis the dequantized rescore would degrade.
+        if !exact_basis {
+            self.rescore_on_shared_basis(&mut kept, idx, metric, prepared_query)?;
+            kept.retain(|hit| hit.similarity >= request.params.min_similarity);
+        }
+        Ok((kept, candidates_examined))
+    }
     /// Rescore `hits` against the raw query in the shared
     /// dequantized-f32 space (Issue #927).
     ///
@@ -391,75 +493,38 @@ impl VectorIndexSearcher for SegmentFanoutSearcher {
         }
 
         // Issue #927: shared scoring basis for the cross-segment merge —
-        // see `rescore_on_shared_basis`.
+        // see `rescore_on_shared_basis`. Prepared once and shared
+        // read-only across the per-segment probes.
         let metric = self.readers[0].distance_metric();
         let prepared_query = metric.prepare_query(&request.query.data);
 
-        // Over-fetch per segment: containment masking drops shadowed hits
-        // AFTER the per-segment top-k, so stale copies would otherwise
-        // consume result slots (#880). Start at 2x for the common case; if
-        // masking dropped this segment below the requested limit AND the pass
-        // was truncated at the budget (i.e. live hits may sit below the cut
-        // behind a band of masked stale copies), EXPAND the budget
-        // geometrically and re-query until enough live hits survive or the
-        // segment is exhausted (#883). A fixed multiplier cannot bound recall
-        // against an arbitrarily deep stale band — the true nearest neighbour
-        // could sit below any constant cut — so the budget doubles each round.
-        // Bounded: top_k reaches the segment size in O(log n) queries, and
-        // the common (no-pollution) case stops after one pass.
-        for (idx, reader) in self.readers.iter().enumerate() {
-            let searcher = (self.make_searcher)(reader.clone())?;
+        // One self-contained probe per segment (see `probe_segment`). On
+        // native targets with more than one segment the probes run
+        // concurrently (#926) — the indexed collect keeps per-segment
+        // results in newest-first segment order, so the merged vector (and
+        // therefore the sort below) sees byte-identical input to the serial
+        // path and the results are bit-for-bit the same. wasm32 keeps the
+        // serial loop (no threads), matching the crate-wide convention.
+        let probe_all_serial = || -> Result<Vec<_>> {
+            (0..self.readers.len())
+                .map(|idx| self.probe_segment(idx, request, limit, metric, &prepared_query))
+                .collect()
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let per_segment = if self.readers.len() > 1 {
+            use rayon::prelude::*;
+            (0..self.readers.len())
+                .into_par_iter()
+                .map(|idx| self.probe_segment(idx, request, limit, metric, &prepared_query))
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            probe_all_serial()?
+        };
+        #[cfg(target_arch = "wasm32")]
+        let per_segment = probe_all_serial()?;
 
-            let mut probe = request.clone();
-            probe.params.top_k = limit.saturating_mul(2);
-            let mut kept: Vec<crate::vector::search::searcher::VectorIndexQueryResult>;
-            // Whether this segment's scores are already on the exact f32
-            // rerank basis (Issue #481 Stage 2) — comparable across
-            // segments and MORE precise than the dequantized rescore, so
-            // the #927 rescore below must not overwrite them. Stamped by
-            // the per-segment searcher; constant across refill rounds
-            // (same segment, same sidecar).
-            let mut exact_basis = false;
-            loop {
-                let results = searcher.search(&probe)?;
-                merged.candidates_examined += results.candidates_examined;
-                exact_basis |= results
-                    .query_metadata
-                    .get(crate::vector::search::searcher::SCORE_BASIS_METADATA_KEY)
-                    .is_some_and(|v| v == crate::vector::search::searcher::SCORE_BASIS_F32_RERANK);
-                let returned = results.results.len();
-                kept = results
-                    .results
-                    .into_iter()
-                    .filter(|hit| !self.shadowed(idx, hit.doc_id, &hit.field_name))
-                    .collect();
-
-                // Enough live hits survived masking, or the segment returned
-                // fewer than requested (nothing deeper to fetch) — done.
-                if kept.len() >= limit || returned < probe.params.top_k {
-                    break;
-                }
-                let next = probe.params.top_k.saturating_mul(2);
-                if next == probe.params.top_k {
-                    break; // budget saturated (overflow guard)
-                }
-                probe.params.top_k = next;
-            }
-
-            // Issue #927: overwrite the segment-local scores with the
-            // shared-basis ones, then re-apply `min_similarity` on the
-            // final scores — the per-segment filter ran on local scores,
-            // which clamping can only inflate (clamped distance ≤ true
-            // distance), so it never dropped a hit the shared basis would
-            // keep; the inverse (an inflated score sneaking past the
-            // threshold) is corrected here. Skipped when the segment's
-            // scores already sit on the exact f32 rerank basis — a MORE
-            // precise shared basis the dequantized rescore would degrade.
-            if !exact_basis {
-                self.rescore_on_shared_basis(&mut kept, idx, metric, &prepared_query)?;
-                kept.retain(|hit| hit.similarity >= request.params.min_similarity);
-            }
-
+        for (mut kept, candidates_examined) in per_segment {
+            merged.candidates_examined += candidates_examined;
             merged.results.append(&mut kept);
         }
 
