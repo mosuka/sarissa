@@ -327,6 +327,60 @@ impl SegmentFanoutSearcher {
     }
 }
 
+impl SegmentFanoutSearcher {
+    /// Rescore `hits` against the raw query in the shared
+    /// dequantized-f32 space (Issue #927).
+    ///
+    /// Per-segment similarities are computed by the quantized kernels
+    /// against **per-segment** affine params, with the query clamped into
+    /// each segment's value range — so they are comparable only within a
+    /// segment. A segment whose range excludes the query reports its
+    /// boundary doc as an exact match (`similarity = 1.0`), outranking
+    /// truly closer docs from other segments. Clamping shifts every
+    /// distance in a segment by the same offset (`|doc − clamp(q)| =
+    /// |doc − q| − |q − edge|` for out-of-range queries), so the
+    /// segment-internal candidate ordering the graph search produced is
+    /// correct — only the absolute scores must be recomputed on a shared
+    /// basis before the cross-segment sort (the Stage-2 rerank
+    /// precedent).
+    ///
+    /// # Arguments
+    ///
+    /// * `hits` - One segment's surviving hits; `distance`/`similarity`
+    ///   are overwritten in place.
+    /// * `idx` - The segment's reader index (fallback vector source when
+    ///   a hit does not carry its dequantized vector).
+    /// * `metric` - The index's distance metric.
+    /// * `prepared_query` - The raw query prepared once per search.
+    ///
+    /// # Errors
+    ///
+    /// Forwards reader / distance-kernel errors.
+    fn rescore_on_shared_basis(
+        &self,
+        hits: &mut [crate::vector::search::searcher::VectorIndexQueryResult],
+        idx: usize,
+        metric: DistanceMetric,
+        prepared_query: &crate::vector::core::distance::PreparedQuery,
+    ) -> Result<()> {
+        for hit in hits.iter_mut() {
+            let distance = if let Some(v) = &hit.vector {
+                metric.distance_with_prepared(prepared_query, &v.data)?
+            } else if let Some(v) = self.readers[idx].get_vector(hit.doc_id, &hit.field_name)? {
+                metric.distance_with_prepared(prepared_query, &v.data)?
+            } else {
+                // The hit was just returned by this segment, so a missing
+                // vector is unreachable in practice; keep the local score
+                // rather than dropping the hit.
+                continue;
+            };
+            hit.distance = distance;
+            hit.similarity = metric.distance_to_similarity(distance);
+        }
+        Ok(())
+    }
+}
+
 impl VectorIndexSearcher for SegmentFanoutSearcher {
     fn search(&self, request: &VectorIndexQuery) -> Result<VectorIndexQueryResults> {
         let started = crate::util::time::Timer::now();
@@ -335,6 +389,11 @@ impl VectorIndexSearcher for SegmentFanoutSearcher {
         if limit == 0 || self.readers.is_empty() {
             return Ok(merged);
         }
+
+        // Issue #927: shared scoring basis for the cross-segment merge —
+        // see `rescore_on_shared_basis`.
+        let metric = self.readers[0].distance_metric();
+        let prepared_query = metric.prepare_query(&request.query.data);
 
         // Over-fetch per segment: containment masking drops shadowed hits
         // AFTER the per-segment top-k, so stale copies would otherwise
@@ -354,9 +413,20 @@ impl VectorIndexSearcher for SegmentFanoutSearcher {
             let mut probe = request.clone();
             probe.params.top_k = limit.saturating_mul(2);
             let mut kept: Vec<crate::vector::search::searcher::VectorIndexQueryResult>;
+            // Whether this segment's scores are already on the exact f32
+            // rerank basis (Issue #481 Stage 2) — comparable across
+            // segments and MORE precise than the dequantized rescore, so
+            // the #927 rescore below must not overwrite them. Stamped by
+            // the per-segment searcher; constant across refill rounds
+            // (same segment, same sidecar).
+            let mut exact_basis = false;
             loop {
                 let results = searcher.search(&probe)?;
                 merged.candidates_examined += results.candidates_examined;
+                exact_basis |= results
+                    .query_metadata
+                    .get(crate::vector::search::searcher::SCORE_BASIS_METADATA_KEY)
+                    .is_some_and(|v| v == crate::vector::search::searcher::SCORE_BASIS_F32_RERANK);
                 let returned = results.results.len();
                 kept = results
                     .results
@@ -376,12 +446,35 @@ impl VectorIndexSearcher for SegmentFanoutSearcher {
                 probe.params.top_k = next;
             }
 
+            // Issue #927: overwrite the segment-local scores with the
+            // shared-basis ones, then re-apply `min_similarity` on the
+            // final scores — the per-segment filter ran on local scores,
+            // which clamping can only inflate (clamped distance ≤ true
+            // distance), so it never dropped a hit the shared basis would
+            // keep; the inverse (an inflated score sneaking past the
+            // threshold) is corrected here. Skipped when the segment's
+            // scores already sit on the exact f32 rerank basis — a MORE
+            // precise shared basis the dequantized rescore would degrade.
+            if !exact_basis {
+                self.rescore_on_shared_basis(&mut kept, idx, metric, &prepared_query)?;
+                kept.retain(|hit| hit.similarity >= request.params.min_similarity);
+            }
+
             merged.results.append(&mut kept);
         }
 
-        merged
-            .results
-            .sort_unstable_by(|a, b| b.similarity.total_cmp(&a.similarity));
+        // Sort by ascending distance rather than descending similarity
+        // (#927): every metric's `distance` is lower-is-more-similar and
+        // stays precise at long range, while `distance_to_similarity`'s
+        // `exp(-d)` (Euclidean/Manhattan) underflows to 0.0 far from the
+        // query — collapsing distant hits into ties whose unstable-sort
+        // order would leak segment order into the results. Doc id breaks
+        // exact-tie ordering deterministically.
+        merged.results.sort_unstable_by(|a, b| {
+            a.distance
+                .total_cmp(&b.distance)
+                .then(a.doc_id.cmp(&b.doc_id))
+        });
         merged.results.truncate(limit);
         merged.search_time_ms = started.elapsed_ms() as f64;
         Ok(merged)

@@ -276,6 +276,19 @@ pub struct VectorIndexQueryResult {
     pub vector: Option<Vector>,
 }
 
+/// `query_metadata` key a per-segment searcher sets when its scores were
+/// computed against the exact f32 rerank sidecar (Issue #481 Stage 2) —
+/// i.e. `distance(raw_query, true_f32_vector)`, a basis that is already
+/// comparable across segments AND more precise than the dequantized
+/// reconstruction. The multi-segment fan-out (Issue #927) skips its
+/// shared-basis rescore for such results so the sidecar's precision is
+/// not overwritten.
+pub(crate) const SCORE_BASIS_METADATA_KEY: &str = "score_basis";
+
+/// `query_metadata` value for [`SCORE_BASIS_METADATA_KEY`]: exact f32
+/// sidecar rerank basis.
+pub(crate) const SCORE_BASIS_F32_RERANK: &str = "f32-rerank";
+
 /// Collection of results from a low-level vector index query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorIndexQueryResults {

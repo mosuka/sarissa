@@ -1048,6 +1048,13 @@ impl HnswSearcher {
                 _ => found.into_iter().collect(),
             };
 
+        // Issue #927: when the rerank arm above actually ran, the scores
+        // are `distance(raw_query, true_f32_vector)` — an exact,
+        // cross-segment-comparable basis the multi-segment fan-out must
+        // not overwrite with its (approximate) dequantized rescore.
+        let rerank_applied =
+            request.params.rerank_factor.is_some() && reader.rerank_storage().is_some();
+
         // Convert candidate set to results.
         let field_name_owned = field_name.to_string();
         let mut final_results = Vec::new();
@@ -1093,11 +1100,18 @@ impl HnswSearcher {
         let top_k = request.params.top_k.min(final_results.len());
         final_results.truncate(top_k);
 
+        let mut query_metadata = std::collections::HashMap::new();
+        if rerank_applied {
+            query_metadata.insert(
+                crate::vector::search::searcher::SCORE_BASIS_METADATA_KEY.to_string(),
+                crate::vector::search::searcher::SCORE_BASIS_F32_RERANK.to_string(),
+            );
+        }
         Ok(VectorIndexQueryResults {
             results: final_results,
             candidates_examined,
             search_time_ms: 0.0, // Set by caller
-            query_metadata: std::collections::HashMap::new(),
+            query_metadata,
         })
     }
 
