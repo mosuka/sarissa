@@ -179,3 +179,34 @@ fn min_similarity_applies_to_the_shared_basis_score() {
         );
     }
 }
+
+/// Issue #672 regression: `SegmentFanoutSearcher::count` was rewritten
+/// from per-segment `vector_ids()` full clones onto the Arc-backed
+/// `doc_ids_for_field` path — its semantics must be unchanged: distinct
+/// live `(doc_id, field)` keys, counting cross-segment duplicates once
+/// (newest-wins), excluding soft-deleted docs, and honoring the field
+/// filter.
+#[test]
+fn count_masks_duplicates_and_deletions() {
+    use laurus::vector::search::searcher::VectorIndexQueryParams;
+
+    let (index, live) = build_fixture();
+    let searcher = index.searcher().unwrap();
+
+    let count_for = |field: Option<&str>| {
+        searcher
+            .count(VectorIndexQuery {
+                query: grid(0.0),
+                params: VectorIndexQueryParams::default(),
+                field_name: field.map(str::to_string),
+                filter: None,
+            })
+            .unwrap()
+    };
+
+    // 30 docs, one deleted; the stale copies of docs 3 and 7 are the
+    // same (doc, field) keys and must not be double-counted.
+    assert_eq!(count_for(Some("v")), live.len() as u64);
+    assert_eq!(count_for(None), live.len() as u64);
+    assert_eq!(count_for(Some("missing")), 0);
+}
