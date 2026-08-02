@@ -485,6 +485,31 @@ impl VectorIndexWriter for FlatIndexWriter {
         // power loss could surface a published-but-hollow segment file.
         output.close()?;
         storage.rename_file(&tmp_name, &file_name)?;
+
+        // Stage 2 (Issue #481, extended to Flat by #650 PR-2 / #932): emit
+        // the optional LRS1 rerank sidecar alongside the main int8 segment.
+        // The payload follows `self.vectors` — the exact record emission
+        // order above — so the reader's (sidecar position) -> (record
+        // position) mapping is the identity, mirroring HNSW.
+        if let Some(rerank_kind) = self.index_config.rerank_storage {
+            let sidecar_name = format!("{}.f32", file_name);
+            let sidecar_tmp = format!("{}.f32.tmp", file_name);
+            let mut sidecar_out = storage.create_output(&sidecar_tmp)?;
+            let mut payload: Vec<f32> =
+                Vec::with_capacity(self.vectors.len() * self.index_config.dimension);
+            for (_, _, v) in &self.vectors {
+                payload.extend_from_slice(&v.data);
+            }
+            crate::vector::index::rerank_sidecar::write_sidecar(
+                &mut sidecar_out,
+                rerank_kind,
+                self.index_config.dimension as u32,
+                &payload,
+            )?;
+            sidecar_out.flush()?;
+            drop(sidecar_out);
+            storage.rename_file(&sidecar_tmp, &sidecar_name)?;
+        }
         Ok(())
     }
 

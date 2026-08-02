@@ -209,7 +209,7 @@ base_weight = 1.0
 | `distance` | `string` | `"Cosine"` | 距離メトリクス（[距離メトリクス](#距離メトリクス)を参照） |
 | `base_weight` | `float` | `1.0` | ハイブリッド検索のスコア融合における重み |
 | `quantizer` | `object` | `"Scalar8Bit"` | 量子化方式（[量子化](#量子化)を参照）。必須。デフォルトは Issue #481 Stage 1 で導入された int8 形式を保つ。 |
-| `rerank_storage` | `string` | *（省略）* | [Rerank Storage](#rerank-storage) 用に予約。現状 sidecar を書き出すのは HNSW writer のみで、Flat / IVF はスキーマの対称性のためにフィールドを受け付けるが sidecar の書き出し・読み込みは行わない。 |
+| `rerank_storage` | `string` | *（省略）* | Stage 2 rerank sidecar（[Rerank Storage](#rerank-storage)）。#932 以降、3 つのベクトルインデックスタイプすべてでサポート。`"F32"` でフィールド単位の f32 sidecar を有効化し、検索時に int8 候補を元のベクトルで再スコアできる。 |
 
 #### Ivf
 
@@ -232,7 +232,7 @@ base_weight = 1.0
 | `n_probe` | `integer` | `1` | クエリ時に検索するクラスタ数。大きいほど再現率が向上するが遅くなる |
 | `base_weight` | `float` | `1.0` | ハイブリッド検索のスコア融合における重み |
 | `quantizer` | `object` | `"Scalar8Bit"` | 量子化方式（[量子化](#量子化)を参照）。必須。デフォルトは Issue #481 Stage 1 で導入された int8 形式を保つ。 |
-| `rerank_storage` | `string` | *（省略）* | [Rerank Storage](#rerank-storage) 用に予約。現状 sidecar を書き出すのは HNSW writer のみで、Flat / IVF はスキーマの対称性のためにフィールドを受け付けるが sidecar の書き出し・読み込みは行わない。 |
+| `rerank_storage` | `string` | *（省略）* | Stage 2 rerank sidecar（[Rerank Storage](#rerank-storage)）。#932 以降、3 つのベクトルインデックスタイプすべてでサポート。`"F32"` でフィールド単位の f32 sidecar を有効化し、検索時に int8 候補を元のベクトルで再スコアできる。 |
 
 > **注意:** Hnsw および Flat とは異なり、Ivf の `dimension` フィールドは**必須**であり、デフォルト値はありません。
 
@@ -318,9 +318,11 @@ commit は大幅に高速化し、小さな per-commit segment も PQ を維持
 ## Rerank Storage
 
 任意の Stage 2 sidecar（Issue #481）。元の完全精度ベクトルを int8
-セグメントの隣に保持し、HNSW searcher が int8 で広めに候補を取得
+セグメントの隣に保持し、searcher が int8 で広めに候補を取得
 （高速）してから上位 `top_k * rerank_factor` 件を完全な f32 値で
-再スコア（高精度）できるようにします。
+再スコア（高精度）できるようにします。#932 以降、HNSW / Flat /
+IVF の 3 タイプすべてでサポートされます（Flat / IVF の再スコアは
+フィールド指定クエリに適用）。
 
 sidecar はフィールド単位で `rerank_storage` で設定します:
 

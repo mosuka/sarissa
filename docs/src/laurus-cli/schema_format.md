@@ -209,7 +209,7 @@ base_weight = 1.0
 | `distance` | `string` | `"Cosine"` | Distance metric (see [Distance Metrics](#distance-metrics)) |
 | `base_weight` | `float` | `1.0` | Scoring weight in hybrid search fusion |
 | `quantizer` | `object` | `"Scalar8Bit"` | Quantization method (see [Quantization](#quantization)). Mandatory; default keeps the int8 format introduced in Issue #481 Stage 1. |
-| `rerank_storage` | `string` | *(omit)* | Reserved for [Rerank Storage](#rerank-storage). Currently emitted only by the HNSW writer; Flat / IVF accept the field for schema symmetry but do not yet write or consume the sidecar. |
+| `rerank_storage` | `string` | *(omit)* | Optional Stage 2 rerank sidecar (see [Rerank Storage](#rerank-storage)); supported by all three vector index types since #932. `"F32"` enables the per-field f32 sidecar so search can rescore int8 candidates against the original vectors. |
 
 #### Ivf
 
@@ -232,7 +232,7 @@ base_weight = 1.0
 | `n_probe` | `integer` | `1` | Number of clusters to search at query time. Higher = better recall, slower |
 | `base_weight` | `float` | `1.0` | Scoring weight in hybrid search fusion |
 | `quantizer` | `object` | `"Scalar8Bit"` | Quantization method (see [Quantization](#quantization)). Mandatory; default keeps the int8 format introduced in Issue #481 Stage 1. |
-| `rerank_storage` | `string` | *(omit)* | Reserved for [Rerank Storage](#rerank-storage). Currently emitted only by the HNSW writer; Flat / IVF accept the field for schema symmetry but do not yet write or consume the sidecar. |
+| `rerank_storage` | `string` | *(omit)* | Optional Stage 2 rerank sidecar (see [Rerank Storage](#rerank-storage)); supported by all three vector index types since #932. `"F32"` enables the per-field f32 sidecar so search can rescore int8 candidates against the original vectors. |
 
 > **Note:** Unlike Hnsw and Flat, the `dimension` field in Ivf is **required** and has no default value.
 
@@ -317,10 +317,12 @@ with an error naming the `laurus train pq-codebook` command to run
 ## Rerank Storage
 
 Optional Stage 2 sidecar (Issue #481) that keeps the original
-full-precision vectors alongside the int8 segment so the HNSW
-searcher can do a wide candidate fetch over int8 (cheap) and then
-rescore the top `top_k * rerank_factor` candidates against the
-exact f32 values (accurate).
+full-precision vectors alongside the int8 segment so the searcher
+can do a wide candidate fetch over int8 (cheap) and then rescore
+the top `top_k * rerank_factor` candidates against the exact f32
+values (accurate). Supported by all three vector index types —
+HNSW, Flat, and IVF (#932); on Flat/IVF the rescoring applies to
+field-routed queries.
 
 The sidecar is configured per field with `rerank_storage`:
 

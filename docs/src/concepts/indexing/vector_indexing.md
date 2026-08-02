@@ -261,7 +261,9 @@ original full-precision vectors:
    [LRS1 sidecar](#lrs1-rerank-sidecar) (`*.hnsw.f32`).
 3. The new ranking is truncated to `top_k` and returned.
 
-Stage 2 is opt-in per field via
+Since #932 the same sidecar mechanism serves Flat and IVF too (the
+shared `RerankPipeline`, #650); the description below uses HNSW, the
+original Stage-2 host. Stage 2 is opt-in per field via
 [`HnswOption.rerank_storage`](../../laurus-cli/schema_format.md#rerank-storage):
 
 ```rust
