@@ -288,8 +288,11 @@ impl VectorIndexSearcher for IvfSearcher {
                 Ok(None)
             })?;
 
-        // Sort by similarity (descending)
-        candidates.sort_unstable_by(|a, b| b.2.total_cmp(&a.2));
+        // Sort ascending by distance with a doc-id tiebreak (#933):
+        // similarity's `exp(-d)` underflows to 0.0 at long range, collapsing
+        // distant candidates into ties whose unstable order would make top-k
+        // membership arbitrary; distance stays precise at any range.
+        candidates.sort_unstable_by(|a, b| a.3.total_cmp(&b.3).then(a.0.cmp(&b.0)));
 
         // Take top_k results
         let candidates_len = candidates.len();
