@@ -1023,45 +1023,56 @@ impl HnswSearcher {
         found: BinaryHeap<ResultCandidate>,
         candidates_examined: usize,
     ) -> Result<VectorIndexQueryResults> {
-        // Stage 2 (Issue #481): if the query asks for rerank
-        // (`rerank_factor`) and the reader has the LRS1 sidecar loaded
-        // (`reader.rerank_storage()`), widen the int8 candidate set to
-        // `top_k * rerank_factor`, recompute distances against the
-        // original f32 vectors, and use the new distances for the
-        // ranking that the existing convert-to-results pipeline below
-        // operates on. When either prerequisite is missing we silently
-        // fall through to Stage 1 ranking — Stage 1 segments cannot
-        // recover the f32 information that was discarded at index
+        // Stage 2 (Issue #481, refactored by #650 PR-1 / #931): when the
+        // query asks for rerank (`rerank_factor`) and the reader has the
+        // LRS1 sidecar loaded, run the shared `RerankPipeline` — for this
+        // searcher a single `F32SidecarStage` that widens the int8
+        // candidate set to `top_k * rerank_factor` and rescores against
+        // the original f32 vectors. When either prerequisite is missing
+        // we silently fall through to Stage 1 ranking — Stage 1 segments
+        // cannot recover the f32 information that was discarded at index
         // time, so there's nothing better to do.
-        let candidates_for_results: Vec<ResultCandidate> =
-            match (request.params.rerank_factor, reader.rerank_storage()) {
-                (Some(factor), Some(pool)) => {
-                    let widened = request.params.top_k.saturating_mul(factor);
-                    let int8_sorted: Vec<ResultCandidate> = found.into_sorted_vec();
-                    let metric = reader.distance_metric();
-                    let prepared_query = metric.prepare_query(&query.data);
-                    let field_idx = pool.field_position_index(field_name);
-                    let mut rescored: Vec<ResultCandidate> = Vec::with_capacity(widened);
-                    for c in int8_sorted.into_iter().take(widened) {
-                        let pos = match field_idx.as_ref().and_then(|idx| idx.get(&c.id).copied()) {
-                            Some(p) => p,
-                            None => continue,
-                        };
-                        let f32_slice = pool.f32_slice_at(pos);
-                        let distance = metric.distance_with_prepared(&prepared_query, f32_slice)?;
-                        rescored.push(ResultCandidate { id: c.id, distance });
-                    }
-                    rescored
-                }
-                _ => found.into_iter().collect(),
-            };
+        use crate::vector::search::rerank::{F32SidecarStage, RerankCandidates, RerankPipeline};
+        let pipeline = match (request.params.rerank_factor, reader.rerank_storage()) {
+            (Some(factor), Some(pool)) => Some((
+                RerankPipeline::new(
+                    vec![Box::new(F32SidecarStage::new(
+                        Arc::clone(pool),
+                        field_name,
+                        reader.distance_metric(),
+                    ))],
+                    vec![factor],
+                ),
+                factor,
+            )),
+            _ => None,
+        };
 
-        // Issue #927: when the rerank arm above actually ran, the scores
-        // are `distance(raw_query, true_f32_vector)` — an exact,
-        // cross-segment-comparable basis the multi-segment fan-out must
-        // not overwrite with its (approximate) dequantized rescore.
-        let rerank_applied =
-            request.params.rerank_factor.is_some() && reader.rerank_storage().is_some();
+        // Issue #927: when the pipeline's final stage actually applies,
+        // the scores are `distance(raw_query, true_f32_vector)` — an
+        // exact, cross-segment-comparable basis the multi-segment
+        // fan-out must not overwrite with its (approximate) dequantized
+        // rescore.
+        let mut rerank_applied = false;
+        let candidates_for_results: Vec<ResultCandidate> = match pipeline {
+            Some((pipeline, _factor)) => {
+                // Ascending int8 order so the pipeline's widening prefix
+                // matches the pre-refactor `into_sorted_vec().take(..)`.
+                let int8_sorted: Vec<ResultCandidate> = found.into_sorted_vec();
+                let mut candidates = RerankCandidates::with_capacity(int8_sorted.len());
+                for c in &int8_sorted {
+                    candidates.push(c.id, c.distance);
+                }
+                rerank_applied = pipeline.run(query, &mut candidates, request.params.top_k)?;
+                candidates
+                    .doc_ids
+                    .iter()
+                    .zip(&candidates.distances)
+                    .map(|(&id, &distance)| ResultCandidate { id, distance })
+                    .collect()
+            }
+            None => found.into_iter().collect(),
+        };
 
         // Convert candidate set to results.
         let field_name_owned = field_name.to_string();
