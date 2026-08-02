@@ -9,4 +9,5 @@
 //! similarity-metric / ranking API that no production caller invoked.
 
 pub mod filter_set;
+pub(crate) mod rerank;
 pub mod searcher;
