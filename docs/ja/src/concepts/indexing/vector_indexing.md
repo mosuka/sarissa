@@ -262,7 +262,9 @@ Stage 1 ではベクトルを int8 のみで保持します。グラフ検索は
    ベクトルで再スコアする。
 3. 新しいランキングを `top_k` に切り詰めて返す。
 
-Stage 2 はフィールド単位で
+Issue #932 以降、同じ sidecar 機構は共有 `RerankPipeline`（#650）を
+通じて Flat / IVF でも機能します（以下の説明は Stage 2 の元ホストである
+HNSW を例にしています）。Stage 2 はフィールド単位で
 [`HnswOption.rerank_storage`](../../laurus-cli/schema_format.md#rerank-storage)
 で opt-in します:
 

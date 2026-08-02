@@ -197,14 +197,12 @@ impl VectorIndexSearcher for IvfSearcher {
         // filter. The store's post-filter still runs but becomes a no-op for
         // the already-filtered results, so recall is unchanged.
 
-        // Issue #481 Stage 2 (rerank) -- API surface only in Stage 1.
-        if request.params.rerank_factor.is_some() {
-            return Err(crate::error::LaurusError::NotImplemented(
-                "Two-stage rerank (Issue #481 Stage 2) is not yet implemented. \
-                 Pass rerank_factor = None for the Stage 1 quantized search."
-                    .to_string(),
-            ));
-        }
+        // Issue #481 Stage 2 rerank (extended to IVF by #650 PR-2 /
+        // #932): honored below when the query is field-routed and the
+        // reader has the `.f32` sidecar loaded. Otherwise `rerank_factor`
+        // silently falls back to Stage 1 ranking — the same convention as
+        // HNSW, where a missing prerequisite (here: a single field to key
+        // the sidecar position index) cannot be recovered at query time.
 
         let start = Timer::now();
         let mut results = VectorIndexQueryResults::new();
@@ -294,6 +292,59 @@ impl VectorIndexSearcher for IvfSearcher {
         // membership arbitrary; distance stays precise at any range.
         candidates.sort_unstable_by(|a, b| a.3.total_cmp(&b.3).then(a.0.cmp(&b.0)));
 
+        // Stage 2 (Issue #481 / #932): run the shared rerank pipeline over
+        // the sorted quantized candidates when the query is field-routed
+        // (every candidate then shares one sidecar position index). The
+        // survivors carry exact f32 distances — stamped below as the
+        // fan-out's `score_basis` (#927).
+        let mut rerank_applied = false;
+        if let (Some(factor), Some(pool), Some(field_name)) = (
+            request.params.rerank_factor,
+            ivf_reader.and_then(|r| r.rerank_storage()),
+            request.field_name.as_deref(),
+        ) {
+            use crate::vector::search::rerank::{
+                F32SidecarStage, RerankCandidates, RerankPipeline,
+            };
+            let pipeline = RerankPipeline::new(
+                vec![Box::new(F32SidecarStage::new(
+                    std::sync::Arc::clone(pool),
+                    field_name,
+                    metric,
+                ))],
+                vec![factor],
+            );
+            let mut rc = RerankCandidates::with_capacity(candidates.len());
+            for (doc_id, _, _, distance, _) in &candidates {
+                rc.push(*doc_id, *distance);
+            }
+            rerank_applied = pipeline.run(&request.query, &mut rc, request.params.top_k)?;
+            if rerank_applied {
+                // Every candidate shares the routed field; recover its
+                // interned id for the rebuild (guaranteed present — the
+                // probe already filtered on it).
+                let fid = field_dict
+                    .iter()
+                    .position(|f| &**f == field_name)
+                    .map(|i| i as u16)
+                    .unwrap_or_default();
+                candidates = rc
+                    .doc_ids
+                    .iter()
+                    .zip(&rc.distances)
+                    .map(|(&doc_id, &distance)| {
+                        (
+                            doc_id,
+                            fid,
+                            metric.distance_to_similarity(distance),
+                            distance,
+                            Vector::new(Vec::new()),
+                        )
+                    })
+                    .collect();
+            }
+        }
+
         // Take top_k results
         let candidates_len = candidates.len();
         let top_k = request.params.top_k.min(candidates_len);
@@ -306,7 +357,13 @@ impl VectorIndexSearcher for IvfSearcher {
             }
 
             let vector_output = if request.params.include_vectors {
-                Some(vector)
+                if rerank_applied {
+                    // The rescored tuple carries a placeholder; fetch the
+                    // real vector only for the final results.
+                    self.index_reader.get_vector(doc_id, &field_name)?
+                } else {
+                    Some(vector)
+                }
             } else {
                 None
             };
@@ -320,6 +377,16 @@ impl VectorIndexSearcher for IvfSearcher {
                     distance,
                     vector: vector_output,
                 });
+        }
+
+        // Issue #927: exact-f32 scores must be flagged so the multi-segment
+        // fan-out keeps them instead of overwriting with its dequantized
+        // rescore.
+        if rerank_applied {
+            results.query_metadata.insert(
+                crate::vector::search::searcher::SCORE_BASIS_METADATA_KEY.to_string(),
+                crate::vector::search::searcher::SCORE_BASIS_F32_RERANK.to_string(),
+            );
         }
 
         results.search_time_ms = start.elapsed().as_secs_f64() * 1000.0;

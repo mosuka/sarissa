@@ -130,6 +130,10 @@ impl VectorStore {
                     FieldOption::Flat(opt) => VectorIndexTypeConfig::Flat(FlatIndexConfig {
                         dimension: opt.dimension,
                         distance_metric: opt.distance,
+                        // Stage-2 rerank sidecar (#481, wired for Flat by
+                        // #932 — previously carried on the option but
+                        // dropped here, so the writer never emitted it).
+                        rerank_storage: opt.rerank_storage,
                         // L2-normalize only for the magnitude-invariant
                         // Cosine metric (Issue #794); normalizing a
                         // Euclidean/DotProduct/Manhattan field changes its
@@ -161,6 +165,10 @@ impl VectorStore {
                         distance_metric: opt.distance,
                         n_clusters: opt.n_clusters,
                         n_probe: opt.n_probe,
+                        // Stage-2 rerank sidecar (#481, wired for IVF by
+                        // #932 — previously carried on the option but
+                        // dropped here, so the writer never emitted it).
+                        rerank_storage: opt.rerank_storage,
                         // L2-normalize only for the magnitude-invariant
                         // Cosine metric (Issue #794).
                         normalize_vectors: opt.distance

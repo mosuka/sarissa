@@ -46,6 +46,10 @@ pub struct IvfIndexReader {
     /// once at load so `doc_ids_for_field` returns a refcount-shared
     /// slice without re-cloning `vector_ids`. #405.
     vector_ids_by_field: HashMap<String, Arc<[u64]>>,
+    /// Stage 2 rerank sidecar pool (Issue #481, extended to IVF by
+    /// #650 PR-2 / #932). `Some` only when the `.f32` sidecar exists and
+    /// the loading mode is Eager; absence keeps Stage 1 behavior.
+    rerank_storage: Option<Arc<crate::vector::index::rerank_storage::RerankStoragePool>>,
 }
 
 /// Group `vector_ids` by field name into refcount-shared slices.
@@ -312,6 +316,20 @@ impl IvfIndexReader {
         };
 
         let vector_ids_by_field = build_vector_ids_by_field(&vector_ids, &field_dict);
+
+        // Stage 2 rerank sidecar (Issue #481, extended to IVF by #650
+        // PR-2 / #932): loaded eagerly when present, mirroring HNSW. The
+        // pool's positions pair with `vector_ids` (the cluster-grouped
+        // record order the writer also used for the sidecar payload) —
+        // an identity mapping.
+        let rerank_storage = crate::vector::index::rerank_sidecar::load_rerank_sidecar(
+            storage.as_ref(),
+            &file_name,
+            dimension,
+            &vector_ids,
+            &field_dict,
+        )?;
+
         Ok(Self {
             vectors,
             vector_ids,
@@ -324,7 +342,15 @@ impl IvfIndexReader {
             field_dict,
             deletion_bitmap: None,
             vector_ids_by_field,
+            rerank_storage,
         })
+    }
+
+    /// Borrow the optional Stage 2 rerank storage pool (#932).
+    pub fn rerank_storage(
+        &self,
+    ) -> Option<&Arc<crate::vector::index::rerank_storage::RerankStoragePool>> {
+        self.rerank_storage.as_ref()
     }
 
     pub fn set_deletion_bitmap(&mut self, bitmap: Arc<DeletionBitmap>) {

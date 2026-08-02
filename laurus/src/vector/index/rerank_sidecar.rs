@@ -471,6 +471,80 @@ pub fn read_sidecar<R: Read>(
     }
 }
 
+/// Load a segment's optional `.f32` rerank sidecar into a
+/// [`crate::vector::index::rerank_storage::RerankStoragePool`]
+/// (Issue #481; shared across HNSW/Flat/IVF readers by #650 PR-2 / #932).
+///
+/// Lenient-if-absent: returns `Ok(None)` when no sidecar file exists or
+/// when `storage` is in Lazy loading mode (the sidecar is skipped to honor
+/// Lazy's memory-savings promise — Stage 2 segments opened Lazy silently
+/// degrade to Stage 1). A present sidecar whose `dim`/`vector_count`
+/// disagree with the segment fails loudly.
+///
+/// The pool's positions pair with `vector_ids` (the segment's record
+/// order, which the writer also used for the sidecar payload), giving an
+/// identity (sidecar position) -> (record position) mapping.
+///
+/// # Arguments
+///
+/// * `storage` - The segment's storage backend.
+/// * `file_name` - The main segment file name (`"{id}.hnsw"` / `.flat` /
+///   `.ivf`); the sidecar is `"{file_name}.f32"`.
+/// * `dimension` - The segment's vector dimension.
+/// * `vector_ids` - Interned `(doc_id, field_id)` records in segment
+///   order.
+/// * `field_dict` - The segment's field-name dictionary.
+///
+/// # Errors
+///
+/// Forwards [`read_sidecar`] errors and fails on `dim` / `vector_count`
+/// mismatches.
+pub(crate) fn load_rerank_sidecar(
+    storage: &dyn crate::storage::Storage,
+    file_name: &str,
+    dimension: usize,
+    vector_ids: &[(u64, u16)],
+    field_dict: &[std::sync::Arc<str>],
+) -> Result<Option<std::sync::Arc<crate::vector::index::rerank_storage::RerankStoragePool>>> {
+    if !matches!(storage.loading_mode(), crate::storage::LoadingMode::Eager) {
+        return Ok(None);
+    }
+    let sidecar_name = format!("{file_name}.f32");
+    if !storage.file_exists(&sidecar_name) {
+        return Ok(None);
+    }
+    let mut sidecar_in = storage.open_input(&sidecar_name)?;
+    let sidecar_size = sidecar_in.size()?;
+    let (header, payload) = read_sidecar(&mut sidecar_in, sidecar_size)?;
+    if header.dim as usize != dimension {
+        return Err(LaurusError::InvalidOperation(format!(
+            "rerank sidecar dim mismatch: segment uses {dimension}, sidecar uses {}",
+            header.dim
+        )));
+    }
+    if header.vector_count as usize != vector_ids.len() {
+        return Err(LaurusError::InvalidOperation(format!(
+            "rerank sidecar vector_count mismatch: segment has {} vectors, sidecar has {}",
+            vector_ids.len(),
+            header.vector_count
+        )));
+    }
+    // Transient rehydration for the pool's String-shaped assignment input
+    // (eager-only path; nothing retained).
+    let assignment: Vec<(u64, String)> = vector_ids
+        .iter()
+        .map(|&(id, fid)| (id, field_dict[fid as usize].to_string()))
+        .collect();
+    let pool = crate::vector::index::rerank_storage::RerankStoragePool::from_sidecar_payload(
+        header.storage_kind,
+        dimension,
+        header.vector_count as usize,
+        payload,
+        &assignment,
+    )?;
+    Ok(Some(std::sync::Arc::new(pool)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
