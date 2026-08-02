@@ -131,7 +131,11 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                 results.candidates_examined = candidates.len();
             }
 
-            candidates.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+            // Sort ascending by distance with a doc-id tiebreak (#933):
+            // similarity's `exp(-d)` underflows to 0.0 at long range,
+            // collapsing distant candidates into ties whose unstable order
+            // would make top-k membership arbitrary; distance stays precise.
+            candidates.sort_unstable_by(|a, b| a.2.total_cmp(&b.2).then(a.0.cmp(&b.0)));
 
             let top_k = request.params.top_k.min(candidates.len());
             for (doc_id, similarity, distance, vector) in candidates.into_iter().take(top_k) {
@@ -198,7 +202,11 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                 results.candidates_examined = candidates.len();
             }
 
-            candidates.sort_unstable_by(|a, b| b.2.total_cmp(&a.2));
+            // Sort ascending by distance with a doc-id tiebreak (#933):
+            // similarity's `exp(-d)` underflows to 0.0 at long range,
+            // collapsing distant candidates into ties whose unstable order
+            // would make top-k membership arbitrary; distance stays precise.
+            candidates.sort_unstable_by(|a, b| a.3.total_cmp(&b.3).then(a.0.cmp(&b.0)));
 
             let top_k = request.params.top_k.min(candidates.len());
             for (doc_id, field_name, similarity, distance, vector) in
