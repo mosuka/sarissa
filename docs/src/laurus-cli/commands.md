@@ -23,7 +23,7 @@ laurus --index-dir /var/data/my_index --format json search "title:rust"
 Create a new index. If `--schema` is given, uses that TOML file; otherwise launches the interactive schema wizard.
 
 ```bash
-laurus create index [--schema <FILE>]
+laurus create index [--schema <FILE>] [--train-pq-codebook <JSONL>]
 ```
 
 **Arguments:**
@@ -31,6 +31,7 @@ laurus create index [--schema <FILE>]
 | Flag | Required | Description |
 | :--- | :--- | :--- |
 | `--schema <FILE>` | No | Path to a TOML file defining the index schema. When omitted, the command checks if a `schema.toml` already exists in the index directory and uses it; otherwise the interactive wizard is launched. |
+| `--train-pq-codebook <JSONL>` | No | Train shared PQ codebooks as part of creation (Issue #920). Every HNSW field configuring `ProductQuantization` + `pq_codebook_path` is trained from this JSONL file (the `put docs` / `add docs` shape with pre-computed `Vector` values) immediately after the index is created, so the very first commit can already encode against the codebook — removing the create → `train pq-codebook` → ingest ordering the failure policy otherwise requires you to manage manually. Errors before creating anything if the file is missing or no field is eligible. |
 
 **Schema file format:**
 
@@ -65,6 +66,13 @@ laurus --index-dir ./my_index create index
 # Field name: title
 # ...
 # Index created at ./my_index.
+
+# Create and train the shared PQ codebook in one step (Issue #920)
+laurus --index-dir ./my_index create index --schema schema.toml \
+    --train-pq-codebook train.jsonl
+# Index created at ./my_index.
+# Training PQ codebook for field 'embedding' on 300 vectors...
+# Trained codebook 'embedding.pqcb' (m = 4, k = 256, sub_dim = 8, dimension = 32) from 300 vectors.
 ```
 
 > **Note:** If both `schema.toml` and `store/` already exist, an error is returned. Delete the index directory to recreate. If only `schema.toml` exists (e.g. after an interrupted creation), running `create index` without `--schema` recovers the index by creating the missing storage from the existing schema.
