@@ -404,15 +404,16 @@ commit と merge のすべてで再利用します — segment ごとの k-means
 小さな per-commit segment も PQ を維持します。
 
 ```bash
-laurus train pq-codebook --field <FIELD> --input <JSONL> \
+laurus train pq-codebook --field <FIELD> (--input <JSONL> | --from-index) \
     [--sample-size <N>] [--output <NAME>] [--update-schema]
 ```
 
 | 引数 | 説明 |
 | :--- | :--- |
 | `--field` | 学習対象の HNSW ベクトルフィールド。`ProductQuantization` quantizer が設定されている必要があります。 |
-| `--input` | JSONL 学習ファイル — `put docs` / `add docs` と同じ `{"id": "...", "document": {"fields": {...}}}` 形式。フィールド値は事前計算済み `Vector` である必要があります（embedder 生成の入力は未対応）。 |
-| `--sample-size` | ファイルの先頭 N 件のみを使用（決定的）。省略時は全件を使用。代表的なベクトル数千件で十分です。 |
+| `--input` | JSONL 学習ファイル — `put docs` / `add docs` と同じ `{"id": "...", "document": {"fields": {...}}}` 形式。フィールド値は事前計算済み `Vector` である必要があります（embedder 生成の入力は未対応）。`--input` と `--from-index` はどちらか一方のみ指定できます。 |
+| `--from-index` | ファイルの代わりに、このインデックスにコミット済みのベクトルを直接サンプリングします（Issue #920）— JSONL エクスポート不要。`--input` と `--from-index` はどちらか一方のみ指定できます。注意: 既に PQ エンコード済みのフィールドではサンプルは有損の再構成ベクトルになります。想定フローはフィールドの PQ 有効化**前**にコミットしたベクトルからの学習です。 |
+| `--sample-size` | 先頭 N 件のみを使用（決定的: `--input` はファイル順、`--from-index` は doc_id 昇順）。省略時は全件を使用。代表的なベクトル数千件で十分です。 |
 | `--output` | ストレージ相対の codebook ファイル名。デフォルトはフィールドの `pq_codebook_path`、未設定なら `{field}.pqcb`。稼働中の codebook の横に v2 を学習する場合に使用。 |
 | `--update-schema` | フィールドの `pq_codebook_path` が学習済みファイルを指すよう `schema.toml` を書き換えます。 |
 
@@ -437,6 +438,13 @@ laurus train pq-codebook --field embedding --input train.jsonl --update-schema
 # Training PQ codebook for field 'embedding' on 2 vectors...
 # Trained codebook 'embedding.pqcb' (m = 2, k = 256, sub_dim = 2, dimension = 4) from 2 vectors.
 # Updated schema.toml: embedding.pq_codebook_path = "embedding.pqcb".
+```
+
+または、インデックスにコミット済みのベクトルから直接サンプリングします
+— JSONL エクスポートは不要です:
+
+```bash
+laurus train pq-codebook --field embedding --from-index --sample-size 5000 --update-schema
 ```
 
 ---

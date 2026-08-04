@@ -937,6 +937,43 @@ impl VectorStore {
         })
     }
 
+    /// Sample up to `limit` `(doc_id, vector)` pairs already committed for
+    /// `field`.
+    ///
+    /// Ordered by ascending doc_id for determinism —
+    /// [`get_vectors_by_field`](crate::vector::reader::VectorIndexReader::get_vectors_by_field)
+    /// returns vectors in sealed-segment (newest-generation-first) order,
+    /// not doc_id order, so this sorts before truncating (Issue #920:
+    /// mirrors the `laurus train pq-codebook` JSONL path's "first N,
+    /// deterministic" sampling semantics, just drawn from committed
+    /// segments instead of a training file).
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Vector field to sample. An unknown or vector-less
+    ///   field yields an empty `Vec`, not an error (matches
+    ///   `get_vectors_by_field`'s own convention).
+    /// * `limit` - Maximum number of pairs to return. `None` returns
+    ///   every committed vector for the field.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if obtaining the reader or reading the field's
+    /// vectors fails.
+    pub fn sample_field_vectors(
+        &self,
+        field: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<(u64, Vector)>> {
+        let reader = self.index.reader()?;
+        let mut vectors = reader.get_vectors_by_field(field)?;
+        vectors.sort_unstable_by_key(|(doc_id, _)| *doc_id);
+        if let Some(limit) = limit {
+            vectors.truncate(limit);
+        }
+        Ok(vectors)
+    }
+
     /// Get the storage backend.
     pub fn storage(&self) -> &Arc<dyn Storage> {
         self.index.storage()
@@ -1083,6 +1120,70 @@ mod tests {
         assert!(!store.is_closed());
         store.close().await.unwrap();
         assert!(store.is_closed());
+    }
+
+    /// Build a `VectorStore` (Flat, Euclidean — no normalization, so the
+    /// dequantized round-trip is easy to bound) and commit `n` vectors
+    /// under `field`, one dimension of value `doc_id as f32` (so exact
+    /// identity is trivially checkable modulo int8 quantization error).
+    async fn store_with_committed_vectors(field: &str, doc_ids: &[u64]) -> VectorStore {
+        use crate::vector::index::config::FlatIndexConfig;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let config = VectorIndexTypeConfig::Flat(FlatIndexConfig {
+            dimension: 4,
+            distance_metric: crate::vector::core::distance::DistanceMetric::Euclidean,
+            ..Default::default()
+        });
+        let store = VectorStore::with_index_type_config(storage, config).unwrap();
+
+        for &doc_id in doc_ids {
+            let doc = Document::builder()
+                .add_field(field, DataValue::Vector(vec![doc_id as f32; 4]))
+                .build();
+            store
+                .upsert_document_by_internal_id(doc_id, doc)
+                .await
+                .unwrap();
+        }
+        store.commit().await.unwrap();
+        store
+    }
+
+    /// Issue #920: `sample_field_vectors` must return committed vectors
+    /// sorted by ascending doc_id, regardless of commit/insertion order —
+    /// `get_vectors_by_field`'s underlying sealed-segment order is
+    /// newest-generation-first, not doc_id order.
+    #[tokio::test]
+    async fn sample_field_vectors_orders_by_ascending_doc_id() {
+        let store = store_with_committed_vectors("embedding", &[30, 10, 20]).await;
+
+        let sampled = store.sample_field_vectors("embedding", None).unwrap();
+        let ids: Vec<u64> = sampled.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, vec![10, 20, 30]);
+    }
+
+    /// `limit` truncates to the first N by doc_id; `None` returns all.
+    #[tokio::test]
+    async fn sample_field_vectors_respects_limit() {
+        let store = store_with_committed_vectors("embedding", &[5, 1, 3, 2, 4]).await;
+
+        let limited = store.sample_field_vectors("embedding", Some(2)).unwrap();
+        let ids: Vec<u64> = limited.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, vec![1, 2]);
+
+        let all = store.sample_field_vectors("embedding", None).unwrap();
+        assert_eq!(all.len(), 5);
+    }
+
+    /// An unknown field yields an empty `Vec`, not an error — matches
+    /// `get_vectors_by_field`'s own convention.
+    #[tokio::test]
+    async fn sample_field_vectors_returns_empty_for_unknown_field() {
+        let store = store_with_committed_vectors("embedding", &[1, 2]).await;
+
+        let sampled = store.sample_field_vectors("no_such_field", None).unwrap();
+        assert!(sampled.is_empty());
     }
 
     /// Issue #790: the store-level config conversion must carry
