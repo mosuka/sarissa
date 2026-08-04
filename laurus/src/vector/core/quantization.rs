@@ -126,11 +126,37 @@ impl ScalarQuantParams {
                 "Cannot train scalar quantization on an empty vector set".to_string(),
             ));
         }
+        Self::train_from_slices(vectors.iter().map(|v| v.data.as_slice()))
+    }
+
+    /// Train per-segment global affine parameters from an iterator of raw
+    /// f32 slices, without requiring the caller to materialize [`Vector`]
+    /// wrappers.
+    ///
+    /// Same algorithm and error conditions as [`Self::train`] (single pass
+    /// over every element to find `min`/`max`); used by callers that
+    /// already hold flat f32 payloads — e.g. deriving a scalar-quantized
+    /// view from an existing full-precision rerank sidecar (Issue #673).
+    ///
+    /// # Arguments
+    ///
+    /// * `slices` - Iterator of non-empty, equal-or-mixed-length f32
+    ///   slices. The iterator itself must yield at least one slice with at
+    ///   least one element.
+    ///
+    /// # Errors
+    ///
+    /// * [`LaurusError::InvalidOperation`] if the iterator yields no
+    ///   elements at all (empty iterator, or every slice is empty).
+    /// * [`LaurusError::InvalidOperation`] if any element is non-finite
+    ///   (`NaN` or `±inf`), since quantization parameters would be
+    ///   meaningless.
+    pub fn train_from_slices<'a>(slices: impl Iterator<Item = &'a [f32]>) -> Result<Self> {
         let mut min_v = f32::INFINITY;
         let mut max_v = f32::NEG_INFINITY;
         let mut total_count: usize = 0;
-        for v in vectors {
-            for &x in v.data.iter() {
+        for slice in slices {
+            for &x in slice {
                 if !x.is_finite() {
                     return Err(LaurusError::InvalidOperation(
                         "Training vectors contain NaN or infinite values".to_string(),
@@ -964,6 +990,28 @@ mod tests {
 
         let vectors = vec![vec_of(&[1.0, f32::INFINITY, 2.0])];
         let err = ScalarQuantParams::train(&vectors).unwrap_err();
+        assert!(matches!(err, LaurusError::InvalidOperation(_)));
+    }
+
+    #[test]
+    fn train_from_slices_matches_train_on_equivalent_input() {
+        let vectors = vec![
+            vec_of(&[0.0, 1.0, 2.0]),
+            vec_of(&[-1.5, 3.0, 0.5]),
+            vec_of(&[5.0, -2.0, 1.0]),
+        ];
+        let via_vectors = ScalarQuantParams::train(&vectors).unwrap();
+        let slices: Vec<&[f32]> = vectors.iter().map(|v| v.data.as_slice()).collect();
+        let via_slices = ScalarQuantParams::train_from_slices(slices.into_iter()).unwrap();
+        assert_eq!(via_vectors, via_slices);
+    }
+
+    #[test]
+    fn train_from_slices_rejects_empty_iterator() {
+        let err = ScalarQuantParams::train_from_slices(std::iter::empty()).unwrap_err();
+        assert!(matches!(err, LaurusError::InvalidOperation(_)));
+
+        let err = ScalarQuantParams::train_from_slices([[].as_slice()].into_iter()).unwrap_err();
         assert!(matches!(err, LaurusError::InvalidOperation(_)));
     }
 
