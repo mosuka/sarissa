@@ -486,7 +486,10 @@ laurus train pq-codebook --field embedding --input vectors.jsonl --update-schema
 ```
 
 （`--input` の代わりに `--from-index` でインデックスにコミット済みの
-ベクトルを直接サンプリングすることもできます、Issue #920）、または
+ベクトルを直接サンプリングすることも、`laurus create index
+--train-pq-codebook <jsonl>` で学習をインデックス作成に畳み込んで
+train-before-first-commit の順序ハザードを完全に解消することもできます
+— いずれも Issue #920）、または
 プログラムから
 [`Engine::train_pq_codebook`](https://docs.rs/laurus/latest/laurus/struct.Engine.html)
 （`engine.train_pq_codebook("embedding", &vectors, None)`。from-index

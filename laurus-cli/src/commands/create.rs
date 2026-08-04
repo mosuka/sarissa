@@ -27,10 +27,21 @@ use crate::context;
 /// schema file (the schema is persisted inside the index directory as
 /// `schema.toml`).
 ///
+/// With `train_pq_codebook`, every HNSW field configuring
+/// `ProductQuantization` + `pq_codebook_path` gets its shared codebook
+/// trained from the given JSONL file immediately after creation (Issue
+/// #920) — the very first commit can already encode against it, removing
+/// the train-before-first-commit ordering hazard the #918 failure policy
+/// otherwise leaves to the user. Validation (JSONL exists, at least one
+/// eligible field) runs **before** anything is created so a failure never
+/// leaves a half-initialized index behind.
+///
 /// # Arguments
 ///
 /// * `schema_path` - Optional path to a schema TOML file. When `None`, the
 ///   interactive wizard is used instead.
+/// * `train_pq_codebook` - Optional JSONL training file (bulk-ingest
+///   shape); trains the shared codebook(s) as part of creation.
 /// * `index_dir` - Path to the index directory for the new index.
 ///
 /// # Errors
@@ -38,26 +49,112 @@ use crate::context;
 /// Returns an error if:
 /// - The schema file cannot be read or parsed (when `schema_path` is given).
 /// - The interactive wizard fails (when `schema_path` is `None`).
-/// - The index cannot be created.
-pub async fn run_index(schema_path: Option<&Path>, index_dir: &Path) -> Result<()> {
-    match schema_path {
-        Some(path) => {
-            context::create_index(index_dir, path).await?;
-        }
-        None => {
-            // If schema.toml already exists, use it directly instead of
-            // launching the wizard (recovery path for missing store/).
-            if index_dir.join("schema.toml").exists() {
-                let schema = context::read_schema(index_dir)?;
-                context::create_index_from_schema(index_dir, schema).await?;
-            } else {
-                let schema = build_schema_interactive()?;
-                context::create_index_from_schema(index_dir, schema).await?;
+/// - `train_pq_codebook` is given but the file does not exist, or the
+///   effective schema has no `ProductQuantization` + `pq_codebook_path`
+///   field.
+/// - The index cannot be created, or codebook training fails.
+pub async fn run_index(
+    schema_path: Option<&Path>,
+    train_pq_codebook: Option<&Path>,
+    index_dir: &Path,
+) -> Result<()> {
+    // Determine the schema that will actually be persisted, replicating
+    // init_index's recovery rule: an existing schema.toml without store/
+    // wins over the argument/wizard schema.
+    let schema = if index_dir.join("schema.toml").exists() && !index_dir.join("store").exists() {
+        context::read_schema(index_dir)?
+    } else {
+        match schema_path {
+            Some(path) => {
+                let content =
+                    std::fs::read_to_string(path).context("Failed to read schema file")?;
+                toml::from_str(&content).context("Failed to parse schema TOML")?
             }
+            None => build_schema_interactive()?,
+        }
+    };
+
+    // Pre-creation validation for --train-pq-codebook: fail before
+    // creating anything so a bad invocation never leaves a created-but-
+    // untrained index behind.
+    let pq_fields = match train_pq_codebook {
+        Some(jsonl) => {
+            if !jsonl.exists() {
+                anyhow::bail!(
+                    "--train-pq-codebook file '{}' does not exist",
+                    jsonl.display()
+                );
+            }
+            let fields = eligible_pq_fields(&schema);
+            if fields.is_empty() {
+                anyhow::bail!(
+                    "--train-pq-codebook was given but no HNSW field configures \
+                     ProductQuantization + pq_codebook_path; nothing to train \
+                     (set pq_codebook_path on the field, or drop the flag)"
+                );
+            }
+            fields
+        }
+        None => Vec::new(),
+    };
+
+    context::create_index_from_schema(index_dir, schema).await?;
+    println!("Index created at {}.", index_dir.display());
+
+    if let Some(jsonl) = train_pq_codebook {
+        let engine = context::open_index(index_dir).await?;
+        for field in &pq_fields {
+            let vectors = crate::commands::train::collect_vectors_from_jsonl(field, jsonl, None)?;
+            if vectors.is_empty() {
+                anyhow::bail!(
+                    "no training vectors found in '{}' for field '{field}'",
+                    jsonl.display()
+                );
+            }
+            println!(
+                "Training PQ codebook for field '{field}' on {} vectors...",
+                vectors.len()
+            );
+            // output = None writes to the field's configured
+            // pq_codebook_path, so the schema persisted above and the
+            // trained file agree by construction.
+            let info = engine.train_pq_codebook(field, &vectors, None)?;
+            println!(
+                "Trained codebook '{}' (m = {}, k = {}, sub_dim = {}, dimension = {}) \
+                 from {} vectors.",
+                info.path,
+                info.subvector_count,
+                info.centroids,
+                info.sub_dimension,
+                info.dimension,
+                info.training_vectors
+            );
         }
     }
-    println!("Index created at {}.", index_dir.display());
     Ok(())
+}
+
+/// Collect the fields eligible for create-time codebook training: HNSW
+/// fields configuring `ProductQuantization` with a `pq_codebook_path`,
+/// sorted by field name (`Schema::fields` is a HashMap, so iteration
+/// order alone would be nondeterministic).
+fn eligible_pq_fields(schema: &Schema) -> Vec<String> {
+    use laurus::vector::core::quantization::QuantizationMethod;
+    let mut fields: Vec<String> = schema
+        .fields
+        .iter()
+        .filter_map(|(name, option)| match option {
+            FieldOption::Hnsw(o)
+                if matches!(o.quantizer, QuantizationMethod::ProductQuantization { .. })
+                    && o.pq_codebook_path.is_some() =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    fields.sort();
+    fields
 }
 use laurus::lexical::core::field::{
     BooleanOption, BytesOption, DateTimeOption, FloatOption, Geo3dOption, GeoOption, IntegerOption,
@@ -627,5 +724,158 @@ ef_construction = 16
             FieldOption::Hnsw(h) => assert!(h.rerank_storage.is_none()),
             other => panic!("expected Hnsw field, got {:?}", field_type_label(other)),
         }
+    }
+
+    // --- create index --train-pq-codebook (Issue #920) ---
+
+    use laurus::{DataValue, Document};
+
+    const DIM: usize = 32;
+
+    /// Write a schema TOML declaring `fields` as HNSW + PQ +
+    /// pq_codebook_path, and a JSONL training file carrying `count`
+    /// deterministic vectors for every one of those fields per line.
+    fn setup_pq_schema_and_jsonl(
+        dir: &Path,
+        fields: &[&str],
+        count: usize,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        let mut schema = String::new();
+        for field in fields {
+            schema.push_str(&format!(
+                "[fields.{field}.Hnsw]\ndimension = 32\ndistance = \"Euclidean\"\n\
+                 m = 8\nef_construction = 32\npq_codebook_path = \"{field}.pqcb\"\n\n\
+                 [fields.{field}.Hnsw.quantizer.ProductQuantization]\nsubvector_count = 4\n\n"
+            ));
+        }
+        std::fs::create_dir_all(dir).unwrap();
+        let schema_path = dir.join("input-schema.toml");
+        std::fs::write(&schema_path, schema).unwrap();
+
+        let mut state = 0x2468_ACE0_u64;
+        let mut jsonl = String::new();
+        for i in 0..count {
+            let mut cells = Vec::new();
+            for field in fields {
+                let data: Vec<String> = (0..DIM)
+                    .map(|_| {
+                        state = state
+                            .wrapping_mul(6_364_136_223_846_793_005)
+                            .wrapping_add(1_442_695_040_888_963_407);
+                        format!(
+                            "{:.4}",
+                            ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+                        )
+                    })
+                    .collect();
+                cells.push(format!(
+                    "\"{field}\": {{\"Vector\": [{}]}}",
+                    data.join(", ")
+                ));
+            }
+            jsonl.push_str(&format!(
+                "{{\"id\": \"doc{i}\", \"document\": {{\"fields\": {{{}}}}}}}\n",
+                cells.join(", ")
+            ));
+        }
+        let jsonl_path = dir.join("train.jsonl");
+        std::fs::write(&jsonl_path, jsonl).unwrap();
+        (schema_path, jsonl_path)
+    }
+
+    /// Put one small document per field and commit on a freshly opened
+    /// engine — succeeds only when every PQ field's codebook is trained.
+    async fn ingest_and_commit(index_dir: &Path, fields: &[&str]) -> anyhow::Result<()> {
+        let engine = context::open_index(index_dir).await?;
+        let mut builder = Document::builder();
+        for field in fields {
+            builder = builder.add_field(
+                *field,
+                DataValue::Vector((0..DIM).map(|j| j as f32 * 0.01).collect()),
+            );
+        }
+        engine.put_document("probe", builder.build()).await?;
+        engine.commit().await?;
+        Ok(())
+    }
+
+    /// Issue #920: the flag trains the codebook as part of creation, so
+    /// the very first commit encodes against it — the direct regression
+    /// for the train-before-first-commit hazard.
+    #[tokio::test]
+    async fn create_with_train_flag_makes_first_commit_succeed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (schema, jsonl) = setup_pq_schema_and_jsonl(dir.path(), &["embedding"], 300);
+
+        run_index(Some(&schema), Some(&jsonl), dir.path())
+            .await
+            .unwrap();
+
+        assert!(dir.path().join("store/vector/embedding.pqcb").exists());
+        ingest_and_commit(dir.path(), &["embedding"])
+            .await
+            .expect("first commit must encode against the create-time codebook");
+    }
+
+    /// Control pinning the hazard itself: without the flag, the same
+    /// schema's first commit hard-errors per the #918 failure policy.
+    #[tokio::test]
+    async fn create_without_train_flag_leaves_first_commit_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (schema, _jsonl) = setup_pq_schema_and_jsonl(dir.path(), &["embedding"], 1);
+
+        run_index(Some(&schema), None, dir.path()).await.unwrap();
+
+        assert!(!dir.path().join("store/vector/embedding.pqcb").exists());
+        let err = ingest_and_commit(dir.path(), &["embedding"])
+            .await
+            .expect_err("commit without a trained codebook must fail");
+        assert!(
+            err.to_string().contains("pq_codebook_path"),
+            "the failure must be the untrained-codebook hard-error: {err}"
+        );
+    }
+
+    /// The flag with no eligible PQ field bails before creating anything.
+    #[tokio::test]
+    async fn create_with_train_flag_rejects_schema_without_pq_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema_path = dir.path().join("input-schema.toml");
+        // HNSW but Scalar8Bit (default quantizer), no pq_codebook_path.
+        std::fs::write(
+            &schema_path,
+            "[fields.embedding.Hnsw]\ndimension = 32\ndistance = \"Euclidean\"\n\
+             m = 8\nef_construction = 32\n",
+        )
+        .unwrap();
+        let jsonl = dir.path().join("train.jsonl");
+        std::fs::write(&jsonl, "").unwrap();
+
+        let index_dir = dir.path().join("idx");
+        let err = run_index(Some(&schema_path), Some(&jsonl), &index_dir)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("no HNSW field configures"),
+            "error must explain why nothing can be trained: {err}"
+        );
+        assert!(
+            !index_dir.join("schema.toml").exists(),
+            "a rejected invocation must not leave a half-created index"
+        );
+    }
+
+    /// Multiple eligible fields all get their codebooks trained.
+    #[tokio::test]
+    async fn create_with_train_flag_trains_every_pq_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let (schema, jsonl) = setup_pq_schema_and_jsonl(dir.path(), &["emb_a", "emb_b"], 300);
+
+        run_index(Some(&schema), Some(&jsonl), dir.path())
+            .await
+            .unwrap();
+
+        assert!(dir.path().join("store/vector/emb_a.pqcb").exists());
+        assert!(dir.path().join("store/vector/emb_b.pqcb").exists());
     }
 }

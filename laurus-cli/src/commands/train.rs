@@ -21,6 +21,66 @@ use laurus::vector::Vector;
 use crate::commands::bulk::parse_entry;
 use crate::context;
 
+/// Collect pre-computed training vectors for `field` from a JSONL file
+/// (bulk-ingest shape: `{"id": "...", "document": {"fields": {...}}}`).
+///
+/// Blank lines are skipped; every non-blank entry must carry a
+/// pre-computed `Vector` value for `field`. Collection stops after the
+/// first `sample_size` vectors when set (deterministic file order — no
+/// random sampling).
+///
+/// Shared between `train pq-codebook --input` and
+/// `create index --train-pq-codebook` (Issue #920).
+///
+/// # Arguments
+///
+/// * `field` - The vector field whose values to extract.
+/// * `input` - Path to the JSONL training file.
+/// * `sample_size` - Optional cap: only the first N vectors are collected.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or read, an entry fails
+/// to parse, or an entry lacks a pre-computed vector for `field` (the
+/// message names the line).
+pub(crate) fn collect_vectors_from_jsonl(
+    field: &str,
+    input: &Path,
+    sample_size: Option<usize>,
+) -> Result<Vec<Vector>> {
+    let reader = std::io::BufReader::new(
+        std::fs::File::open(input)
+            .with_context(|| format!("failed to open JSONL file '{}'", input.display()))?,
+    );
+
+    let mut vectors: Vec<Vector> = Vec::new();
+    for (index, line) in reader.lines().enumerate() {
+        let line_no = index + 1;
+        let line = line.with_context(|| format!("line {line_no}: failed to read"))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let (_, doc) = parse_entry(&line, line_no)?;
+        let Some(value) = doc.fields.get(field) else {
+            bail!("line {line_no}: entry has no '{field}' field");
+        };
+        let Some(data) = value.as_vector() else {
+            bail!(
+                "line {line_no}: field '{field}' is not a pre-computed vector \
+                 (embedder-generated training input is not supported; provide \
+                 `{{\"{field}\": {{\"Vector\": [..]}}}}` values)"
+            );
+        };
+        vectors.push(Vector::new(data.clone()));
+        if let Some(cap) = sample_size
+            && vectors.len() >= cap
+        {
+            break;
+        }
+    }
+    Ok(vectors)
+}
+
 /// Execute the `train pq-codebook` command.
 ///
 /// Collects training vectors from exactly one of two sources — a JSONL
@@ -82,37 +142,7 @@ pub async fn run_pq_codebook(
     } else {
         // Checked above: when `from_index` is false, `input` is Some.
         let input = input.expect("validated: --input given when --from-index is not");
-        let reader = std::io::BufReader::new(
-            std::fs::File::open(input)
-                .with_context(|| format!("failed to open JSONL file '{}'", input.display()))?,
-        );
-
-        let mut vectors: Vec<Vector> = Vec::new();
-        for (index, line) in reader.lines().enumerate() {
-            let line_no = index + 1;
-            let line = line.with_context(|| format!("line {line_no}: failed to read"))?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let (_, doc) = parse_entry(&line, line_no)?;
-            let Some(value) = doc.fields.get(field) else {
-                bail!("line {line_no}: entry has no '{field}' field");
-            };
-            let Some(data) = value.as_vector() else {
-                bail!(
-                    "line {line_no}: field '{field}' is not a pre-computed vector \
-                     (embedder-generated training input is not supported; provide \
-                     `{{\"{field}\": {{\"Vector\": [..]}}}}` values)"
-                );
-            };
-            vectors.push(Vector::new(data.clone()));
-            if let Some(cap) = sample_size
-                && vectors.len() >= cap
-            {
-                break;
-            }
-        }
-        vectors
+        collect_vectors_from_jsonl(field, input, sample_size)?
     };
     if vectors.is_empty() {
         if from_index {

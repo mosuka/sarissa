@@ -23,7 +23,7 @@ laurus --index-dir /var/data/my_index --format json search "title:rust"
 新しいインデックスを作成します。`--schema` が指定された場合はその TOML ファイルを使用し、省略された場合は対話型スキーマウィザードが起動します。
 
 ```bash
-laurus create index [--schema <FILE>]
+laurus create index [--schema <FILE>] [--train-pq-codebook <JSONL>]
 ```
 
 **引数:**
@@ -31,6 +31,7 @@ laurus create index [--schema <FILE>]
 | フラグ | 必須 | 説明 |
 | :--- | :--- | :--- |
 | `--schema <FILE>` | いいえ | インデックススキーマを定義する TOML ファイルのパス。省略時はインデックスディレクトリに既存の `schema.toml` があればそれを使用し、なければ対話型ウィザードが起動します。 |
+| `--train-pq-codebook <JSONL>` | いいえ | インデックス作成の一部として共有 PQ codebook を学習します（Issue #920）。`ProductQuantization` + `pq_codebook_path` を設定したすべての HNSW フィールドを、作成直後にこの JSONL ファイル（`put docs` / `add docs` と同じ形式、事前計算済み `Vector` 値）から学習します。最初の commit がすぐに codebook でエンコードできるため、create → `train pq-codebook` → ingest の順序を手動で守る必要がなくなります。ファイル不在または対象フィールドなしの場合は、何も作成する前にエラーになります。 |
 
 **スキーマファイルの形式:**
 
@@ -65,6 +66,13 @@ laurus --index-dir ./my_index create index
 # Field name: title
 # ...
 # Index created at ./my_index.
+
+# 作成と共有 PQ codebook の学習を1ステップで（Issue #920）
+laurus --index-dir ./my_index create index --schema schema.toml \
+    --train-pq-codebook train.jsonl
+# Index created at ./my_index.
+# Training PQ codebook for field 'embedding' on 300 vectors...
+# Trained codebook 'embedding.pqcb' (m = 4, k = 256, sub_dim = 8, dimension = 32) from 300 vectors.
 ```
 
 > **注意:** `schema.toml` と `store/` の両方が存在する場合はエラーが返されます。再作成するにはインデックスディレクトリを削除してください。`schema.toml` のみ存在する場合（作成が中断された場合など）は、`--schema` なしで `create index` を実行すると既存スキーマからストレージが復旧されます。

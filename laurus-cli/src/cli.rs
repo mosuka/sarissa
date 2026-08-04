@@ -67,12 +67,23 @@ pub struct CreateCommand {
 #[derive(Subcommand)]
 pub enum CreateResource {
     /// Create a new index. If --schema is given, uses that TOML file;
-    /// otherwise launches the interactive schema wizard.
+    /// otherwise launches the interactive schema wizard. With
+    /// --train-pq-codebook, shared PQ codebooks are trained as part of
+    /// creation (Issue #920), removing the train-before-first-commit
+    /// ordering hazard for fields that configure pq_codebook_path.
     Index {
         /// Path to an existing schema TOML file. When omitted, the
         /// interactive schema wizard is launched instead.
         #[arg(long)]
         schema: Option<PathBuf>,
+        /// Path to a JSONL training file (the `put docs` / `add docs`
+        /// shape; pre-computed Vector values). When given, every HNSW
+        /// field that configures ProductQuantization + pq_codebook_path
+        /// gets its shared codebook trained from this file immediately
+        /// after creation, so the very first commit can already encode
+        /// against it.
+        #[arg(long)]
+        train_pq_codebook: Option<PathBuf>,
     },
     /// Interactively generate a schema TOML file.
     Schema {

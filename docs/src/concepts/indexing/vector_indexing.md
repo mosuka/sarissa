@@ -509,7 +509,10 @@ laurus train pq-codebook --field embedding --input vectors.jsonl --update-schema
 ```
 
 (or `--from-index` in place of `--input` to sample vectors already
-committed to the index, Issue #920), or programmatically via
+committed to the index; or fold training into index creation with
+`laurus create index --train-pq-codebook <jsonl>`, which removes the
+train-before-first-commit ordering hazard entirely — both Issue #920),
+or programmatically via
 [`Engine::train_pq_codebook`](https://docs.rs/laurus/latest/laurus/struct.Engine.html)
 (`engine.train_pq_codebook("embedding", &vectors, None)`; pair with
 `engine.sample_committed_vectors("embedding", Some(n))` for the
