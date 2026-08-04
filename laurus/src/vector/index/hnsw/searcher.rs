@@ -1026,25 +1026,65 @@ impl HnswSearcher {
         // Stage 2 (Issue #481, refactored by #650 PR-1 / #931): when the
         // query asks for rerank (`rerank_factor`) and the reader has the
         // LRS1 sidecar loaded, run the shared `RerankPipeline` — for this
-        // searcher a single `F32SidecarStage` that widens the int8
-        // candidate set to `top_k * rerank_factor` and rescores against
-        // the original f32 vectors. When either prerequisite is missing
-        // we silently fall through to Stage 1 ranking — Stage 1 segments
-        // cannot recover the f32 information that was discarded at index
-        // time, so there's nothing better to do.
-        use crate::vector::search::rerank::{F32SidecarStage, RerankCandidates, RerankPipeline};
+        // searcher normally a single `F32SidecarStage` that widens the
+        // int8/ADC candidate set to `top_k * rerank_factor` and rescores
+        // against the original f32 vectors. When either prerequisite is
+        // missing we silently fall through to Stage 1 ranking — Stage 1
+        // segments cannot recover the f32 information that was discarded
+        // at index time, so there's nothing better to do.
+        //
+        // Issue #673 (#650 PR-3): on a PQ/PQ-FastScan segment, the graph
+        // traversal already computed `effective_ef` ADC candidates, but
+        // only the leading `top_k * rerank_factor` of them feed the exact
+        // f32 stage — the rest are discarded unscored. When `ef` exceeds
+        // that budget, insert a cheap int8 stage (`SqRerankStage`, derived
+        // from the same f32 sidecar `F32SidecarStage` reads — see
+        // `RerankStoragePool::int8_view`) ahead of the exact stage to
+        // rescore that surplus instead of throwing it away. When `ef`
+        // does not exceed the budget the surplus is empty, so the SQ
+        // stage would narrow nothing and is skipped to avoid pure
+        // overhead.
+        use crate::vector::search::rerank::{
+            F32SidecarStage, RerankCandidates, RerankPipeline, RerankStage, SqRerankStage,
+        };
         let pipeline = match (request.params.rerank_factor, reader.rerank_storage()) {
-            (Some(factor), Some(pool)) => Some((
-                RerankPipeline::new(
-                    vec![Box::new(F32SidecarStage::new(
-                        Arc::clone(pool),
-                        field_name,
-                        reader.distance_metric(),
-                    ))],
-                    vec![factor],
-                ),
-                factor,
-            )),
+            (Some(factor), Some(pool)) => {
+                let metric = reader.distance_metric();
+                let f32_stage: Box<dyn RerankStage> =
+                    Box::new(F32SidecarStage::new(Arc::clone(pool), field_name, metric));
+
+                let is_pq_segment = {
+                    #[cfg(feature = "pq-fastscan")]
+                    {
+                        reader.vectors().pq_pool().is_some()
+                            || reader.vectors().pq_fastscan_pool().is_some()
+                    }
+                    #[cfg(not(feature = "pq-fastscan"))]
+                    {
+                        reader.vectors().pq_pool().is_some()
+                    }
+                };
+                let top_k = request.params.top_k;
+                let ef = self.effective_ef(request);
+                let sq_view = (is_pq_segment && ef > top_k.saturating_mul(factor))
+                    .then(|| pool.int8_view())
+                    .flatten();
+
+                match sq_view {
+                    Some(int8_pool) => Some(RerankPipeline::new(
+                        vec![
+                            Box::new(SqRerankStage::new(
+                                Arc::clone(int8_pool),
+                                field_name,
+                                metric,
+                            )),
+                            f32_stage,
+                        ],
+                        vec![ef.div_ceil(top_k.max(1)), factor],
+                    )),
+                    None => Some(RerankPipeline::new(vec![f32_stage], vec![factor])),
+                }
+            }
             _ => None,
         };
 
@@ -1055,9 +1095,9 @@ impl HnswSearcher {
         // rescore.
         let mut rerank_applied = false;
         let candidates_for_results: Vec<ResultCandidate> = match pipeline {
-            Some((pipeline, _factor)) => {
-                // Ascending int8 order so the pipeline's widening prefix
-                // matches the pre-refactor `into_sorted_vec().take(..)`.
+            Some(pipeline) => {
+                // Ascending int8/ADC order so the pipeline's widening
+                // prefix matches the pre-refactor `into_sorted_vec().take(..)`.
                 let int8_sorted: Vec<ResultCandidate> = found.into_sorted_vec();
                 let mut candidates = RerankCandidates::with_capacity(int8_sorted.len());
                 for c in &int8_sorted {

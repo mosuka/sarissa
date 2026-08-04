@@ -20,7 +20,9 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::distance_quantized::{QuantizedQuery, distance_quantized};
 use crate::vector::core::vector::Vector;
+use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::index::rerank_storage::RerankStoragePool;
 
 /// SoA candidate buffer flowing through the pipeline: parallel
@@ -164,6 +166,71 @@ impl RerankStage for F32SidecarStage {
     }
 }
 
+/// Rescore against a derived int8 (SQ) view of the rerank sidecar
+/// (Issue #673) — a middle stage that narrows PQ/graph candidates with a
+/// cheap int8 kernel before the final exact [`F32SidecarStage`] runs.
+///
+/// The int8 view is derived from the same f32 payload
+/// [`F32SidecarStage`] reads (see [`RerankStoragePool::int8_view`]), so
+/// this stage never requires its own on-disk sidecar.
+pub(crate) struct SqRerankStage {
+    pool: Arc<QuantizedVectorPool>,
+    /// `doc_id -> pool position` for the searched field, resolved once
+    /// at stage construction.
+    positions: Option<Arc<HashMap<u64, u32>>>,
+    metric: DistanceMetric,
+}
+
+impl SqRerankStage {
+    /// Build the stage for one query against `field_name`.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool` - The derived int8 view ([`RerankStoragePool::int8_view`]).
+    /// * `field_name` - The searched field (position index key).
+    /// * `metric` - The index's distance metric.
+    pub fn new(pool: Arc<QuantizedVectorPool>, field_name: &str, metric: DistanceMetric) -> Self {
+        let positions = pool.field_position_index(field_name);
+        Self {
+            pool,
+            positions,
+            metric,
+        }
+    }
+}
+
+impl RerankStage for SqRerankStage {
+    fn rescore(
+        &self,
+        query: &Vector,
+        candidates: &mut RerankCandidates,
+        take_n: usize,
+    ) -> Result<bool> {
+        let prepared = QuantizedQuery::prepare(&query.data, &self.pool.params);
+        let take_n = take_n.min(candidates.len());
+        let mut rescored = RerankCandidates::with_capacity(take_n);
+        for i in 0..take_n {
+            let doc_id = candidates.doc_ids[i];
+            // A doc without an int8 record for this field cannot be
+            // scored on this stage's basis — drop it, mirroring
+            // `F32SidecarStage`'s missing-position behavior.
+            let Some(pos) = self
+                .positions
+                .as_ref()
+                .and_then(|idx| idx.get(&doc_id).copied())
+            else {
+                continue;
+            };
+            let (cand, meta) = self.pool.record_at(pos);
+            let distance = distance_quantized(self.metric, &prepared, cand, meta);
+            rescored.push(doc_id, distance);
+        }
+        rescored.sort_by_distance();
+        *candidates = rescored;
+        Ok(true)
+    }
+}
+
 /// Multi-stage rerank driver: stage `i` rescores the top
 /// `top_k * factors[i]` candidates of the previous basis.
 pub(crate) struct RerankPipeline {
@@ -292,5 +359,47 @@ mod tests {
         assert!(!applied);
         assert_eq!(c.doc_ids, vec![1, 2]);
         assert_eq!(c.distances, vec![1.0, 2.0]);
+    }
+
+    use crate::vector::core::quantization::{QuantizedVectorMeta, ScalarQuantParams};
+
+    /// Build a 2-doc int8 pool under field `"f"`: doc 1 at the origin,
+    /// doc 2 far away, so int8 Euclidean distance unambiguously ranks
+    /// doc 1 first for a query near the origin.
+    fn int8_pool_near_and_far() -> Arc<QuantizedVectorPool> {
+        let params =
+            ScalarQuantParams::train(&[Vector::new(vec![0.0, 0.0]), Vector::new(vec![10.0, 10.0])])
+                .unwrap();
+        let mut records = Vec::new();
+        for (doc_id, data) in [(1u64, vec![0.0_f32, 0.0]), (2, vec![10.0, 10.0])] {
+            let q = params.quantize_slice(&data);
+            let meta = QuantizedVectorMeta::from_quantized(&q, &params);
+            records.push((doc_id, "f".to_string(), q, meta));
+        }
+        Arc::new(QuantizedVectorPool::build(params, 2, records))
+    }
+
+    #[test]
+    fn sq_stage_rescores_and_reorders_by_int8_distance() {
+        let stage = SqRerankStage::new(int8_pool_near_and_far(), "f", DistanceMetric::Euclidean);
+        // Previous-stage distances are irrelevant here: the stage must
+        // recompute from the int8 payload, not trust the incoming order.
+        let mut c = buffer(&[(2, 0.0), (1, 100.0)]);
+        let applied = stage
+            .rescore(&Vector::new(vec![0.0, 0.0]), &mut c, 2)
+            .unwrap();
+        assert!(applied);
+        assert_eq!(c.doc_ids, vec![1, 2], "doc 1 (near query) must rank first");
+    }
+
+    #[test]
+    fn sq_stage_drops_candidates_absent_from_the_pool() {
+        let stage = SqRerankStage::new(int8_pool_near_and_far(), "f", DistanceMetric::Euclidean);
+        let mut c = buffer(&[(1, 0.0), (99, 0.0)]); // doc 99 has no int8 record
+        let applied = stage
+            .rescore(&Vector::new(vec![0.0, 0.0]), &mut c, 2)
+            .unwrap();
+        assert!(applied);
+        assert_eq!(c.doc_ids, vec![1]);
     }
 }

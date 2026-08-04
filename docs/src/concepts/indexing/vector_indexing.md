@@ -578,6 +578,43 @@ recover recall. The gate was reduced to ≥ 1.5× accordingly. A
 follow-up could pursue the Lucene 99 pattern (independent graph
 search budget) and / or a 4-bit PQ variant to close the gap.
 
+#### PQ → SQ → f32 three-stage rerank (Issue #673)
+
+Stage 3's rerank widens the PQ ADC candidate set to `top_k *
+rerank_factor` and rescores only that leading slice against the
+exact f32 sidecar — anything the graph traversal found beyond that
+budget is discarded. Setting `ef_search` wider than `top_k *
+rerank_factor` used to buy nothing beyond that budget on a PQ field;
+since #673 it activates an extra **int8 (SQ) stage** that
+re-ranks the *entire* `ef_search`-sized candidate set by a cheap
+int8 kernel before the narrow exact-stage budget is carved out of
+it — so the surplus the graph already computed gets a chance to
+compete on a much better proxy (int8) than the PQ ADC order it
+arrived in, instead of being thrown away unscored.
+
+The int8 view is **derived from the same LRS1 f32 sidecar** the
+exact stage reads (trained once, lazily, on first use, and cached
+for the segment's lifetime) — no second on-disk sidecar, no new
+per-field configuration, and no new query parameter. The chain
+activates automatically, per query, whenever all of the following
+hold:
+
+- the field is PQ-quantized (`ProductQuantization` or
+  `ProductQuantizationFastScan`);
+- a rerank sidecar (`rerank_storage: Some(F32)`) is loaded;
+- `rerank_factor` is set on the query; and
+- `effective_ef_search > top_k * rerank_factor` — i.e. the graph
+  traversal actually computed more candidates than the exact stage
+  alone would consume. When it doesn't (the common case where
+  `ef_search` is left at its default), the SQ stage would narrow
+  nothing and is skipped, so the query takes the identical two-stage
+  (PQ → f32) path it always has.
+
+The `score_basis` contract (Issue #927) is unaffected either way:
+the pipeline still ends in the exact f32 stage, so multi-segment
+fan-out keeps treating those scores as the exact, cross-segment-
+comparable basis regardless of whether an SQ stage ran ahead of it.
+
 ## Segment Files
 
 | Index Type | File Extension | Contents |

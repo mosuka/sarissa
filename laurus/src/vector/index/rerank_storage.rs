@@ -31,10 +31,12 @@ compile_error!(
 );
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::error::{LaurusError, Result};
+use crate::vector::core::quantization::{QuantizedVectorMeta, ScalarQuantParams};
 use crate::vector::core::rerank::RerankStorageKind;
+use crate::vector::index::quantized_storage::QuantizedVectorPool;
 
 /// In-memory rerank storage for one segment's full-precision vectors.
 ///
@@ -62,6 +64,10 @@ pub struct RerankStoragePool {
     pub field_index: HashMap<String, Arc<HashMap<u64, u32>>>,
     /// Total vector count (matches `data.len() / record_size`).
     pub vector_count: usize,
+    /// Lazily-derived int8 (SQ) view of [`Self::data`], built on first
+    /// access by [`Self::int8_view`]. See that method for why this is
+    /// derived rather than a second on-disk sidecar (Issue #673).
+    int8_view_cache: OnceLock<Option<Arc<QuantizedVectorPool>>>,
 }
 
 impl RerankStoragePool {
@@ -122,6 +128,7 @@ impl RerankStoragePool {
             data,
             field_index,
             vector_count,
+            int8_view_cache: OnceLock::new(),
         }
     }
 
@@ -200,6 +207,7 @@ impl RerankStoragePool {
             data: payload,
             field_index,
             vector_count,
+            int8_view_cache: OnceLock::new(),
         })
     }
 
@@ -248,6 +256,65 @@ impl RerankStoragePool {
         //   the returned slice to the pool's borrow, so no aliasing
         //   with mutable accessors is possible.
         unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), self.dim) }
+    }
+
+    /// Lazily-derived int8 scalar-quantized view of this pool's f32
+    /// payload, used as the middle stage of the PQ → SQ → f32 rerank
+    /// chain (Issue #673).
+    ///
+    /// Every 3-stage chain ends in an exact f32 stage — this pool always
+    /// holds that f32 data already. Deriving an int8 view from it (rather
+    /// than persisting a second on-disk sidecar) avoids storing the same
+    /// information twice and keeps the derived positions trivially
+    /// consistent with [`Self::f32_slice_at`] (both are indexed by the
+    /// same `pos`).
+    ///
+    /// Built once on first call via a per-segment quantization trained
+    /// from this pool's own f32 vectors, then cached for the pool's
+    /// lifetime. Returns `None` when the pool is empty or training fails
+    /// (e.g. non-finite values) — callers must treat that the same as
+    /// "no SQ stage available" and fall back to the 2-stage chain, never
+    /// error the query over this optimization.
+    pub fn int8_view(&self) -> Option<&Arc<QuantizedVectorPool>> {
+        self.int8_view_cache
+            .get_or_init(|| self.build_int8_view())
+            .as_ref()
+    }
+
+    /// Build the derived int8 view backing [`Self::int8_view`].
+    fn build_int8_view(&self) -> Option<Arc<QuantizedVectorPool>> {
+        if self.vector_count == 0 {
+            return None;
+        }
+
+        // Invert `field_index` (field -> doc_id -> pos) into a
+        // position-ordered `(doc_id, field)` assignment so records can be
+        // fed to `QuantizedVectorPool::build` in the same position order
+        // as this pool's own `f32_slice_at`.
+        let mut assignment: Vec<Option<(u64, &str)>> = vec![None; self.vector_count];
+        for (field, map) in &self.field_index {
+            for (&doc_id, &pos) in map.iter() {
+                *assignment.get_mut(pos as usize)? = Some((doc_id, field.as_str()));
+            }
+        }
+
+        let params = ScalarQuantParams::train_from_slices(
+            (0..self.vector_count as u32).map(|pos| self.f32_slice_at(pos)),
+        )
+        .ok()?;
+
+        let mut records = Vec::with_capacity(self.vector_count);
+        for (pos, slot) in assignment.into_iter().enumerate() {
+            let (doc_id, field) = slot?;
+            let f32_vec = self.f32_slice_at(pos as u32);
+            let q = params.quantize_slice(f32_vec);
+            let meta = QuantizedVectorMeta::from_quantized(&q, &params);
+            records.push((doc_id, field.to_string(), q, meta));
+        }
+
+        Some(Arc::new(QuantizedVectorPool::build(
+            params, self.dim, records,
+        )))
     }
 
     /// Cheap O(1) lookup of the per-field doc_id -> position map,
@@ -468,5 +535,84 @@ mod tests {
             assert_eq!(addr % std::mem::align_of::<f32>(), 0, "pos {pos}");
             assert_eq!(slice.len(), 8);
         }
+    }
+
+    #[test]
+    fn int8_view_positions_match_f32_pool_positions() {
+        let pool = RerankStoragePool::build(
+            RerankStorageKind::F32,
+            3,
+            vec![
+                (10, "embedding".to_string(), vec![0.0, 1.0, 2.0]),
+                (20, "embedding".to_string(), vec![-1.5, 3.0, 0.5]),
+                (30, "thumbnail".to_string(), vec![5.0, -2.0, 1.0]),
+            ],
+        );
+        let int8_pool = pool.int8_view().expect("training should succeed");
+        assert_eq!(int8_pool.vector_count, 3);
+        assert_eq!(int8_pool.dim, 3);
+
+        for &(doc_id, field) in &[(10u64, "embedding"), (20, "embedding"), (30, "thumbnail")] {
+            let f32_pos = pool.field_position_index(field).unwrap()[&doc_id];
+            let int8_pos = int8_pool.field_position_index(field).unwrap()[&doc_id];
+            assert_eq!(
+                f32_pos, int8_pos,
+                "derived int8 position must match the f32 pool position for ({doc_id}, {field})"
+            );
+        }
+    }
+
+    #[test]
+    fn int8_view_dequantizes_within_quantization_error() {
+        let pool = RerankStoragePool::build(
+            RerankStorageKind::F32,
+            4,
+            vec![
+                (1, "f".to_string(), vec![0.0, 10.0, -5.0, 2.5]),
+                (2, "f".to_string(), vec![3.0, -8.0, 6.0, 0.0]),
+            ],
+        );
+        let int8_pool = pool.int8_view().unwrap();
+        for &doc_id in &[1u64, 2] {
+            let original = pool.get_f32_slice(doc_id, "f").unwrap();
+            let (codes, meta) = int8_pool.get_record(doc_id, "f").unwrap();
+            let dequantized = int8_pool.params.dequantize(codes);
+            for (o, d) in original.iter().zip(&dequantized) {
+                // One quantization step of slack: scale = range / 255.
+                assert!(
+                    (o - d).abs() <= int8_pool.params.scale + 1e-4,
+                    "dequantized {d} too far from original {o}"
+                );
+            }
+            assert!(meta.norm_q >= 0.0);
+        }
+    }
+
+    #[test]
+    fn int8_view_is_built_only_once() {
+        let pool = RerankStoragePool::build(
+            RerankStorageKind::F32,
+            2,
+            vec![(1, "f".to_string(), vec![1.0, 2.0])],
+        );
+        let first = pool.int8_view().unwrap() as *const Arc<QuantizedVectorPool>;
+        let second = pool.int8_view().unwrap() as *const Arc<QuantizedVectorPool>;
+        assert_eq!(first, second, "int8_view must cache the derived pool");
+    }
+
+    #[test]
+    fn int8_view_is_none_for_empty_pool() {
+        let pool = RerankStoragePool::build(RerankStorageKind::F32, 3, Vec::new());
+        assert!(pool.int8_view().is_none());
+    }
+
+    #[test]
+    fn int8_view_is_none_when_training_fails_on_non_finite_data() {
+        let pool = RerankStoragePool::build(
+            RerankStorageKind::F32,
+            2,
+            vec![(1, "f".to_string(), vec![f32::NAN, 1.0])],
+        );
+        assert!(pool.int8_view().is_none());
     }
 }

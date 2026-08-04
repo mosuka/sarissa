@@ -460,7 +460,8 @@ rpc SearchStream(SearchRequest) returns (stream SearchResult);
 | `score_mode` | `VectorScoreMode` | `WEIGHTED_SUM`, `MAX_SIM`, または `LATE_INTERACTION` |
 | `overfetch` | `float` | オーバーフェッチ係数（デフォルト: 2.0） |
 | `min_score` | `float` | 最小スコア閾値 |
-| `rerank_factor` | `optional uint32` | Stage 2 rerank の widening 係数（Issue #481）。`rerank_storage` を有効にした HNSW フィールドに対してこの値を設定すると、サーバは int8 候補取得を `top_k * rerank_factor` まで広げ、元の完全精度ベクトルで再スコアしてから上位 `top_k` を返します。`rerank_storage = "F32"` を指定した HNSW フィールドのみで反映され、それ以外（Stage 1 セグメント、Flat、IVF）では silent に int8 ランキングへフォールバックします — Stage 1 セグメントから f32 情報を復元することはできません。`0` または省略で rerank 無効。 |
+| `rerank_factor` | `optional uint32` | Stage 2 rerank の widening 係数（Issue #481）。`rerank_storage` を有効にしたフィールドに対してこの値を設定すると、サーバは int8/PQ 候補取得を `top_k * rerank_factor` まで広げ、元の完全精度ベクトルで再スコアしてから上位 `top_k` を返します。#932 以降 3 つのベクトルインデックスタイプ（HNSW・Flat・IVF）すべてで反映されます（Flat/IVF はフィールド指定クエリに適用）。`rerank_storage = "F32"` を設定していないフィールドでは silent に int8 ランキングへフォールバックします — f32 情報を復元することはできません。`0` または省略で rerank 無効。 |
+| `ef_search` | `optional uint32` | HNSW の `ef_search` 候補リストサイズをクエリ単位で上書き（Issue #644）。PQ → SQ → f32 の3段 rerank チェーン（Issue #673）も、この値がゲートとなります。`rerank_storage` を有効にした PQ フィールドで `ef_search` を `top_k * rerank_factor` より広く設定すると、グラフが計算した候補集合全体を安価な int8 段で再ランキングしてから exact 段の狭い予算を切り出すようになります（`rerank_storage` サイドカーから導出、追加設定不要）。HNSW 以外のフィールドでは無視されます。 |
 
 ### SearchResult
 

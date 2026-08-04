@@ -1523,7 +1523,33 @@ fn bench_hnsw_graph_search_pq_rerank_real_data(c: &mut Criterion) {
         PqRealDataBenchParams {
             top_k: 10,
             rerank_factor: 10,
+            ef_search: 200,
             bench_id_label: "top10_pq_rerank20",
+        },
+    );
+}
+
+/// Issue #673 (#650 PR-3): the same SIFT1M PQ + rerank config as
+/// [`bench_hnsw_graph_search_pq_rerank_real_data`], but with `ef_search`
+/// widened well past the exact-stage budget (`top_k * rerank_factor =
+/// 30`) so the PQ → SQ → f32 three-stage chain activates instead of the
+/// two-stage PQ → f32 chain. Re-measures the "rerank stage dominates
+/// ADC" assumption documented on
+/// [`bench_hnsw_graph_search_pq_rerank_real_data`] now that a cheap
+/// int8 stage sits between the ADC candidate generation and the exact
+/// f32 rescore — the SQ stage's own cost must stay well under the ADC
+/// savings it enables for the three-stage chain to be worth taking by
+/// default.
+///
+/// Same opt-in gating as [`bench_hnsw_graph_search_pq_rerank_real_data`].
+fn bench_hnsw_graph_search_pq_rerank_real_data_wide_ef(c: &mut Criterion) {
+    run_pq_real_data_bench(
+        c,
+        PqRealDataBenchParams {
+            top_k: 10,
+            rerank_factor: 3,
+            ef_search: 800,
+            bench_id_label: "top10_pq_rerank3_wide_ef800",
         },
     );
 }
@@ -1540,6 +1566,7 @@ fn bench_hnsw_graph_search_pq_rerank_real_data_no_rerank(c: &mut Criterion) {
         PqRealDataBenchParams {
             top_k: 10,
             rerank_factor: 1,
+            ef_search: 200,
             bench_id_label: "top10_pq_no_rerank",
         },
     );
@@ -1559,6 +1586,7 @@ fn bench_hnsw_graph_search_pq_rerank_real_data_kernel_only(c: &mut Criterion) {
         PqRealDataBenchParams {
             top_k: 100,
             rerank_factor: 1,
+            ef_search: 200,
             bench_id_label: "top100_pq_kernel_only",
         },
     );
@@ -1567,12 +1595,17 @@ fn bench_hnsw_graph_search_pq_rerank_real_data_kernel_only(c: &mut Criterion) {
 /// Parameters for the PQ-256 SIFT1M real-data benchmark family.
 ///
 /// `top_k` and `rerank_factor` flow straight through to the
-/// [`VectorIndexQuery`] used per iteration. `bench_id_label` is the
-/// per-variant id under the shared
+/// [`VectorIndexQuery`] used per iteration. `ef_search` sets the graph
+/// traversal budget (Issue #673: exceeding `top_k * rerank_factor`
+/// activates the PQ → SQ → f32 three-stage chain instead of the
+/// pre-#673 two-stage PQ → f32 chain — see
+/// [`bench_hnsw_graph_search_pq_rerank_real_data_wide_ef`]).
+/// `bench_id_label` is the per-variant id under the shared
 /// `"HNSW Graph Search PQ Rerank Real"` Criterion group.
 struct PqRealDataBenchParams {
     top_k: usize,
     rerank_factor: usize,
+    ef_search: usize,
     bench_id_label: &'static str,
 }
 
@@ -1606,7 +1639,7 @@ fn run_pq_real_data_bench(c: &mut Criterion, params: PqRealDataBenchParams) {
     let dim: usize = 128;
     let n_corpus: usize = 50_000;
     let n_queries: usize = 200;
-    let ef_search: usize = 200;
+    let ef_search = params.ef_search;
     let subvector_count: usize = 32;
     let m: usize = 16;
     let ef_construction: usize = 200;
@@ -1889,6 +1922,7 @@ criterion_group!(
     bench_hnsw_graph_search_rerank,
     bench_hnsw_graph_search_rerank_real_data,
     bench_hnsw_graph_search_pq_rerank_real_data,
+    bench_hnsw_graph_search_pq_rerank_real_data_wide_ef,
     bench_hnsw_graph_search_pq_rerank_real_data_no_rerank,
     bench_hnsw_graph_search_pq_rerank_real_data_kernel_only,
     bench_hnsw_graph_search_pq_fastscan_real_data,

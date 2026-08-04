@@ -461,7 +461,8 @@ A `oneof` with two options:
 | `score_mode` | `VectorScoreMode` | `WEIGHTED_SUM`, `MAX_SIM`, or `LATE_INTERACTION` |
 | `overfetch` | `float` | Overfetch factor (default: 2.0) |
 | `min_score` | `float` | Minimum score threshold |
-| `rerank_factor` | `optional uint32` | Stage 2 rerank widening factor (Issue #481). When set on a HNSW field whose schema enabled `rerank_storage`, the server widens the int8 candidate fetch to `top_k * rerank_factor` and rescores the candidates against the original full-precision vectors before returning the top `top_k`. Honored only on HNSW fields with `rerank_storage = "F32"`; other configurations (Stage 1 segments, Flat, IVF) silently fall back to int8 ranking — there is no f32 information to recover. A value of `0` or omitting the field disables rerank. |
+| `rerank_factor` | `optional uint32` | Stage 2 rerank widening factor (Issue #481). When set on a field whose schema enabled `rerank_storage`, the server widens the int8/PQ candidate fetch to `top_k * rerank_factor` and rescores the candidates against the original full-precision vectors before returning the top `top_k`. Honored on all three vector index types since #932 (HNSW, Flat, IVF — on Flat/IVF this applies to field-routed queries); fields without `rerank_storage = "F32"` silently fall back to int8 ranking — there is no f32 information to recover. A value of `0` or omitting the field disables rerank. |
+| `ef_search` | `optional uint32` | Per-query override for the HNSW `ef_search` candidate-list size (Issue #644). Also gates the PQ → SQ → f32 three-stage rerank chain (Issue #673): on a PQ field with `rerank_storage` enabled, setting `ef_search` wider than `top_k * rerank_factor` activates an extra int8 stage that rescores the graph's full candidate set — derived from the same `rerank_storage` sidecar, no extra configuration needed — before the exact stage's narrower budget is carved out of it. Ignored on non-HNSW fields. |
 
 ### SearchResult
 
