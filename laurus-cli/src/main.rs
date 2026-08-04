@@ -95,13 +95,15 @@ async fn main() -> Result<()> {
             TrainResource::PqCodebook {
                 field,
                 input,
+                from_index,
                 sample_size,
                 output,
                 update_schema,
             } => {
                 train::run_pq_codebook(
                     &field,
-                    &input,
+                    input.as_deref(),
+                    from_index,
                     sample_size,
                     output.as_deref(),
                     update_schema,

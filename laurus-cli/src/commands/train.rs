@@ -1,9 +1,10 @@
 //! Implementation for the `train pq-codebook` subcommand (Issue #631).
 //!
-//! Trains a shared PQ codebook for one HNSW vector field from a JSONL
-//! file — the same `{"id": "...", "document": {"fields": {...}}}` shape
-//! the bulk-ingest commands read — and persists it into the index's
-//! vector storage namespace via
+//! Trains a shared PQ codebook for one HNSW vector field — from a JSONL
+//! file (the same `{"id": "...", "document": {"fields": {...}}}` shape
+//! the bulk-ingest commands read), or with `--from-index` (Issue #920)
+//! from the vectors already committed to the index itself — and persists
+//! it into the index's vector storage namespace via
 //! [`Engine::train_pq_codebook`](laurus::Engine::train_pq_codebook).
 //! Subsequent engine opens (the next `add` / `put` / `commit` CLI
 //! invocation) pick the codebook up through the field's
@@ -22,18 +23,24 @@ use crate::context;
 
 /// Execute the `train pq-codebook` command.
 ///
-/// Reads `input` line by line (blank lines are skipped), extracts the
-/// pre-computed vector value of `field` from each entry, and trains the
-/// codebook on the collected vectors (all of them, or the first
-/// `sample_size` when set — deterministic, no random sampling). With
-/// `update_schema`, the index's `schema.toml` is rewritten afterwards so
-/// the field's `pq_codebook_path` names the trained file.
+/// Collects training vectors from exactly one of two sources — a JSONL
+/// file (`input`: read line by line, blank lines skipped, each entry's
+/// pre-computed vector value for `field` extracted) or the index itself
+/// (`from_index`: the vectors already committed for `field`, in
+/// ascending doc_id order, Issue #920) — and trains the codebook on the
+/// collected vectors (all of them, or the first `sample_size` when set
+/// — deterministic, no random sampling). With `update_schema`, the
+/// index's `schema.toml` is rewritten afterwards so the field's
+/// `pq_codebook_path` names the trained file.
 ///
 /// # Arguments
 ///
 /// * `field` - The HNSW vector field to train for. Must be configured
 ///   with `ProductQuantization`.
 /// * `input` - Path to the JSONL training file (bulk-ingest shape).
+///   Mutually exclusive with `from_index`.
+/// * `from_index` - Sample the vectors already committed to the index
+///   instead of reading a file. Mutually exclusive with `input`.
 /// * `sample_size` - Optional cap: only the first N vectors are used.
 /// * `output` - Optional storage-relative codebook file name override
 ///   (defaults to the field's configured `pq_codebook_path`, else
@@ -44,14 +51,16 @@ use crate::context;
 ///
 /// # Errors
 ///
-/// Returns an error if the index cannot be opened, the file cannot be
-/// read, an entry fails to parse, an entry lacks a pre-computed vector
-/// for `field` (the message names the line; embedder-generated training
-/// input is not supported), training fails (wrong field type, empty
-/// sample, dimension mismatch), or the schema rewrite fails.
+/// Returns an error if neither or both of `input` / `from_index` are
+/// given, the index cannot be opened, the file cannot be read, an entry
+/// fails to parse, an entry lacks a pre-computed vector for `field` (the
+/// message names the line; embedder-generated training input is not
+/// supported), no vectors are found, training fails (wrong field type,
+/// empty sample, dimension mismatch), or the schema rewrite fails.
 pub async fn run_pq_codebook(
     field: &str,
-    input: &Path,
+    input: Option<&Path>,
+    from_index: bool,
     sample_size: Option<usize>,
     output: Option<&str>,
     update_schema: bool,
@@ -60,43 +69,64 @@ pub async fn run_pq_codebook(
     if sample_size == Some(0) {
         bail!("--sample-size must be greater than 0");
     }
+    match (input.is_some(), from_index) {
+        (true, true) => bail!("--input and --from-index are mutually exclusive"),
+        (false, false) => bail!("either --input or --from-index must be given"),
+        _ => {}
+    }
 
     let engine = context::open_index(index_dir).await?;
 
-    let reader = std::io::BufReader::new(
-        std::fs::File::open(input)
-            .with_context(|| format!("failed to open JSONL file '{}'", input.display()))?,
-    );
+    let vectors: Vec<Vector> = if from_index {
+        engine.sample_committed_vectors(field, sample_size)?
+    } else {
+        // Checked above: when `from_index` is false, `input` is Some.
+        let input = input.expect("validated: --input given when --from-index is not");
+        let reader = std::io::BufReader::new(
+            std::fs::File::open(input)
+                .with_context(|| format!("failed to open JSONL file '{}'", input.display()))?,
+        );
 
-    let mut vectors: Vec<Vector> = Vec::new();
-    for (index, line) in reader.lines().enumerate() {
-        let line_no = index + 1;
-        let line = line.with_context(|| format!("line {line_no}: failed to read"))?;
-        if line.trim().is_empty() {
-            continue;
+        let mut vectors: Vec<Vector> = Vec::new();
+        for (index, line) in reader.lines().enumerate() {
+            let line_no = index + 1;
+            let line = line.with_context(|| format!("line {line_no}: failed to read"))?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let (_, doc) = parse_entry(&line, line_no)?;
+            let Some(value) = doc.fields.get(field) else {
+                bail!("line {line_no}: entry has no '{field}' field");
+            };
+            let Some(data) = value.as_vector() else {
+                bail!(
+                    "line {line_no}: field '{field}' is not a pre-computed vector \
+                     (embedder-generated training input is not supported; provide \
+                     `{{\"{field}\": {{\"Vector\": [..]}}}}` values)"
+                );
+            };
+            vectors.push(Vector::new(data.clone()));
+            if let Some(cap) = sample_size
+                && vectors.len() >= cap
+            {
+                break;
+            }
         }
-        let (_, doc) = parse_entry(&line, line_no)?;
-        let Some(value) = doc.fields.get(field) else {
-            bail!("line {line_no}: entry has no '{field}' field");
-        };
-        let Some(data) = value.as_vector() else {
-            bail!(
-                "line {line_no}: field '{field}' is not a pre-computed vector \
-                 (embedder-generated training input is not supported; provide \
-                 `{{\"{field}\": {{\"Vector\": [..]}}}}` values)"
-            );
-        };
-        vectors.push(Vector::new(data.clone()));
-        if let Some(cap) = sample_size
-            && vectors.len() >= cap
-        {
-            break;
-        }
-    }
+        vectors
+    };
     if vectors.is_empty() {
+        if from_index {
+            bail!(
+                "no committed vectors found in the index at '{}' for field '{field}' \
+                 (commit some documents first, or train from a JSONL file via --input)",
+                index_dir.display()
+            );
+        }
         bail!(
             "no training vectors found in '{}' for field '{field}'",
-            input.display()
+            input
+                .expect("validated: --input given when --from-index is not")
+                .display()
         );
     }
 
@@ -199,9 +229,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jsonl = setup(dir.path(), 300, None);
 
-        run_pq_codebook("embedding", &jsonl, None, None, true, dir.path())
-            .await
-            .unwrap();
+        run_pq_codebook(
+            "embedding",
+            Some(&jsonl),
+            false,
+            None,
+            None,
+            true,
+            dir.path(),
+        )
+        .await
+        .unwrap();
 
         // schema.toml now names the codebook.
         let schema = context::read_schema(dir.path()).unwrap();
@@ -241,7 +279,8 @@ mod tests {
 
         run_pq_codebook(
             "embedding",
-            &jsonl,
+            Some(&jsonl),
+            false,
             Some(280),
             Some("embedding.v2.pqcb"),
             false,
@@ -253,6 +292,134 @@ mod tests {
         assert!(dir.path().join("store/vector/embedding.v2.pqcb").exists());
         let after = std::fs::read_to_string(dir.path().join("schema.toml")).unwrap();
         assert_eq!(before, after, "schema.toml must stay untouched");
+    }
+
+    /// Write the schema and ingest+commit `count` deterministic vectors so
+    /// `--from-index` has committed data to sample (Issue #920). Returns
+    /// after the commit; the engine is dropped so the training run reopens
+    /// the index fresh.
+    async fn setup_committed_index(dir: &Path, count: usize) {
+        setup(dir, 0, None); // schema.toml only; the JSONL is empty/unused.
+        let engine = context::open_index(dir).await.unwrap();
+        let mut state = 0x9876_5432_u64;
+        for i in 0..count {
+            let data: Vec<f32> = (0..DIM)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+                })
+                .collect();
+            let doc = Document::builder()
+                .add_field("embedding", DataValue::Vector(data))
+                .build();
+            engine.put_document(&format!("doc{i}"), doc).await.unwrap();
+        }
+        engine.commit().await.unwrap();
+    }
+
+    /// Issue #920: `--from-index` trains from the committed vectors —
+    /// no JSONL file involved — and `--update-schema` still rewrites
+    /// `pq_codebook_path`. A subsequent tiny commit must encode against
+    /// the shared codebook (it would hard-error without one).
+    #[tokio::test]
+    async fn train_from_index_uses_committed_vectors_and_updates_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_committed_index(dir.path(), 300).await;
+
+        run_pq_codebook("embedding", None, true, None, None, true, dir.path())
+            .await
+            .unwrap();
+
+        let schema = context::read_schema(dir.path()).unwrap();
+        let Some(FieldOption::Hnsw(opt)) = schema.fields.get("embedding") else {
+            panic!("embedding field must survive the schema rewrite");
+        };
+        assert_eq!(opt.pq_codebook_path.as_deref(), Some("embedding.pqcb"));
+        assert!(dir.path().join("store/vector/embedding.pqcb").exists());
+
+        // A reopened engine commits a tiny batch on the shared codebook.
+        let engine = context::open_index(dir.path()).await.unwrap();
+        let doc = Document::builder()
+            .add_field(
+                "embedding",
+                DataValue::Vector((0..DIM).map(|j| j as f32 * 0.01).collect()),
+            )
+            .build();
+        engine.put_document("extra", doc).await.unwrap();
+        engine.commit().await.unwrap();
+    }
+
+    /// Issue #920: `--sample-size` caps the committed vectors used under
+    /// `--from-index` too (first N by ascending doc_id).
+    #[tokio::test]
+    async fn train_from_index_honors_sample_size() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_committed_index(dir.path(), 300).await;
+
+        run_pq_codebook(
+            "embedding",
+            None,
+            true,
+            Some(280),
+            Some("embedding.v2.pqcb"),
+            false,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+
+        assert!(dir.path().join("store/vector/embedding.v2.pqcb").exists());
+    }
+
+    /// Issue #920: exactly one of `--input` / `--from-index` must be
+    /// given — both and neither are rejected up front.
+    #[tokio::test]
+    async fn train_rejects_conflicting_or_missing_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let jsonl = setup(dir.path(), 1, None);
+
+        let err = run_pq_codebook(
+            "embedding",
+            Some(&jsonl),
+            true,
+            None,
+            None,
+            false,
+            dir.path(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("mutually exclusive"),
+            "both sources must be rejected: {err}"
+        );
+
+        let err = run_pq_codebook("embedding", None, false, None, None, false, dir.path())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("either --input or --from-index must be given"),
+            "no source must be rejected: {err}"
+        );
+    }
+
+    /// Issue #920: `--from-index` on an index with no committed vectors
+    /// for the field errors with a message pointing at both remedies.
+    #[tokio::test]
+    async fn train_from_index_errors_on_empty_index() {
+        let dir = tempfile::tempdir().unwrap();
+        setup(dir.path(), 0, None); // schema only, nothing committed.
+
+        let err = run_pq_codebook("embedding", None, true, None, None, false, dir.path())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("no committed vectors"),
+            "empty index must be named: {err}"
+        );
     }
 
     /// A non-vector value for the field names the failing line.
@@ -267,9 +434,17 @@ mod tests {
         )
         .unwrap();
 
-        let err = run_pq_codebook("embedding", &jsonl, None, None, false, dir.path())
-            .await
-            .unwrap_err();
+        let err = run_pq_codebook(
+            "embedding",
+            Some(&jsonl),
+            false,
+            None,
+            None,
+            false,
+            dir.path(),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("line 1"),
             "error must name the line: {err}"

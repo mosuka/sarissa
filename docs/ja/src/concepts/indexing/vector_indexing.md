@@ -485,11 +485,14 @@ subvector_count = 32
 laurus train pq-codebook --field embedding --input vectors.jsonl --update-schema
 ```
 
-またはプログラムから
+（`--input` の代わりに `--from-index` でインデックスにコミット済みの
+ベクトルを直接サンプリングすることもできます、Issue #920）、または
+プログラムから
 [`Engine::train_pq_codebook`](https://docs.rs/laurus/latest/laurus/struct.Engine.html)
-（`engine.train_pq_codebook("embedding", &vectors, None)`）を使い
-ます。学習は同期・CPU-bound で、代表的なベクトル数千件で十分です
-（全コーパスは不要）。
+（`engine.train_pq_codebook("embedding", &vectors, None)`。from-index
+フローには `engine.sample_committed_vectors("embedding", Some(n))` を
+組み合わせます）を使います。学習は同期・CPU-bound で、代表的な
+ベクトル数千件で十分です（全コーパスは不要）。
 
 セマンティクス:
 

@@ -1770,6 +1770,40 @@ impl Engine {
         self.vector.warmup()
     }
 
+    /// Sample up to `sample_size` vectors already committed for `field`,
+    /// suitable as [`Self::train_pq_codebook`] input without a separate
+    /// JSONL export (Issue #920).
+    ///
+    /// Ordered by ascending doc_id for determinism — the same "first N"
+    /// semantics `laurus train pq-codebook`'s JSONL path already uses,
+    /// just drawn from committed segments instead of a training file. See
+    /// [`VectorStore::sample_field_vectors`](crate::vector::store::VectorStore::sample_field_vectors)
+    /// for the full ordering/emptiness contract.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Vector field to sample. An unknown or vector-less
+    ///   field yields an empty `Vec`, not an error.
+    /// * `sample_size` - Maximum number of vectors to return. `None`
+    ///   returns every committed vector for the field.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if obtaining the reader or reading the field's
+    /// vectors fails.
+    pub fn sample_committed_vectors(
+        &self,
+        field: &str,
+        sample_size: Option<usize>,
+    ) -> Result<Vec<Vector>> {
+        Ok(self
+            .vector
+            .sample_field_vectors(field, sample_size)?
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect())
+    }
+
     /// Train a shared PQ codebook for `field` and persist it into the
     /// engine's vector storage namespace (Issue #631).
     ///

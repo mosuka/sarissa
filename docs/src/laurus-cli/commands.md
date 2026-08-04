@@ -408,15 +408,16 @@ per segment — commits on PQ fields get dramatically faster, and even
 tiny per-commit segments stay on PQ.
 
 ```bash
-laurus train pq-codebook --field <FIELD> --input <JSONL> \
+laurus train pq-codebook --field <FIELD> (--input <JSONL> | --from-index) \
     [--sample-size <N>] [--output <NAME>] [--update-schema]
 ```
 
 | Argument | Description |
 | :--- | :--- |
 | `--field` | The HNSW vector field to train for. Must be configured with a `ProductQuantization` quantizer. |
-| `--input` | JSONL training file — the same `{"id": "...", "document": {"fields": {...}}}` shape as `put docs` / `add docs`. The field value must be a pre-computed `Vector` (embedder-generated input is not supported). |
-| `--sample-size` | Use only the first N vectors of the file (deterministic). Omit to use all of them; thousands of representative vectors are enough. |
+| `--input` | JSONL training file — the same `{"id": "...", "document": {"fields": {...}}}` shape as `put docs` / `add docs`. The field value must be a pre-computed `Vector` (embedder-generated input is not supported). Exactly one of `--input` and `--from-index` must be given. |
+| `--from-index` | Sample the vectors already committed to this index instead of reading a file (Issue #920) — no JSONL export needed. Exactly one of `--input` and `--from-index` must be given. Note: on a field that is already PQ-encoded, the sampled vectors are lossy reconstructions; the intended flow is to train from vectors committed **before** enabling PQ on the field. |
+| `--sample-size` | Use only the first N vectors (deterministic: file order for `--input`, ascending doc_id for `--from-index`). Omit to use all of them; thousands of representative vectors are enough. |
 | `--output` | Storage-relative codebook file name. Defaults to the field's configured `pq_codebook_path`, else `{field}.pqcb`. Use to train a v2 codebook alongside a live one. |
 | `--update-schema` | Rewrite `schema.toml` so the field's `pq_codebook_path` names the trained file. |
 
@@ -441,6 +442,13 @@ laurus train pq-codebook --field embedding --input train.jsonl --update-schema
 # Training PQ codebook for field 'embedding' on 2 vectors...
 # Trained codebook 'embedding.pqcb' (m = 2, k = 256, sub_dim = 2, dimension = 4) from 2 vectors.
 # Updated schema.toml: embedding.pq_codebook_path = "embedding.pqcb".
+```
+
+Or sample directly from the vectors already committed to the index —
+no JSONL export needed:
+
+```bash
+laurus train pq-codebook --field embedding --from-index --sample-size 5000 --update-schema
 ```
 
 ---

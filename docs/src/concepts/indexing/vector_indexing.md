@@ -508,11 +508,13 @@ subvector_count = 32
 laurus train pq-codebook --field embedding --input vectors.jsonl --update-schema
 ```
 
-or programmatically via
+(or `--from-index` in place of `--input` to sample vectors already
+committed to the index, Issue #920), or programmatically via
 [`Engine::train_pq_codebook`](https://docs.rs/laurus/latest/laurus/struct.Engine.html)
-(`engine.train_pq_codebook("embedding", &vectors, None)`). Training is
-CPU-bound and synchronous; thousands of representative vectors are
-enough — the full corpus is not required.
+(`engine.train_pq_codebook("embedding", &vectors, None)`; pair with
+`engine.sample_committed_vectors("embedding", Some(n))` for the
+from-index flow). Training is CPU-bound and synchronous; thousands of
+representative vectors are enough — the full corpus is not required.
 
 Semantics:
 
