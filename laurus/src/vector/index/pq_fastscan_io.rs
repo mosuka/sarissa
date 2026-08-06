@@ -30,6 +30,7 @@ use std::io::{Read, Write};
 use crate::error::{LaurusError, Result};
 use crate::vector::core::quantization::{PqParams, QuantizationMethod, VectorQuantizer, pq_decode};
 use crate::vector::core::vector::Vector;
+use crate::vector::index::pq_codebook::SharedPqCodebook;
 
 /// Bytes consumed by the per-vector codes section (everything after
 /// the field_name string ends), i.e. `ceil(m / 2)`.
@@ -43,19 +44,33 @@ pub(super) const fn pq_fastscan_record_payload_size(m: u16) -> usize {
     (m as usize).div_ceil(2)
 }
 
-/// Train a K=16 PQ codebook on the given vectors and encode each one
-/// into 4-bit codes.
+/// Encode each vector into 4-bit codes against a K=16 PQ codebook —
+/// either the `shared` one (Issue #920: trained once via
+/// `laurus train pq-codebook` and reused by every segment) or a fresh
+/// per-segment codebook trained here.
 ///
 /// Returns `(params, codebook, codes)` where `codes[i]` is a `Vec<u8>`
 /// of length `params.m`, each entry in `[0, 15]`. The caller pairs
 /// each entry back with its `(doc_id, field_name)` triple before
 /// writing through [`write_pq_fastscan_record`].
 ///
+/// # Arguments
+///
+/// * `vectors` - The segment's vectors to encode (and, without
+///   `shared`, to train on).
+/// * `dim` - Configured vector dimension.
+/// * `subvector_count` - PQ `m` (must divide `dim`).
+/// * `shared` - Optional shared codebook. Must have been trained with
+///   `k = 16` for this FastScan variant — a k-mismatched codebook
+///   (e.g. a standard-PQ k=256 file) is rejected loudly by
+///   `validate_for` before anything is encoded.
+///
 /// # Errors
 ///
 /// Forwards any error from [`VectorQuantizer::train`] /
 /// [`VectorQuantizer::quantize`] (e.g. empty input, dimension
-/// mismatch, `dim % m != 0`). Returns
+/// mismatch, `dim % m != 0`) and
+/// [`SharedPqCodebook::validate_for`]'s geometry/k mismatches. Returns
 /// [`LaurusError::InvalidOperation`] if a sub-quantiser code ends up
 /// outside `[0, 15]` (should never happen with `K = 16` but we
 /// validate to fail loudly rather than silently truncating during
@@ -64,12 +79,22 @@ pub(super) fn quantize_segment_pq_fastscan(
     vectors: &[Vector],
     dim: usize,
     subvector_count: usize,
+    shared: Option<&SharedPqCodebook>,
 ) -> Result<(PqParams, Vec<f32>, Vec<Vec<u8>>)> {
-    let mut quantizer = VectorQuantizer::new(
-        QuantizationMethod::ProductQuantizationFastScan { subvector_count },
-        dim,
-    );
-    quantizer.train(vectors)?;
+    let quantizer = match shared {
+        Some(cb) => {
+            cb.validate_for(dim, subvector_count, 16)?;
+            VectorQuantizer::from_pq_codebook(dim, cb.params, cb.codebook.clone())?
+        }
+        None => {
+            let mut quantizer = VectorQuantizer::new(
+                QuantizationMethod::ProductQuantizationFastScan { subvector_count },
+                dim,
+            );
+            quantizer.train(vectors)?;
+            quantizer
+        }
+    };
     let (params, codebook_slice) = quantizer
         .pq_state()
         .expect("PQ FastScan quantizer trained successfully implies pq_state is set");
@@ -216,7 +241,7 @@ mod tests {
             vec_of(&[-10.0, -10.0, -20.0, -20.0]),
             vec_of(&[10.1, 10.1, 20.1, 20.1]),
         ];
-        let (params, codebook, codes) = quantize_segment_pq_fastscan(&vectors, 4, 2).unwrap();
+        let (params, codebook, codes) = quantize_segment_pq_fastscan(&vectors, 4, 2, None).unwrap();
         assert_eq!(params.m, 2);
         assert_eq!(params.k, 16);
         assert_eq!(params.sub_dim, 2);
@@ -228,6 +253,64 @@ mod tests {
                 assert!(code < 16, "code {code} exceeds 4-bit range");
             }
         }
+    }
+
+    /// Issue #920 (mirror of the standard-PQ test in `pq_io.rs`):
+    /// encoding against a pre-trained [`SharedPqCodebook`] must produce
+    /// byte-identical output to training a fresh codebook on the exact
+    /// same corpus — `pq_train_codebook` is deterministic (seeded
+    /// k-means), so any divergence means the shared path diverged.
+    #[test]
+    fn shared_codebook_produces_byte_identical_fastscan_codes_to_fresh_training() {
+        let mut state: u64 = 0x1234_5678_9ABC_DEF0;
+        let vectors: Vec<Vector> = (0..300)
+            .map(|_| {
+                let data: Vec<f32> = (0..32)
+                    .map(|_| {
+                        state = state
+                            .wrapping_mul(6_364_136_223_846_793_005)
+                            .wrapping_add(1_442_695_040_888_963_407);
+                        ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+                    })
+                    .collect();
+                Vector::new(data)
+            })
+            .collect();
+
+        let (trained_params, trained_codebook, trained_codes) =
+            quantize_segment_pq_fastscan(&vectors, 32, 4, None).unwrap();
+        assert_eq!(trained_params.k, 16);
+
+        let shared = SharedPqCodebook {
+            params: trained_params,
+            codebook: trained_codebook.clone(),
+        };
+        let (shared_params, shared_codebook, shared_codes) =
+            quantize_segment_pq_fastscan(&vectors, 32, 4, Some(&shared)).unwrap();
+
+        assert_eq!(shared_params, trained_params);
+        assert_eq!(shared_codebook, trained_codebook);
+        assert_eq!(shared_codes, trained_codes);
+    }
+
+    /// Issue #920: a k=256 (standard PQ) codebook must be rejected
+    /// loudly when handed to the FastScan encode path.
+    #[test]
+    fn k256_codebook_is_rejected_by_the_fastscan_encode_path() {
+        let vectors = vec![
+            vec_of(&[10.0, 10.0, 20.0, 20.0]),
+            vec_of(&[-10.0, -10.0, -20.0, -20.0]),
+        ];
+        let params = PqParams::new(2, 256, 2).unwrap();
+        let shared = SharedPqCodebook {
+            codebook: vec![0.0; params.codebook_len()],
+            params,
+        };
+        let err = quantize_segment_pq_fastscan(&vectors, 4, 2, Some(&shared)).unwrap_err();
+        assert!(
+            err.to_string().contains("k = 256"),
+            "the k mismatch must be named: {err}"
+        );
     }
 
     #[test]

@@ -541,6 +541,13 @@ Semantics:
 - Cosine-metric fields L2-normalize the training sample the same way
   the writer normalizes indexed vectors, so the codebook basis always
   matches (the #794 trap).
+- **FastScan fields are supported too** (Issue #920, `pq-fastscan`
+  feature): a `ProductQuantizationFastScan` field trains and encodes
+  against a k=16 shared codebook through the exact same commands and
+  file format — the `.pqcb` header stores `k` verbatim, so the two
+  variants are distinguished by the stored value, and a k-mismatched
+  codebook (e.g. a k=256 file configured on a FastScan field) fails
+  the commit loudly with both values named.
 
 #### On-disk format
 

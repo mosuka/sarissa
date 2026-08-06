@@ -118,6 +118,7 @@ fn shared_codebook_search_results_match_fresh_training() {
         &codebook_name,
         DIM,
         M,
+        256,
         false,
         &training_sample,
     )
@@ -180,6 +181,7 @@ fn shared_codebook_survives_a_forced_merge() {
         &codebook_name,
         DIM,
         M,
+        256,
         false,
         &training_sample,
     )

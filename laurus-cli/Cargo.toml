@@ -54,3 +54,7 @@ embeddings-all = [
     "embeddings-multimodal",
     "embeddings-openai",
 ]
+# Passthrough for laurus's experimental PQ FastScan variant (k=16 4-bit
+# codes) so FastScan schemas parse and `create index --train-pq-codebook`
+# can target FastScan fields (Issue #920). Mirrors laurus-server's flag.
+pq-fastscan = ["laurus/pq-fastscan", "laurus-server/pq-fastscan"]

@@ -135,19 +135,25 @@ pub async fn run_index(
 }
 
 /// Collect the fields eligible for create-time codebook training: HNSW
-/// fields configuring `ProductQuantization` with a `pq_codebook_path`,
-/// sorted by field name (`Schema::fields` is a HashMap, so iteration
-/// order alone would be nondeterministic).
+/// fields configuring `ProductQuantization` (or, with the `pq-fastscan`
+/// feature, `ProductQuantizationFastScan` — Issue #920) with a
+/// `pq_codebook_path`, sorted by field name (`Schema::fields` is a
+/// HashMap, so iteration order alone would be nondeterministic).
 fn eligible_pq_fields(schema: &Schema) -> Vec<String> {
     use laurus::vector::core::quantization::QuantizationMethod;
+    fn is_pq_variant(quantizer: &QuantizationMethod) -> bool {
+        match quantizer {
+            QuantizationMethod::ProductQuantization { .. } => true,
+            #[cfg(feature = "pq-fastscan")]
+            QuantizationMethod::ProductQuantizationFastScan { .. } => true,
+            _ => false,
+        }
+    }
     let mut fields: Vec<String> = schema
         .fields
         .iter()
         .filter_map(|(name, option)| match option {
-            FieldOption::Hnsw(o)
-                if matches!(o.quantizer, QuantizationMethod::ProductQuantization { .. })
-                    && o.pq_codebook_path.is_some() =>
-            {
+            FieldOption::Hnsw(o) if is_pq_variant(&o.quantizer) && o.pq_codebook_path.is_some() => {
                 Some(name.clone())
             }
             _ => None,

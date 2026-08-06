@@ -570,13 +570,27 @@ impl PqParams {
         Ok(Self { m, k, sub_dim })
     }
 
-    /// Derive params from `dim` and `m`. `sub_dim` is `dim / m`.
+    /// Derive params from `dim` and `m` for the standard 8-bit PQ
+    /// variant (`k = 256`). `sub_dim` is `dim / m`.
     ///
     /// # Errors
     ///
     /// Returns [`LaurusError::InvalidOperation`] if `m == 0` or
     /// `dim % m != 0`.
     pub fn from_dim_and_m(dim: usize, m: usize) -> Result<Self> {
+        Self::from_dim_and_m_k(dim, m, 256)
+    }
+
+    /// Derive params from `dim`, `m`, and an explicit centroid count
+    /// `k` (`256` for standard 8-bit PQ, `16` for the FastScan 4-bit
+    /// variant — Issue #920). `sub_dim` is `dim / m`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LaurusError::InvalidOperation`] if `m == 0`,
+    /// `dim % m != 0`, or `k` is not one of `{16, 256}` (via
+    /// [`Self::new`]'s validation).
+    pub fn from_dim_and_m_k(dim: usize, m: usize, k: u16) -> Result<Self> {
         if m == 0 {
             return Err(LaurusError::InvalidOperation(
                 "Product quantization subvector_count must be > 0".to_string(),
@@ -596,7 +610,7 @@ impl PqParams {
                     "Product quantization subvector_count {m} exceeds u16::MAX"
                 ))
             })?,
-            256,
+            k,
             u16::try_from(sub_dim).map_err(|_| {
                 LaurusError::InvalidOperation(format!(
                     "Product quantization sub_dim {sub_dim} exceeds u16::MAX"
@@ -820,11 +834,10 @@ impl VectorQuantizer {
             }
             #[cfg(feature = "pq-fastscan")]
             QuantizationMethod::ProductQuantizationFastScan { subvector_count } => {
-                // FastScan uses K=16; reuse `from_dim_and_m` which validates
-                // divisibility and propagate via the standard PQ codebook
-                // training (k-means on each sub-vector).
-                let mut params = PqParams::from_dim_and_m(self.dimension, subvector_count)?;
-                params.k = 16;
+                // FastScan uses K=16; `from_dim_and_m_k` validates both the
+                // divisibility and the k value, then the codebook trains via
+                // the standard PQ path (k-means on each sub-vector).
+                let params = PqParams::from_dim_and_m_k(self.dimension, subvector_count, 16)?;
                 let codebook = pq_train_codebook(self.dimension, params, vectors)?;
                 self.state = QuantizerState::ProductQuantization { params, codebook };
                 Ok(())

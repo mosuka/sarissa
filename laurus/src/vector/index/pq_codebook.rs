@@ -58,12 +58,19 @@ pub struct SharedPqCodebook {
 
 impl SharedPqCodebook {
     /// Confirm this codebook can be used to encode `dimension`-d
-    /// vectors split into `subvector_count` sub-vectors.
+    /// vectors split into `subvector_count` sub-vectors with
+    /// `expected_k` centroids per sub-quantizer.
     ///
     /// # Arguments
     ///
     /// * `dimension` - The caller's configured vector dimension.
     /// * `subvector_count` - The caller's configured PQ `m`.
+    /// * `expected_k` - The centroid count the caller's quantizer
+    ///   variant encodes against: `256` for standard 8-bit PQ, `16`
+    ///   for FastScan (Issue #920). A k-mismatched codebook (e.g. a
+    ///   k=256 file configured on a FastScan field) must fail loudly
+    ///   here — at the writer, before any segment is encoded — per the
+    ///   #918 failure policy.
     ///
     /// # Errors
     ///
@@ -71,7 +78,12 @@ impl SharedPqCodebook {
     /// geometry does not match the caller's expectations, or if its
     /// stored length is inconsistent with its own params (defensive;
     /// [`read_pq_codebook`] already guarantees this on the load path).
-    pub fn validate_for(&self, dimension: usize, subvector_count: usize) -> Result<()> {
+    pub fn validate_for(
+        &self,
+        dimension: usize,
+        subvector_count: usize,
+        expected_k: u16,
+    ) -> Result<()> {
         if self.params.original_dim() != dimension {
             return Err(LaurusError::InvalidOperation(format!(
                 "shared PQ codebook dimension {} does not match the configured \
@@ -84,6 +96,14 @@ impl SharedPqCodebook {
                 "shared PQ codebook subvector_count {} does not match the configured \
                  subvector_count {subvector_count}",
                 self.params.m
+            )));
+        }
+        if self.params.k != expected_k {
+            return Err(LaurusError::InvalidOperation(format!(
+                "shared PQ codebook has k = {} centroids per sub-quantizer but the \
+                 field's quantizer variant requires k = {expected_k} (16 = FastScan, \
+                 256 = standard PQ); retrain the codebook for this variant",
+                self.params.k
             )));
         }
         if self.codebook.len() != self.params.codebook_len() {
@@ -193,6 +213,10 @@ pub fn read_pq_codebook(storage: &dyn Storage, name: &str) -> Result<SharedPqCod
 /// * `name` - Storage-relative file name (see [`default_codebook_name`]).
 /// * `dimension` - Original vector dimension.
 /// * `subvector_count` - PQ `m` (must divide `dimension`).
+/// * `k` - Centroids per sub-quantizer: `256` for standard 8-bit PQ,
+///   `16` for the FastScan 4-bit variant (Issue #920). The on-disk
+///   `.pqcb` format stores `k` verbatim, so both variants share the
+///   same file format; readers dispatch on the stored value.
 /// * `normalize` - Must match the field's `HnswIndexConfig::normalize_vectors`
 ///   (i.e. `true` for Cosine distance). Training on a different scale
 ///   than the segments that will later encode against this codebook
@@ -203,17 +227,19 @@ pub fn read_pq_codebook(storage: &dyn Storage, name: &str) -> Result<SharedPqCod
 /// # Errors
 ///
 /// * [`LaurusError::InvalidOperation`] if `vectors` is empty, has
-///   mixed dimensions, or `subvector_count` does not divide `dimension`.
+///   mixed dimensions, `subvector_count` does not divide `dimension`,
+///   or `k` is not one of `{16, 256}`.
 /// * Any error from [`write_pq_codebook`].
 pub fn train_and_write_pq_codebook(
     storage: &dyn Storage,
     name: &str,
     dimension: usize,
     subvector_count: usize,
+    k: u16,
     normalize: bool,
     vectors: &[Vector],
 ) -> Result<SharedPqCodebook> {
-    let params = PqParams::from_dim_and_m(dimension, subvector_count)?;
+    let params = PqParams::from_dim_and_m_k(dimension, subvector_count, k)?;
 
     let normalized;
     let training_set: &[Vector] = if normalize {
@@ -263,7 +289,8 @@ mod tests {
         let storage = storage();
         let vectors = sample_vectors(300, 32);
         let trained =
-            train_and_write_pq_codebook(&storage, "field.pqcb", 32, 4, false, &vectors).unwrap();
+            train_and_write_pq_codebook(&storage, "field.pqcb", 32, 4, 256, false, &vectors)
+                .unwrap();
 
         let loaded = read_pq_codebook(&storage, "field.pqcb").unwrap();
         assert_eq!(loaded.params, trained.params);
@@ -274,7 +301,7 @@ mod tests {
     fn corrupted_payload_byte_fails_checksum() {
         let storage = storage();
         let vectors = sample_vectors(300, 32);
-        train_and_write_pq_codebook(&storage, "field.pqcb", 32, 4, false, &vectors).unwrap();
+        train_and_write_pq_codebook(&storage, "field.pqcb", 32, 4, 256, false, &vectors).unwrap();
 
         // Flip one byte inside the codebook payload (after the 24-byte
         // prefix) and confirm the CRC catches it.
@@ -297,7 +324,7 @@ mod tests {
     fn truncated_file_is_rejected_before_allocating() {
         let storage = storage();
         let vectors = sample_vectors(300, 32);
-        train_and_write_pq_codebook(&storage, "field.pqcb", 32, 4, false, &vectors).unwrap();
+        train_and_write_pq_codebook(&storage, "field.pqcb", 32, 4, 256, false, &vectors).unwrap();
 
         // Truncate to just past the fixed prefix -- the declared
         // codebook (m=4, k=256, sub_dim=8 -> 8192 floats = 32768 bytes)
@@ -322,17 +349,43 @@ mod tests {
     fn validate_for_rejects_dimension_and_subvector_mismatch() {
         let storage = storage();
         let vectors = sample_vectors(300, 32);
-        let cb =
-            train_and_write_pq_codebook(&storage, "field.pqcb", 32, 4, false, &vectors).unwrap();
+        let cb = train_and_write_pq_codebook(&storage, "field.pqcb", 32, 4, 256, false, &vectors)
+            .unwrap();
 
-        assert!(cb.validate_for(32, 4).is_ok());
+        assert!(cb.validate_for(32, 4, 256).is_ok());
         assert!(
-            cb.validate_for(64, 4).is_err(),
+            cb.validate_for(64, 4, 256).is_err(),
             "dimension mismatch must be rejected"
         );
         assert!(
-            cb.validate_for(32, 8).is_err(),
+            cb.validate_for(32, 8, 256).is_err(),
             "subvector_count mismatch must be rejected"
+        );
+        assert!(
+            cb.validate_for(32, 4, 16).is_err(),
+            "k mismatch must be rejected (Issue #920: a k=256 codebook must not \
+             encode a FastScan field)"
+        );
+    }
+
+    /// Issue #920: a k=16 (FastScan) codebook round-trips through the
+    /// same `.pqcb` file format — the header stores `k` verbatim, so no
+    /// format change is needed for the FastScan variant.
+    #[test]
+    fn k16_codebook_round_trips_through_the_same_format() {
+        let storage = storage();
+        let vectors = sample_vectors(300, 32);
+        let trained =
+            train_and_write_pq_codebook(&storage, "fs.pqcb", 32, 4, 16, false, &vectors).unwrap();
+        assert_eq!(trained.params.k, 16);
+
+        let loaded = read_pq_codebook(&storage, "fs.pqcb").unwrap();
+        assert_eq!(loaded.params, trained.params);
+        assert_eq!(loaded.codebook, trained.codebook);
+        assert!(loaded.validate_for(32, 4, 16).is_ok());
+        assert!(
+            loaded.validate_for(32, 4, 256).is_err(),
+            "a k=16 codebook must not validate for the standard-PQ variant"
         );
     }
 
@@ -342,9 +395,9 @@ mod tests {
         let vectors = sample_vectors(300, 32);
 
         let cb_raw =
-            train_and_write_pq_codebook(&storage, "raw.pqcb", 32, 4, false, &vectors).unwrap();
+            train_and_write_pq_codebook(&storage, "raw.pqcb", 32, 4, 256, false, &vectors).unwrap();
         let cb_normalized =
-            train_and_write_pq_codebook(&storage, "norm.pqcb", 32, 4, true, &vectors).unwrap();
+            train_and_write_pq_codebook(&storage, "norm.pqcb", 32, 4, 256, true, &vectors).unwrap();
 
         // Same input, different `normalize` flag: the trained codebooks
         // must differ (proves normalization actually ran, rather than

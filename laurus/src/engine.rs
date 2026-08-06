@@ -111,7 +111,8 @@ pub struct PqCodebookInfo {
     pub path: String,
     /// Number of sub-vectors (`m`) the codebook was trained for.
     pub subvector_count: usize,
-    /// Centroids per sub-vector (`k`, currently always `256`).
+    /// Centroids per sub-vector (`k`): `256` for standard 8-bit PQ
+    /// fields, `16` for FastScan fields (Issue #920).
     pub centroids: usize,
     /// Sub-vector dimension (`dimension / subvector_count`).
     pub sub_dimension: usize,
@@ -1859,7 +1860,7 @@ impl Engine {
             default_codebook_name, train_and_write_pq_codebook,
         };
 
-        let (dimension, subvector_count, normalize, configured_path) = {
+        let (dimension, subvector_count, k, normalize, configured_path) = {
             let schema = self.schema.read();
             let Some(option) = schema.fields.get(field) else {
                 return Err(crate::error::LaurusError::invalid_argument(format!(
@@ -1872,16 +1873,28 @@ impl Engine {
                      (shared PQ codebooks are HNSW-only)"
                 )));
             };
-            let QuantizationMethod::ProductQuantization { subvector_count } = o.quantizer else {
-                return Err(crate::error::LaurusError::invalid_argument(format!(
-                    "cannot train a PQ codebook: field '{field}' does not use \
-                     ProductQuantization (quantizer is {:?})",
-                    o.quantizer
-                )));
+            // The quantizer variant fixes the centroid count the segments
+            // will encode against: k=256 for standard 8-bit PQ, k=16 for
+            // the FastScan 4-bit variant (Issue #920).
+            let (subvector_count, k): (usize, u16) = match o.quantizer {
+                QuantizationMethod::ProductQuantization { subvector_count } => {
+                    (subvector_count, 256)
+                }
+                #[cfg(feature = "pq-fastscan")]
+                QuantizationMethod::ProductQuantizationFastScan { subvector_count } => {
+                    (subvector_count, 16)
+                }
+                other => {
+                    return Err(crate::error::LaurusError::invalid_argument(format!(
+                        "cannot train a PQ codebook: field '{field}' does not use \
+                         ProductQuantization (quantizer is {other:?})"
+                    )));
+                }
             };
             (
                 o.dimension,
                 subvector_count,
+                k,
                 o.distance == DistanceMetric::Cosine,
                 o.pq_codebook_path.clone(),
             )
@@ -1897,6 +1910,7 @@ impl Engine {
             &name,
             dimension,
             subvector_count,
+            k,
             normalize,
             vectors,
         )?;

@@ -71,7 +71,7 @@ pub(super) fn quantize_segment_pq(
 ) -> Result<(PqParams, Vec<f32>, Vec<Vec<u8>>)> {
     let quantizer = match shared {
         Some(cb) => {
-            cb.validate_for(dim, subvector_count)?;
+            cb.validate_for(dim, subvector_count, 256)?;
             VectorQuantizer::from_pq_codebook(dim, cb.params, cb.codebook.clone())?
         }
         None => {

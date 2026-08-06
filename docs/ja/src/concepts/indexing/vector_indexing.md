@@ -518,6 +518,13 @@ train-before-first-commit の順序ハザードを完全に解消することも
 - Cosine メトリックのフィールドでは、 writer がインデックス時に行う
   L2 正規化と同じ正規化を学習サンプルにも適用し、 codebook の基底を
   常に一致させます（#794 の罠への対処）。
+- **FastScan フィールドにも対応**（Issue #920、`pq-fastscan` feature）:
+  `ProductQuantizationFastScan` フィールドは同じコマンド・同じファイル
+  フォーマットで k=16 の共有 codebook を学習・エンコードします —
+  `.pqcb` header は `k` をそのまま保存するため 2 つの variant は
+  保存された値で区別され、k 不一致の codebook（例: k=256 のファイルを
+  FastScan フィールドに設定）は両方の値を明示するエラーで commit が
+  失敗します。
 
 #### on-disk format
 
