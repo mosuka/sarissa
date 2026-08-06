@@ -138,7 +138,7 @@ generate_commands() {
       DOC=$(echo "$BASE_DOC" | jq -c '{fields: .}')
     fi
 
-    echo "doc add $ID $DOC"
+    echo "add doc $ID $DOC"
 
     count=$((count + 1))
     if [ $((count % COMMIT_INTERVAL)) -eq 0 ]; then
