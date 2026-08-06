@@ -89,16 +89,16 @@ You can also search directly:
 
 ```bash
 # Lexical search
-./target/release/laurus --data-dir examples/movies/index search "title:matrix" --limit 10
+./target/release/laurus --index-dir examples/movies/index search "title:matrix" --limit 10
 
 # Multimodal vector search (text-to-image)
-./target/release/laurus --data-dir examples/movies/index search 'poster_vec:"action hero"' --limit 10
+./target/release/laurus --index-dir examples/movies/index search 'poster_vec:"action hero"' --limit 10
 ```
 
 Or start an interactive session:
 
 ```bash
-./target/release/laurus --data-dir examples/movies/index repl
+./target/release/laurus --index-dir examples/movies/index repl
 ```
 
 ## File structure

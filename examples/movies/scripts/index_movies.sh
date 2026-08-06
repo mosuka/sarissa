@@ -152,6 +152,6 @@ generate_commands() {
   echo "quit"
 }
 
-generate_commands | "$LAURUS" --data-dir "$INDEX_DIR" repl >/dev/null
+generate_commands | "$LAURUS" --index-dir "$INDEX_DIR" repl >/dev/null
 
 echo "==> Done. Indexed $TOTAL movies."
