@@ -262,6 +262,11 @@ Lexical 検索の動作パラメータは `SearchRequestBuilder` のメソッド
 | `parallel` | false | セグメント間の並列検索を有効にする |
 | `sort_by` | `Score` | 関連性スコアでソート、またはフィールドでソート（`asc` / `desc`） |
 
+フィールドソート検索（`sort_by: Field { .. }`）は常に全候補ドキュメントを走査します。
+スコアソートで利用可能な block-max ベースの早期終了とは異なり、フィールドソートには早期終了が
+ありません。これにより返るヒットは早期終了による近似ではなく真の top-K であることが保証され、
+`total_hits` も走査打ち切りによる件数ではなく真のマッチ数を反映します。
+
 `timeout_ms` を設定すると、時間予算は検索の**実行中に協調的に**適用されます。スキャンループ
 （マルチセグメント fanout の各セグメントを含む）が定期的に deadline をチェックし、超過した時点で
 即座に中断してタイムアウトエラーを返します（従来のようにクエリを完走してから判定するのではありません）。
@@ -275,17 +280,17 @@ Lexical 検索の動作パラメータは `SearchRequestBuilder` のメソッド
 ```rust
 use laurus::SearchRequestBuilder;
 use laurus::lexical::TermQuery;
-use laurus::lexical::search::searcher::{LexicalSearchQuery, SortField};
+use laurus::lexical::search::searcher::{LexicalSearchQuery, SortField, SortOrder};
 
 let request = SearchRequestBuilder::new()
     .lexical_query(LexicalSearchQuery::Obj(Box::new(TermQuery::new("body", "rust"))))
-    .limit(20)
     .lexical_min_score(0.5)
     .lexical_timeout_ms(5000)
     .lexical_parallel(true)
-    .sort_by(SortField::FieldDesc("date".to_string()))
+    .sort_by(SortField::Field { name: "date".to_string(), order: SortOrder::Desc })
     .add_field_boost("title", 2.0)
     .add_field_boost("body", 1.0)
+    .limit(20)
     .build();
 ```
 

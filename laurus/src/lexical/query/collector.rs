@@ -169,27 +169,19 @@ impl<'a> TopFieldCollector<'a> {
         }
     }
 
-    /// Compare two field values based on sort order.
-    fn compare_for_heap(&self, a: &FieldScoredDoc, b: &FieldScoredDoc) -> Ordering {
-        if self.ascending {
-            // For ascending: heap comparison is already reversed (min-heap behavior)
-            a.cmp(b)
-        } else {
-            // For descending: reverse the comparison
-            b.cmp(a)
-        }
-    }
-
     /// Check if a new document should be collected based on field value.
+    ///
+    /// Compares against the current heap-worst (`Ord`-greatest, see
+    /// [`FieldScoredDoc::cmp`]) — a new doc is worth collecting when it
+    /// ranks better (`Ordering::Less`) than the worst.
     fn should_collect(&self, new_doc: &FieldScoredDoc) -> bool {
         if self.hits.len() < self.max_docs {
             return true;
         }
 
-        if let Some(worst) = self.hits.peek() {
-            self.compare_for_heap(new_doc, worst) == Ordering::Less
-        } else {
-            true
+        match self.hits.peek() {
+            Some(worst) => new_doc.cmp(worst) == Ordering::Less,
+            None => true,
         }
     }
 }
@@ -197,6 +189,10 @@ impl<'a> TopFieldCollector<'a> {
 impl<'a> Collector for TopFieldCollector<'a> {
     fn collect(&mut self, doc_id: u64, score: f32) -> Result<()> {
         self.total_hits += 1;
+
+        if self.max_docs == 0 {
+            return Ok(());
+        }
 
         // Check minimum score threshold
         if score < self.min_score {
@@ -228,58 +224,13 @@ impl<'a> Collector for TopFieldCollector<'a> {
     }
 
     fn results(&self) -> Vec<SearchHit> {
-        // Convert heap to vector and sort by field values
+        // `FieldScoredDoc::Ord` is defined so that `Less` always means
+        // "ranks better" (for both sort directions — see the `cmp` impl
+        // below), so a plain ascending sort by `Ord` yields best-first
+        // output regardless of `self.ascending`.
         let mut sorted_docs: Vec<_> = self.hits.iter().cloned().collect();
+        sorted_docs.sort_unstable();
 
-        // Sort based on the sort order
-        use crate::lexical::core::field::FieldValue;
-        if self.ascending {
-            // Ascending: compare field values directly
-            sorted_docs.sort_unstable_by(|a, b| match (&a.field_value, &b.field_value) {
-                (FieldValue::Text(av), FieldValue::Text(bv)) => av.cmp(bv),
-                (FieldValue::Int64(av), FieldValue::Int64(bv)) => av.cmp(bv),
-                (FieldValue::Float64(av), FieldValue::Float64(bv)) => av.total_cmp(bv),
-                (FieldValue::Bool(av), FieldValue::Bool(bv)) => av.cmp(bv),
-                (FieldValue::DateTime(av), FieldValue::DateTime(bv)) => av.cmp(bv),
-                (FieldValue::Geo(a), FieldValue::Geo(b)) => {
-                    let lat_cmp = a.lat.total_cmp(&b.lat);
-                    if lat_cmp != Ordering::Equal {
-                        lat_cmp
-                    } else {
-                        a.lon.total_cmp(&b.lon)
-                    }
-                }
-                (FieldValue::Bytes(av, _), FieldValue::Bytes(bv, _)) => av.cmp(bv),
-                (FieldValue::Null, FieldValue::Null) => Ordering::Equal,
-                (FieldValue::Null, _) => Ordering::Greater,
-                (_, FieldValue::Null) => Ordering::Less,
-                _ => Ordering::Equal,
-            });
-        } else {
-            // Descending: reverse comparison
-            sorted_docs.sort_unstable_by(|a, b| match (&a.field_value, &b.field_value) {
-                (FieldValue::Text(av), FieldValue::Text(bv)) => bv.cmp(av),
-                (FieldValue::Int64(av), FieldValue::Int64(bv)) => bv.cmp(av),
-                (FieldValue::Float64(av), FieldValue::Float64(bv)) => bv.total_cmp(av),
-                (FieldValue::Bool(av), FieldValue::Bool(bv)) => bv.cmp(av),
-                (FieldValue::DateTime(av), FieldValue::DateTime(bv)) => bv.cmp(av),
-                (FieldValue::Geo(a), FieldValue::Geo(b)) => {
-                    let lat_cmp = b.lat.total_cmp(&a.lat);
-                    if lat_cmp != Ordering::Equal {
-                        lat_cmp
-                    } else {
-                        b.lon.total_cmp(&a.lon)
-                    }
-                }
-                (FieldValue::Bytes(av, _), FieldValue::Bytes(bv, _)) => bv.cmp(av),
-                (FieldValue::Null, FieldValue::Null) => Ordering::Equal,
-                (FieldValue::Null, _) => Ordering::Less,
-                (_, FieldValue::Null) => Ordering::Greater,
-                _ => Ordering::Equal,
-            });
-        }
-
-        // Convert to SearchHit
         sorted_docs
             .into_iter()
             .map(|doc| SearchHit {
@@ -295,7 +246,20 @@ impl<'a> Collector for TopFieldCollector<'a> {
     }
 
     fn needs_more(&self) -> bool {
-        self.hits.len() < self.max_docs
+        // Field-sort values (dates, popularity, ...) have no algebraic
+        // upper bound over doc_id-ordered iteration the way BM25 scores
+        // do, so — unlike `TopDocsCollector` (#459) — this collector
+        // cannot expose a meaningful `min_competitive()` to drive early
+        // termination. The previous `self.hits.len() < self.max_docs`
+        // short-circuit stopped the searcher loop the instant the heap
+        // filled, so any later-iterated doc with a better field value
+        // was silently dropped — returning the first K matches by
+        // doc_id rather than the true top K by field value (#608).
+        // `min_competitive()` / `bmw_capable()` intentionally stay at
+        // their trait defaults (`NEG_INFINITY` / `false`): every
+        // candidate must be visited for a field-sorted search to be
+        // correct.
+        true
     }
 
     fn min_score(&self) -> f32 {
@@ -322,65 +286,48 @@ impl PartialOrd for FieldScoredDoc {
     }
 }
 
+/// Natural ascending order over sort-field values, used as the single
+/// source of truth for both [`FieldScoredDoc::cmp`] (heap order) and
+/// [`TopFieldCollector::results`] (final output order) — see #608.
+///
+/// `Null` always sorts greatest (last in ascending order), independent
+/// of sort direction; direction is applied by the caller via
+/// [`Ordering::reverse`].
+fn compare_sort_key(
+    a: &crate::lexical::core::field::FieldValue,
+    b: &crate::lexical::core::field::FieldValue,
+) -> Ordering {
+    use crate::lexical::core::field::FieldValue;
+
+    match (a, b) {
+        (FieldValue::Null, FieldValue::Null) => Ordering::Equal,
+        (FieldValue::Null, _) => Ordering::Greater,
+        (_, FieldValue::Null) => Ordering::Less,
+        (FieldValue::Text(a), FieldValue::Text(b)) => a.cmp(b),
+        (FieldValue::Int64(a), FieldValue::Int64(b)) => a.cmp(b),
+        (FieldValue::Float64(a), FieldValue::Float64(b)) => a.total_cmp(b),
+        (FieldValue::Bool(a), FieldValue::Bool(b)) => a.cmp(b),
+        (FieldValue::DateTime(a), FieldValue::DateTime(b)) => a.cmp(b),
+        (FieldValue::Geo(a), FieldValue::Geo(b)) => a
+            .lat
+            .total_cmp(&b.lat)
+            .then_with(|| a.lon.total_cmp(&b.lon)),
+        (FieldValue::Bytes(a, _), FieldValue::Bytes(b, _)) => a.cmp(b),
+        _ => Ordering::Equal,
+    }
+}
+
 impl Ord for FieldScoredDoc {
+    /// Heap order: `Ordering::Less` always means "ranks better", for
+    /// both sort directions — `BinaryHeap` (a max-heap) then naturally
+    /// pops the `Ord`-greatest element, which is always the current
+    /// *worst* ranked document, i.e. the correct eviction target
+    /// (#608; mirrors [`ScoredDoc::cmp`]'s min-heap-via-reversal
+    /// pattern for `TopDocsCollector`).
     fn cmp(&self, other: &Self) -> Ordering {
-        // BinaryHeap is a max-heap, but we want min-heap behavior for ascending sorts
-        // and max-heap behavior for descending sorts.
-        //
-        // For ascending: We want lowest values to be popped first (min-heap).
-        //   So we reverse comparison: b.cmp(a) makes heap pop smallest first.
-        // For descending: We want highest values to be popped first (max-heap).
-        //   So we use normal comparison: a.cmp(b) makes heap pop largest first.
-        use crate::lexical::core::field::FieldValue;
-
-        let field_cmp = if self.ascending {
-            // Ascending: reverse comparison for min-heap behavior
-            match (&self.field_value, &other.field_value) {
-                (FieldValue::Text(a), FieldValue::Text(b)) => b.cmp(a),
-                (FieldValue::Int64(a), FieldValue::Int64(b)) => b.cmp(a),
-                (FieldValue::Float64(a), FieldValue::Float64(b)) => b.total_cmp(a),
-                (FieldValue::Bool(a), FieldValue::Bool(b)) => b.cmp(a),
-                (FieldValue::DateTime(a), FieldValue::DateTime(b)) => b.cmp(a),
-                (FieldValue::Geo(a), FieldValue::Geo(b)) => {
-                    let lat_cmp = b.lat.total_cmp(&a.lat);
-                    if lat_cmp != Ordering::Equal {
-                        lat_cmp
-                    } else {
-                        b.lon.total_cmp(&a.lon)
-                    }
-                }
-                (FieldValue::Bytes(a, _), FieldValue::Bytes(b, _)) => b.cmp(a),
-                (FieldValue::Null, FieldValue::Null) => Ordering::Equal,
-                (FieldValue::Null, _) => Ordering::Greater,
-                (_, FieldValue::Null) => Ordering::Less,
-                _ => Ordering::Equal,
-            }
-        } else {
-            // Descending: normal comparison for max-heap behavior
-            match (&self.field_value, &other.field_value) {
-                (FieldValue::Text(a), FieldValue::Text(b)) => a.cmp(b),
-                (FieldValue::Int64(a), FieldValue::Int64(b)) => a.cmp(b),
-                (FieldValue::Float64(a), FieldValue::Float64(b)) => a.total_cmp(b),
-                (FieldValue::Bool(a), FieldValue::Bool(b)) => a.cmp(b),
-                (FieldValue::DateTime(a), FieldValue::DateTime(b)) => a.cmp(b),
-                (FieldValue::Geo(a), FieldValue::Geo(b)) => {
-                    let lat_cmp = a.lat.total_cmp(&b.lat);
-                    if lat_cmp != Ordering::Equal {
-                        lat_cmp
-                    } else {
-                        a.lon.total_cmp(&b.lon)
-                    }
-                }
-                (FieldValue::Bytes(a, _), FieldValue::Bytes(b, _)) => a.cmp(b),
-                (FieldValue::Null, FieldValue::Null) => Ordering::Equal,
-                (FieldValue::Null, _) => Ordering::Less,
-                (_, FieldValue::Null) => Ordering::Greater,
-                _ => Ordering::Equal,
-            }
-        };
-
-        // If field values are equal, compare by doc_id for stability
-        field_cmp.then_with(|| other.doc_id.cmp(&self.doc_id))
+        let key = compare_sort_key(&self.field_value, &other.field_value);
+        let by_rank = if self.ascending { key } else { key.reverse() };
+        by_rank.then_with(|| self.doc_id.cmp(&other.doc_id))
     }
 }
 
@@ -942,5 +889,207 @@ mod tests {
 
         // Min-heap: lowest score should be at top
         assert_eq!(heap.peek().unwrap().score, 0.5);
+    }
+
+    /// Minimal reader that serves a fixed `doc_id -> FieldValue` map via
+    /// DocValues, for [`TopFieldCollector`] tests. Mirrors the shape of
+    /// `DvMockReader` in `lexical::search::features::facet`.
+    #[derive(Debug)]
+    struct FieldValueMockReader {
+        values: std::collections::HashMap<u64, crate::lexical::core::field::FieldValue>,
+    }
+
+    impl FieldValueMockReader {
+        fn new(values: &[(u64, crate::lexical::core::field::FieldValue)]) -> Self {
+            Self {
+                values: values.iter().cloned().collect(),
+            }
+        }
+    }
+
+    impl crate::lexical::reader::LexicalIndexReader for FieldValueMockReader {
+        fn doc_count(&self) -> u64 {
+            self.values.len() as u64
+        }
+        fn max_doc(&self) -> u64 {
+            self.values.len() as u64
+        }
+        fn is_deleted(&self, _doc_id: u64) -> bool {
+            false
+        }
+        fn document(&self, _doc_id: u64) -> Result<Option<crate::Document>> {
+            Ok(None)
+        }
+        fn term_info(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+            Ok(None)
+        }
+        fn postings(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>> {
+            Ok(None)
+        }
+        fn field_stats(&self, _field: &str) -> Result<Option<crate::lexical::reader::FieldStats>> {
+            Ok(None)
+        }
+        fn close(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn is_closed(&self) -> bool {
+            false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn get_doc_value(
+            &self,
+            _field: &str,
+            doc_id: u64,
+        ) -> Result<Option<crate::lexical::core::field::FieldValue>> {
+            Ok(self.values.get(&doc_id).cloned())
+        }
+    }
+
+    /// Build a `TopFieldCollector` over an `Int64` field named `"value"`
+    /// and feed it `docs` (`(doc_id, value)` pairs) in order.
+    fn collect_field_sorted(docs: &[(u64, i64)], max_docs: usize, ascending: bool) -> Vec<u64> {
+        use crate::lexical::core::field::FieldValue;
+
+        let values: Vec<(u64, FieldValue)> = docs
+            .iter()
+            .map(|(id, v)| (*id, FieldValue::Int64(*v)))
+            .collect();
+        let reader = FieldValueMockReader::new(&values);
+        let mut collector =
+            TopFieldCollector::new(max_docs, "value".to_string(), ascending, &reader);
+        for (doc_id, _) in docs {
+            collector.collect(*doc_id, 0.0).unwrap();
+        }
+        collector.results().iter().map(|h| h.doc_id).collect()
+    }
+
+    // Regression tests for #608: `TopFieldCollector` had two independent
+    // bugs. (1) `needs_more()` short-circuited once the heap filled,
+    // mirroring the pre-#459 `TopDocsCollector` bug — the searcher loop
+    // stopped scanning candidates entirely once `max_docs` hits were
+    // collected. (2) Because of (1), `collect()`'s eviction branch never
+    // ran in production, hiding the fact that `FieldScoredDoc::Ord` was
+    // inverted for BOTH sort directions, so once eviction *did* run it
+    // discarded the best candidate instead of the worst. These tests call
+    // `collect()` directly (bypassing the searcher loop's `needs_more()`
+    // gate entirely) so bug (2) is provable in isolation from bug (1).
+
+    #[test]
+    fn test_top_field_collector_desc_evicts_lowest_not_highest() {
+        // Values arrive in ascending doc_id / value order; only the last
+        // 3 (largest) values are the correct descending top-3.
+        let docs: Vec<(u64, i64)> = (1..=5).map(|i| (i, i as i64)).collect();
+        let ids = collect_field_sorted(&docs, 3, false);
+        assert_eq!(ids, vec![5, 4, 3], "descending top-3 by value");
+    }
+
+    #[test]
+    fn test_top_field_collector_asc_evicts_highest_not_lowest() {
+        let docs: Vec<(u64, i64)> = (1..=5).map(|i| (i, i as i64)).collect();
+        let ids = collect_field_sorted(&docs, 3, true);
+        assert_eq!(ids, vec![1, 2, 3], "ascending top-3 by value");
+    }
+
+    #[test]
+    fn test_top_field_collector_needs_more_stays_true_when_full() {
+        // Verifies the correctness contract restored by the
+        // `needs_more = true` change (mirrors #459's fix for
+        // `TopDocsCollector`): a document later in the iteration with a
+        // better field value must still be able to displace the current
+        // heap-worst. Early termination for field sorts is intentionally
+        // left to the searcher's default `min_competitive = NEG_INFINITY`
+        // (i.e. no early termination — see `TopFieldCollector::needs_more`
+        // doc comment for why enabling BMW here would be unsound).
+        use crate::lexical::core::field::FieldValue;
+
+        let values: Vec<(u64, FieldValue)> =
+            vec![(1, FieldValue::Int64(10)), (2, FieldValue::Int64(20))];
+        let reader = FieldValueMockReader::new(&values);
+        let mut collector = TopFieldCollector::new(2, "value".to_string(), false, &reader);
+
+        assert!(collector.needs_more());
+        collector.collect(1, 0.0).unwrap();
+        collector.collect(2, 0.0).unwrap();
+
+        assert!(
+            collector.needs_more(),
+            "must stay true even when the heap is full, so later docs can still evict"
+        );
+    }
+
+    #[test]
+    fn test_top_field_collector_results_are_deterministic_on_ties() {
+        // All docs share the same field value; the tie-break (doc_id)
+        // must make the result order deterministic instead of depending
+        // on `BinaryHeap`'s unspecified iteration order.
+        let docs: Vec<(u64, i64)> = vec![(3, 1), (1, 1), (2, 1)];
+        let ids = collect_field_sorted(&docs, 3, true);
+        assert_eq!(ids, vec![1, 2, 3], "ties break by doc_id ascending");
+    }
+
+    #[test]
+    fn test_top_field_collector_null_ordering() {
+        use crate::lexical::core::field::FieldValue;
+
+        let values: Vec<(u64, FieldValue)> = vec![
+            (1, FieldValue::Int64(5)),
+            (2, FieldValue::Null),
+            (3, FieldValue::Int64(1)),
+        ];
+        let reader = FieldValueMockReader::new(&values);
+
+        // Ascending: Null sorts last (greatest).
+        let mut asc = TopFieldCollector::new(3, "value".to_string(), true, &reader);
+        for (doc_id, _) in &values {
+            asc.collect(*doc_id, 0.0).unwrap();
+        }
+        let asc_ids: Vec<u64> = asc.results().iter().map(|h| h.doc_id).collect();
+        assert_eq!(asc_ids, vec![3, 1, 2]);
+
+        // Descending reverses the whole rank (including the Null
+        // placement), so Null sorts first here — this matches the
+        // pre-#608 `results()` behavior, which is unchanged by this fix.
+        let mut desc = TopFieldCollector::new(3, "value".to_string(), false, &reader);
+        for (doc_id, _) in &values {
+            desc.collect(*doc_id, 0.0).unwrap();
+        }
+        let desc_ids: Vec<u64> = desc.results().iter().map(|h| h.doc_id).collect();
+        assert_eq!(desc_ids, vec![2, 1, 3]);
+    }
+
+    #[test]
+    fn test_top_field_collector_zero_limit_returns_empty() {
+        let docs: Vec<(u64, i64)> = vec![(1, 10)];
+        let ids = collect_field_sorted(&docs, 0, true);
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn test_top_field_collector_reset() {
+        use crate::lexical::core::field::FieldValue;
+
+        let values: Vec<(u64, FieldValue)> = vec![(1, FieldValue::Int64(1))];
+        let reader = FieldValueMockReader::new(&values);
+        let mut collector = TopFieldCollector::new(3, "value".to_string(), true, &reader);
+
+        collector.collect(1, 0.0).unwrap();
+        assert_eq!(collector.total_hits(), 1);
+        assert_eq!(collector.results().len(), 1);
+
+        collector.reset();
+
+        assert_eq!(collector.total_hits(), 0);
+        assert_eq!(collector.results().len(), 0);
+        assert!(collector.needs_more());
     }
 }
