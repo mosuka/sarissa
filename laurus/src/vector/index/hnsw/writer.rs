@@ -1788,9 +1788,14 @@ impl VectorIndexWriter for HnswIndexWriter {
                 }
                 #[cfg(feature = "pq-fastscan")]
                 Qm::ProductQuantizationFastScan { subvector_count }
-                    if n > 0 && n < PQ_FASTSCAN_MIN_TRAIN_VECTORS =>
+                    if n > 0 && n < PQ_FASTSCAN_MIN_TRAIN_VECTORS && !has_shared_pq_codebook =>
                 {
-                    // Same geometry validation as the PQ arm above.
+                    // Same geometry validation as the PQ arm above; the
+                    // shared-codebook exemption also mirrors it (Issue
+                    // #920): with a shared codebook nothing is trained, so
+                    // small flushes stay FastScan, and a configured-but-
+                    // untrained path must reach the loud error in the
+                    // FastScan arm below instead of degrading silently.
                     crate::vector::core::quantization::PqParams::from_dim_and_m(
                         self.index_config.dimension,
                         subvector_count.max(1),
@@ -1915,11 +1920,27 @@ impl VectorIndexWriter for HnswIndexWriter {
                         .with_field_dict(field_dict.clone())
                         .write_to(&mut output)?;
                 } else {
+                    // Issue #920: same failure policy as the standard PQ
+                    // arm above — a configured-but-unresolved shared
+                    // codebook must fail loudly here, not silently fall
+                    // through to per-segment training.
+                    if self.index_config.pq_codebook_path.is_some()
+                        && self.index_config.pq_codebook.is_none()
+                    {
+                        return Err(LaurusError::InvalidOperation(format!(
+                            "HNSW field configures pq_codebook_path = {:?} but no codebook \
+                             has been trained there yet; train one first (e.g. `laurus train \
+                             pq-codebook`) before committing, or clear pq_codebook_path to use \
+                             per-segment training",
+                            self.index_config.pq_codebook_path.as_deref().unwrap_or_default()
+                        )));
+                    }
                     let (params, codebook, codes) =
                         crate::vector::index::pq_fastscan_io::quantize_segment_pq_fastscan(
                             &f32_vectors,
                             self.index_config.dimension,
                             subvector_count,
+                            self.index_config.pq_codebook.as_deref(),
                         )?;
                     VectorSegmentHeader::product_quantization_fastscan(params, codebook)
                         .with_version(VERSION_FIELD_DICT)

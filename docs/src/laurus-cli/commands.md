@@ -31,7 +31,7 @@ laurus create index [--schema <FILE>] [--train-pq-codebook <JSONL>]
 | Flag | Required | Description |
 | :--- | :--- | :--- |
 | `--schema <FILE>` | No | Path to a TOML file defining the index schema. When omitted, the command checks if a `schema.toml` already exists in the index directory and uses it; otherwise the interactive wizard is launched. |
-| `--train-pq-codebook <JSONL>` | No | Train shared PQ codebooks as part of creation (Issue #920). Every HNSW field configuring `ProductQuantization` + `pq_codebook_path` is trained from this JSONL file (the `put docs` / `add docs` shape with pre-computed `Vector` values) immediately after the index is created, so the very first commit can already encode against the codebook — removing the create → `train pq-codebook` → ingest ordering the failure policy otherwise requires you to manage manually. Errors before creating anything if the file is missing or no field is eligible. |
+| `--train-pq-codebook <JSONL>` | No | Train shared PQ codebooks as part of creation (Issue #920). Every HNSW field configuring `ProductQuantization` (or, with the `pq-fastscan` feature, `ProductQuantizationFastScan`) + `pq_codebook_path` is trained from this JSONL file (the `put docs` / `add docs` shape with pre-computed `Vector` values) immediately after the index is created, so the very first commit can already encode against the codebook — removing the create → `train pq-codebook` → ingest ordering the failure policy otherwise requires you to manage manually. Errors before creating anything if the file is missing or no field is eligible. |
 
 **Schema file format:**
 
@@ -422,7 +422,7 @@ laurus train pq-codebook --field <FIELD> (--input <JSONL> | --from-index) \
 
 | Argument | Description |
 | :--- | :--- |
-| `--field` | The HNSW vector field to train for. Must be configured with a `ProductQuantization` quantizer. |
+| `--field` | The HNSW vector field to train for. Must be configured with a `ProductQuantization` quantizer (or `ProductQuantizationFastScan` when the `pq-fastscan` feature is enabled — the codebook is then trained with k=16, Issue #920). |
 | `--input` | JSONL training file — the same `{"id": "...", "document": {"fields": {...}}}` shape as `put docs` / `add docs`. The field value must be a pre-computed `Vector` (embedder-generated input is not supported). Exactly one of `--input` and `--from-index` must be given. |
 | `--from-index` | Sample the vectors already committed to this index instead of reading a file (Issue #920) — no JSONL export needed. Exactly one of `--input` and `--from-index` must be given. Note: on a field that is already PQ-encoded, the sampled vectors are lossy reconstructions; the intended flow is to train from vectors committed **before** enabling PQ on the field. |
 | `--sample-size` | Use only the first N vectors (deterministic: file order for `--input`, ascending doc_id for `--from-index`). Omit to use all of them; thousands of representative vectors are enough. |

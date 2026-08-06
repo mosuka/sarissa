@@ -246,10 +246,14 @@ jobs:
       - name: Run test
         shell: bash
         run: |
+          # pq-fastscan rides along on every platform (Issue #920): its
+          # feature-gated tests would otherwise never run in CI, and the
+          # 3-platform matrix exercises the AVX2 / NEON / scalar kernel
+          # dispatch paths.
           if [ "${{ matrix.platform.skip_embedding_features }}" == "true" ]; then
-            FEATURES=""
+            FEATURES="--features pq-fastscan"
           else
-            FEATURES="--features embeddings-all"
+            FEATURES="--features embeddings-all,pq-fastscan"
           fi
 
           cargo test --package laurus --target "${{ matrix.platform.target }}" $FEATURES

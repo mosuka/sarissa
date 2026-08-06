@@ -112,6 +112,7 @@ fn bench_pq_encode_shared_codebook(c: &mut Criterion) {
             &codebook_name,
             DIM,
             16,
+            256,
             true,
             &training_sample,
         )

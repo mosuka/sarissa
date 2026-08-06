@@ -202,9 +202,12 @@ pub struct HnswOption {
     /// Storage-relative file name of a shared PQ codebook (Issue #631).
     ///
     /// Only meaningful when [`Self::quantizer`] is
-    /// [`quantization::QuantizationMethod::ProductQuantization`]. When set,
-    /// segment writes encode against the named pre-trained codebook
-    /// (trained once via `Engine::train_pq_codebook` / the
+    /// [`quantization::QuantizationMethod::ProductQuantization`] (k=256)
+    /// or, with the `pq-fastscan` feature, `ProductQuantizationFastScan`
+    /// (k=16 — Issue #920; the same `.pqcb` file format carries either
+    /// variant, distinguished by the stored `k`). When set, segment
+    /// writes encode against the named pre-trained codebook (trained
+    /// once via `Engine::train_pq_codebook` / the
     /// `laurus train pq-codebook` CLI command) instead of re-running
     /// k-means from scratch on every commit and merge. The segment
     /// format is unchanged: the shared codebook is still embedded

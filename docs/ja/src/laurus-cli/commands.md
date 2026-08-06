@@ -31,7 +31,7 @@ laurus create index [--schema <FILE>] [--train-pq-codebook <JSONL>]
 | フラグ | 必須 | 説明 |
 | :--- | :--- | :--- |
 | `--schema <FILE>` | いいえ | インデックススキーマを定義する TOML ファイルのパス。省略時はインデックスディレクトリに既存の `schema.toml` があればそれを使用し、なければ対話型ウィザードが起動します。 |
-| `--train-pq-codebook <JSONL>` | いいえ | インデックス作成の一部として共有 PQ codebook を学習します（Issue #920）。`ProductQuantization` + `pq_codebook_path` を設定したすべての HNSW フィールドを、作成直後にこの JSONL ファイル（`put docs` / `add docs` と同じ形式、事前計算済み `Vector` 値）から学習します。最初の commit がすぐに codebook でエンコードできるため、create → `train pq-codebook` → ingest の順序を手動で守る必要がなくなります。ファイル不在または対象フィールドなしの場合は、何も作成する前にエラーになります。 |
+| `--train-pq-codebook <JSONL>` | いいえ | インデックス作成の一部として共有 PQ codebook を学習します（Issue #920）。`ProductQuantization`（または `pq-fastscan` feature 有効時は `ProductQuantizationFastScan`）+ `pq_codebook_path` を設定したすべての HNSW フィールドを、作成直後にこの JSONL ファイル（`put docs` / `add docs` と同じ形式、事前計算済み `Vector` 値）から学習します。最初の commit がすぐに codebook でエンコードできるため、create → `train pq-codebook` → ingest の順序を手動で守る必要がなくなります。ファイル不在または対象フィールドなしの場合は、何も作成する前にエラーになります。 |
 
 **スキーマファイルの形式:**
 
@@ -418,7 +418,7 @@ laurus train pq-codebook --field <FIELD> (--input <JSONL> | --from-index) \
 
 | 引数 | 説明 |
 | :--- | :--- |
-| `--field` | 学習対象の HNSW ベクトルフィールド。`ProductQuantization` quantizer が設定されている必要があります。 |
+| `--field` | 学習対象の HNSW ベクトルフィールド。`ProductQuantization` quantizer（または `pq-fastscan` feature 有効時は `ProductQuantizationFastScan` — その場合 codebook は k=16 で学習されます、Issue #920）が設定されている必要があります。 |
 | `--input` | JSONL 学習ファイル — `put docs` / `add docs` と同じ `{"id": "...", "document": {"fields": {...}}}` 形式。フィールド値は事前計算済み `Vector` である必要があります（embedder 生成の入力は未対応）。`--input` と `--from-index` はどちらか一方のみ指定できます。 |
 | `--from-index` | ファイルの代わりに、このインデックスにコミット済みのベクトルを直接サンプリングします（Issue #920）— JSONL エクスポート不要。`--input` と `--from-index` はどちらか一方のみ指定できます。注意: 既に PQ エンコード済みのフィールドではサンプルは有損の再構成ベクトルになります。想定フローはフィールドの PQ 有効化**前**にコミットしたベクトルからの学習です。 |
 | `--sample-size` | 先頭 N 件のみを使用（決定的: `--input` はファイル順、`--from-index` は doc_id 昇順）。省略時は全件を使用。代表的なベクトル数千件で十分です。 |

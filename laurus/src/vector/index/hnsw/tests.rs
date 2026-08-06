@@ -633,6 +633,7 @@ fn shared_pq_codebook_keeps_small_segment_on_pq() -> Result<()> {
         "shared.pqcb",
         4,
         2,
+        256,
         false,
         &training_sample,
     )?;
@@ -731,6 +732,209 @@ fn missing_shared_pq_codebook_is_lenient_at_open_but_errors_at_write() -> Result
     assert!(
         message.contains("not-yet-trained.pqcb"),
         "error must name the configured path, got: {message}"
+    );
+    Ok(())
+}
+
+/// Issue #920 (FastScan mirror of `shared_pq_codebook_keeps_small_segment_on_pq`):
+/// a segment below `PQ_FASTSCAN_MIN_TRAIN_VECTORS` (16) normally
+/// degrades to Scalar8Bit, but with a shared k=16 codebook configured
+/// nothing is trained, so the segment must stay FastScan and encode
+/// against the shared codebook.
+#[cfg(feature = "pq-fastscan")]
+#[test]
+fn shared_pq_codebook_keeps_small_segment_on_fastscan() -> Result<()> {
+    use crate::vector::core::quantization::QuantizationMethod;
+    use crate::vector::index::pq_codebook::train_and_write_pq_codebook;
+    use crate::vector::index::storage::VectorStorage;
+
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+
+    let mut state: u64 = 0xABCD_EF01_2345_6789;
+    let training_sample: Vec<Vector> = (0..300)
+        .map(|_| {
+            let data: Vec<f32> = (0..4)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+                })
+                .collect();
+            Vector::new(data)
+        })
+        .collect();
+    train_and_write_pq_codebook(
+        storage.as_ref(),
+        "shared-fs.pqcb",
+        4,
+        2,
+        16,
+        false,
+        &training_sample,
+    )?;
+
+    let mut config = HnswIndexConfig {
+        dimension: 4,
+        m: 8,
+        ef_construction: 50,
+        distance_metric: DistanceMetric::Euclidean,
+        quantization_method: QuantizationMethod::ProductQuantizationFastScan { subvector_count: 2 },
+        pq_codebook_path: Some("shared-fs.pqcb".to_string()),
+        ..Default::default()
+    };
+    config.resolve_pq_codebook(storage.as_ref())?;
+    assert!(
+        config.pq_codebook.is_some(),
+        "the shared k=16 codebook must resolve from the file just written"
+    );
+
+    let index = HnswIndex::create(storage.clone(), "small_fs_segment", config)?;
+    let mut writer = index.writer()?;
+    // Only 10 vectors -- below PQ_FASTSCAN_MIN_TRAIN_VECTORS (16).
+    let vectors: Vec<_> = (0..10u64)
+        .map(|i| {
+            (
+                i + 1,
+                "embedding".to_string(),
+                Vector::new(vec![i as f32, i as f32, i as f32 * 2.0, i as f32 * 2.0]),
+            )
+        })
+        .collect();
+    writer.build(vectors)?;
+    writer.finalize()?;
+    writer.commit()?;
+
+    let reader = index.reader()?;
+    let hnsw_reader = reader
+        .as_any()
+        .downcast_ref::<HnswIndexReader>()
+        .expect("HnswIndex::reader() always returns an HnswIndexReader");
+    assert!(
+        matches!(hnsw_reader.vectors(), VectorStorage::OwnedPqFastScan(_)),
+        "a 10-vector segment with a shared k=16 codebook configured must stay \
+         FastScan, not degrade to Scalar8Bit"
+    );
+    Ok(())
+}
+
+/// Issue #920 (FastScan mirror of
+/// `missing_shared_pq_codebook_is_lenient_at_open_but_errors_at_write`):
+/// a configured-but-untrained `pq_codebook_path` on a FastScan field
+/// must fail loudly at write — before this fix it was silently ignored
+/// and every segment retrained k-means.
+#[cfg(feature = "pq-fastscan")]
+#[test]
+fn missing_shared_pq_codebook_errors_at_write_for_fastscan() -> Result<()> {
+    use crate::vector::core::quantization::QuantizationMethod;
+
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let mut config = HnswIndexConfig {
+        dimension: 4,
+        m: 8,
+        ef_construction: 50,
+        distance_metric: DistanceMetric::Euclidean,
+        quantization_method: QuantizationMethod::ProductQuantizationFastScan { subvector_count: 2 },
+        pq_codebook_path: Some("not-yet-trained-fs.pqcb".to_string()),
+        ..Default::default()
+    };
+    config.resolve_pq_codebook(storage.as_ref())?;
+    assert!(config.pq_codebook.is_none());
+
+    let index = HnswIndex::create(storage.clone(), "no_fs_codebook_yet", config)?;
+    let mut writer = index.writer()?;
+    let vectors: Vec<_> = (0..300u64)
+        .map(|i| {
+            (
+                i + 1,
+                "embedding".to_string(),
+                Vector::new(vec![i as f32, i as f32, i as f32 * 2.0, i as f32 * 2.0]),
+            )
+        })
+        .collect();
+    writer.build(vectors)?;
+    writer.finalize()?;
+
+    let err = writer.write().expect_err(
+        "write() must reject a configured-but-unresolved pq_codebook_path on a \
+         FastScan field instead of silently training a fresh codebook",
+    );
+    let message = err.to_string();
+    assert!(
+        message.contains("not-yet-trained-fs.pqcb"),
+        "error must name the configured path, got: {message}"
+    );
+    Ok(())
+}
+
+/// Issue #920: a k=256 (standard PQ) codebook configured on a FastScan
+/// field must be rejected loudly at write with the k mismatch named.
+#[cfg(feature = "pq-fastscan")]
+#[test]
+fn k256_codebook_on_fastscan_field_errors_at_write() -> Result<()> {
+    use crate::vector::core::quantization::QuantizationMethod;
+    use crate::vector::index::pq_codebook::train_and_write_pq_codebook;
+
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+
+    let mut state: u64 = 0xABCD_EF01_2345_6789;
+    let training_sample: Vec<Vector> = (0..300)
+        .map(|_| {
+            let data: Vec<f32> = (0..4)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+                })
+                .collect();
+            Vector::new(data)
+        })
+        .collect();
+    // Standard-PQ (k=256) codebook...
+    train_and_write_pq_codebook(
+        storage.as_ref(),
+        "wrong-k.pqcb",
+        4,
+        2,
+        256,
+        false,
+        &training_sample,
+    )?;
+
+    // ...configured on a FastScan (k=16) field.
+    let mut config = HnswIndexConfig {
+        dimension: 4,
+        m: 8,
+        ef_construction: 50,
+        distance_metric: DistanceMetric::Euclidean,
+        quantization_method: QuantizationMethod::ProductQuantizationFastScan { subvector_count: 2 },
+        pq_codebook_path: Some("wrong-k.pqcb".to_string()),
+        ..Default::default()
+    };
+    config.resolve_pq_codebook(storage.as_ref())?;
+
+    let index = HnswIndex::create(storage.clone(), "wrong_k_fs", config)?;
+    let mut writer = index.writer()?;
+    let vectors: Vec<_> = (0..300u64)
+        .map(|i| {
+            (
+                i + 1,
+                "embedding".to_string(),
+                Vector::new(vec![i as f32, i as f32, i as f32 * 2.0, i as f32 * 2.0]),
+            )
+        })
+        .collect();
+    writer.build(vectors)?;
+    writer.finalize()?;
+
+    let err = writer
+        .write()
+        .expect_err("a k=256 codebook must not encode a FastScan field");
+    let message = err.to_string();
+    assert!(
+        message.contains("k = 256") && message.contains("k = 16"),
+        "error must name both the stored and required k, got: {message}"
     );
     Ok(())
 }
