@@ -13,6 +13,6 @@ cargo build --manifest-path "$PROJECT_ROOT/Cargo.toml" --release --bin laurus \
 LAURUS="$PROJECT_ROOT/target/release/laurus"
 
 echo "==> Creating movies index at $INDEX_DIR"
-"$LAURUS" --data-dir "$INDEX_DIR" create index --schema "$SCHEMA"
+"$LAURUS" --index-dir "$INDEX_DIR" create index --schema "$SCHEMA"
 
 echo "==> Done. Index created at $INDEX_DIR"

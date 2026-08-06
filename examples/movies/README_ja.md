@@ -88,16 +88,16 @@ bash examples/movies/scripts/search_movies.sh
 
 ```bash
 # レキシカル検索
-./target/release/laurus --data-dir examples/movies/index search "title:matrix" --limit 10
+./target/release/laurus --index-dir examples/movies/index search "title:matrix" --limit 10
 
 # マルチモーダルベクトル検索（テキスト→画像）
-./target/release/laurus --data-dir examples/movies/index search 'poster_vec:"action hero"' --limit 10
+./target/release/laurus --index-dir examples/movies/index search 'poster_vec:"action hero"' --limit 10
 ```
 
 対話モードで操作する場合:
 
 ```bash
-./target/release/laurus --data-dir examples/movies/index repl
+./target/release/laurus --index-dir examples/movies/index repl
 ```
 
 ## ファイル構成
