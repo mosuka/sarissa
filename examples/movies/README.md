@@ -31,6 +31,31 @@ The schema defines a `clip_embedder` using [CLIP](https://openai.com/index/clip/
 The `poster_vec` field references this embedder so that poster images are automatically
 embedded into a 512-dimensional vector space at index time.
 
+## Sample document
+
+`index_movies.sh` doesn't write an intermediate file — it converts each dataset row into a
+document JSON object with `jq` and pipes `add doc <id> <document>` commands straight into a
+single `laurus repl` process (see [scripts/index_movies.sh](scripts/index_movies.sh)). For
+[_The Matrix_](https://www.themoviedb.org/movie/603), the generated document looks like this:
+
+```json
+{
+  "fields": {
+    "title": {"Text": "The Matrix"},
+    "overview": {"Text": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth."},
+    "genres": {"Text": "Action, Science Fiction"},
+    "poster": {"Text": "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"},
+    "release_date": {"Int64": 922752000},
+    "poster_vec": {"Bytes": [[255, 216, 255, 224, "…"], "image/jpeg"]}
+  }
+}
+```
+
+`poster_vec.Bytes` is `[<raw JPEG byte array>, <MIME type>]`; the byte array above is truncated
+after its JPEG magic number (`FF D8 FF E0`) for readability — the real array holds every byte of
+the downloaded file. `poster_vec` is only added once the poster image has been downloaded to
+`examples/movies/images/<id>.jpg`; a movie with no poster is indexed without it.
+
 ## Usage
 
 ### 1. Create the index
@@ -100,6 +125,40 @@ Or start an interactive session:
 ```bash
 ./target/release/laurus --index-dir examples/movies/index repl
 ```
+
+## gRPC server and MCP server
+
+Instead of the CLI, you can serve this index over gRPC (with an optional HTTP gateway) and
+expose it to an MCP client (e.g. Claude Code).
+
+```bash
+# gRPC server (+ HTTP gateway on --http-port) over the already-built movies index.
+# The index directory's own schema.toml is used automatically — no extra
+# --schema flag exists or is needed.
+./target/release/laurus --index-dir examples/movies/index serve --port 50051 --http-port 8080
+```
+
+```bash
+# HTTP gateway: plain REST/JSON, no gRPC client needed.
+curl http://localhost:8080/v1/index
+curl -X POST http://localhost:8080/v1/search -H "Content-Type: application/json" -d '{"query":"title:matrix","limit":3}'
+```
+
+In another terminal, the MCP server proxies to that same gRPC endpoint over stdio:
+
+```bash
+./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+To register it with Claude Code:
+
+```bash
+claude mcp add laurus-movies -- ./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+`poster_vec` needs the binary built with `embeddings-multimodal` (already the case if you
+followed [Usage](#usage) above) — without it, vector queries against this index fail at request
+time even though the server starts fine.
 
 ## File structure
 

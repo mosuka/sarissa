@@ -1,0 +1,4 @@
+# Ignore the extracted Lindera IPADIC dictionary (downloaded by
+# scripts/fetch_dict.sh).
+*
+!.gitignore

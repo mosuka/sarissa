@@ -1,7 +1,9 @@
 //! Factory for creating vector index instances.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::embedding::embedder::Embedder;
 use crate::error::Result;
 use crate::storage::Storage;
 use crate::vector::index::VectorIndex;
@@ -9,6 +11,7 @@ use crate::vector::index::config::VectorIndexTypeConfig;
 use crate::vector::index::flat::FlatIndex;
 use crate::vector::index::hnsw::HnswIndex;
 use crate::vector::index::ivf::IvfIndex;
+use crate::vector::index::multi_field::MultiFieldVectorIndex;
 
 /// Factory for creating vector index instances.
 ///
@@ -305,6 +308,40 @@ impl VectorIndexFactory {
             }
         }
     }
+
+    /// Open or create a [`MultiFieldVectorIndex`], one independent
+    /// sub-index per entry in `field_configs` (Issue
+    /// [#948](https://github.com/mosuka/laurus/issues/948)).
+    ///
+    /// Callers typically derive `field_configs` from
+    /// [`VectorIndexConfig::field_index_configs`](crate::vector::store::config::VectorIndexConfig::field_index_configs),
+    /// the per-field replacement for the old
+    /// `VectorStore::extract_index_type_config`.
+    ///
+    /// # PQ codebook resolution
+    ///
+    /// Any HNSW field config carrying a
+    /// [`HnswIndexConfig::pq_codebook_path`](crate::vector::index::config::HnswIndexConfig::pq_codebook_path)
+    /// has its shared codebook resolved here, against the ROOT `storage` --
+    /// *before* [`MultiFieldVectorIndex`] wraps each field in its own
+    /// `PrefixedStorage` sub-namespace. Resolving against the field-scoped
+    /// storage instead would look for the codebook file in the wrong place
+    /// (see the `multi_field` module docs' PQ codebook caveat).
+    pub fn open_or_create_multi_field(
+        storage: Arc<dyn Storage>,
+        field_configs: &BTreeMap<String, VectorIndexTypeConfig>,
+        embedder: Arc<dyn Embedder>,
+    ) -> Result<MultiFieldVectorIndex> {
+        let mut resolved = BTreeMap::new();
+        for (name, config) in field_configs {
+            let mut config = config.clone();
+            if let VectorIndexTypeConfig::HNSW(hnsw_config) = &mut config {
+                hnsw_config.resolve_pq_codebook(storage.as_ref())?;
+            }
+            resolved.insert(name.clone(), config);
+        }
+        MultiFieldVectorIndex::open_or_create(storage, &resolved, embedder)
+    }
 }
 
 #[cfg(test)]
@@ -423,5 +460,154 @@ mod tests {
         let index = VectorIndexFactory::create(storage, "ivf_index", config).unwrap();
 
         assert!(!index.is_closed());
+    }
+
+    /// Issue #948: `open_or_create_multi_field` must build one independent
+    /// sub-index per field, each honoring its own dimension/distance metric
+    /// -- not collapse to a single shared config the way the old
+    /// `VectorStore::extract_index_type_config` did.
+    #[test]
+    fn open_or_create_multi_field_honors_each_fields_own_config() {
+        use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
+        use crate::vector::index::config::HnswIndexConfig;
+
+        #[derive(Debug)]
+        struct NoopEmbedder;
+        #[async_trait::async_trait]
+        impl Embedder for NoopEmbedder {
+            async fn embed(
+                &self,
+                _input: &EmbedInput<'_>,
+            ) -> Result<crate::vector::core::vector::Vector> {
+                unreachable!("not used by this test")
+            }
+            fn supported_input_types(&self) -> Vec<EmbedInputType> {
+                vec![EmbedInputType::Text]
+            }
+            fn name(&self) -> &str {
+                "noop"
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            "small_vec".to_string(),
+            VectorIndexTypeConfig::HNSW(HnswIndexConfig {
+                dimension: 3,
+                ..Default::default()
+            }),
+        );
+        fields.insert(
+            "big_vec".to_string(),
+            VectorIndexTypeConfig::HNSW(HnswIndexConfig {
+                dimension: 16,
+                ..Default::default()
+            }),
+        );
+
+        let index = VectorIndexFactory::open_or_create_multi_field(
+            storage,
+            &fields,
+            Arc::new(NoopEmbedder),
+        )
+        .unwrap();
+
+        let dims = index.field_dimensions();
+        assert_eq!(dims.get("small_vec"), Some(&3));
+        assert_eq!(dims.get("big_vec"), Some(&16));
+    }
+
+    /// Issue #948: a shared PQ codebook trained against the ROOT storage
+    /// must be found by `open_or_create_multi_field`'s pre-resolution --
+    /// resolving against a field-scoped `PrefixedStorage` instead (where
+    /// the file does not exist) would leave the codebook unresolved and
+    /// fail the eventual commit.
+    #[test]
+    fn open_or_create_multi_field_resolves_pq_codebook_against_root_storage() {
+        use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
+        use crate::vector::core::quantization::QuantizationMethod;
+        use crate::vector::core::vector::Vector;
+        use crate::vector::index::config::HnswIndexConfig;
+        use crate::vector::index::pq_codebook::train_and_write_pq_codebook;
+
+        #[derive(Debug)]
+        struct NoopEmbedder;
+        #[async_trait::async_trait]
+        impl Embedder for NoopEmbedder {
+            async fn embed(&self, _input: &EmbedInput<'_>) -> Result<Vector> {
+                unreachable!("not used by this test")
+            }
+            fn supported_input_types(&self) -> Vec<EmbedInputType> {
+                vec![EmbedInputType::Text]
+            }
+            fn name(&self) -> &str {
+                "noop"
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+
+        fn sample_vectors(count: usize, dim: usize) -> Vec<Vector> {
+            let mut state: u64 = 42;
+            (0..count)
+                .map(|_| {
+                    let data: Vec<f32> = (0..dim)
+                        .map(|_| {
+                            state = state
+                                .wrapping_mul(6_364_136_223_846_793_005)
+                                .wrapping_add(1_442_695_040_888_963_407);
+                            ((state >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+                        })
+                        .collect();
+                    Vector::new(data)
+                })
+                .collect()
+        }
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        // Train the codebook against the ROOT storage BEFORE the field is
+        // created -- mirrors `laurus-cli`'s `train pq-codebook` command.
+        train_and_write_pq_codebook(
+            storage.as_ref(),
+            "embedding.pqcb",
+            8,
+            2,
+            256,
+            false,
+            &sample_vectors(300, 8),
+        )
+        .unwrap();
+
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            "vec".to_string(),
+            VectorIndexTypeConfig::HNSW(HnswIndexConfig {
+                dimension: 8,
+                quantization_method: QuantizationMethod::ProductQuantization { subvector_count: 2 },
+                pq_codebook_path: Some("embedding.pqcb".to_string()),
+                ..Default::default()
+            }),
+        );
+
+        let index = VectorIndexFactory::open_or_create_multi_field(
+            storage,
+            &fields,
+            Arc::new(NoopEmbedder),
+        )
+        .unwrap();
+
+        let mut writer = index.writer().unwrap();
+        writer
+            .add_vectors(vec![(1, "vec".to_string(), sample_vectors(1, 8).remove(0))])
+            .unwrap();
+        // If the codebook had been resolved against the wrong (field-scoped)
+        // storage namespace, this commit would fail with "no codebook has
+        // been trained there yet" (`hnsw/writer.rs`'s `write()` hard-error).
+        writer.commit().unwrap();
     }
 }

@@ -30,6 +30,32 @@
 スキーマでは [CLIP](https://openai.com/index/clip/)（`openai/clip-vit-base-patch32`）を使用する `clip_embedder` を定義しています。
 `poster_vec` フィールドがこの Embedder を参照しているため、インデックス時にポスター画像が自動的に 512 次元のベクトル空間に埋め込まれます。
 
+## ドキュメント例
+
+`index_movies.sh` は中間ファイルを書き出しません。データセットの各行を `jq` で document JSON に変換し、
+`add doc <id> <document>` コマンドとして単一の `laurus repl` プロセスへ直接パイプで投入します
+（[scripts/index_movies.sh](scripts/index_movies.sh) 参照）。
+[『マトリックス』](https://www.themoviedb.org/movie/603) の場合、生成されるドキュメントは次のようになります:
+
+```json
+{
+  "fields": {
+    "title": {"Text": "The Matrix"},
+    "overview": {"Text": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth."},
+    "genres": {"Text": "Action, Science Fiction"},
+    "poster": {"Text": "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"},
+    "release_date": {"Int64": 922752000},
+    "poster_vec": {"Bytes": [[255, 216, 255, 224, "…"], "image/jpeg"]}
+  }
+}
+```
+
+`poster_vec.Bytes` は `[<生JPEGバイト配列>, <MIMEタイプ>]` という形です。上記のバイト配列は
+読みやすさのため JPEG のマジックナンバー（`FF D8 FF E0`）の後で省略していますが、実際の配列には
+ダウンロードしたファイルの全バイトが入ります。`poster_vec` は `examples/movies/images/<id>.jpg`
+へのポスター画像ダウンロードが成功した場合のみ追加されます。ポスターが無い映画はこのフィールド無しで
+インデックスされます。
+
 ## 使い方
 
 ### 1. インデックスの作成
@@ -99,6 +125,40 @@ bash examples/movies/scripts/search_movies.sh
 ```bash
 ./target/release/laurus --index-dir examples/movies/index repl
 ```
+
+## gRPCサーバーとMCPサーバー
+
+CLIの代わりに、このインデックスをgRPC（＋任意でHTTPゲートウェイ）でサーブしたり、
+MCPクライアント（Claude Codeなど）に公開したりすることもできます。
+
+```bash
+# gRPCサーバー（--http-portでHTTPゲートウェイも同時起動）を、既に構築済みの
+# moviesインデックスに対して起動する。インデックスディレクトリ内の schema.toml
+# が自動的に使われる — --schema のようなフラグは存在せず、指定も不要
+./target/release/laurus --index-dir examples/movies/index serve --port 50051 --http-port 8080
+```
+
+```bash
+# HTTPゲートウェイ: gRPCクライアント不要のプレーンなREST/JSON
+curl http://localhost:8080/v1/index
+curl -X POST http://localhost:8080/v1/search -H "Content-Type: application/json" -d '{"query":"title:matrix","limit":3}'
+```
+
+別のターミナルで、MCPサーバーは同じgRPCエンドポイントへ標準入出力（stdio）経由でプロキシします:
+
+```bash
+./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+Claude Codeへ登録する場合:
+
+```bash
+claude mcp add laurus-movies -- ./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+`poster_vec` を使うには `embeddings-multimodal` フィーチャー付きでビルドしたバイナリが必要です
+（[使い方](#使い方)の手順どおりであれば既に満たされています）。これが無い場合、サーバー自体は
+正常に起動しますが、このインデックスへのベクトル検索クエリはリクエスト時にエラーになります。
 
 ## ファイル構成
 

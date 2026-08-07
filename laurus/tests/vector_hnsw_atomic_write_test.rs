@@ -34,10 +34,13 @@ use laurus::{LaurusError, Result};
 const DIM: usize = 16;
 const N: u64 = 50;
 const STEP: f32 = 0.01;
-/// First sealed segment of the (default, #882) segmented layout.
-const HNSW_FILE: &str = "segment_000000.hnsw";
+/// First sealed segment of the (default, #882) segmented layout, under the
+/// "vec" field's own sub-namespace (Issue #948:
+/// `MultiFieldVectorIndex` gives every vector field its own
+/// `PrefixedStorage` directory rather than sharing the storage root).
+const HNSW_FILE: &str = "vec/segment_000000.hnsw";
 /// An orphaned staging file from a simulated crashed segment write.
-const HNSW_TMP: &str = "segment_000001.hnsw.tmp";
+const HNSW_TMP: &str = "vec/segment_000001.hnsw.tmp";
 
 #[derive(Debug)]
 struct MockEmbedder {
@@ -156,7 +159,10 @@ async fn commit_leaves_no_temp_file() {
     // After a successful commit the sealed segment and the manifest are in
     // place, and every temp file has been renamed away.
     assert!(storage.file_exists(HNSW_FILE), "sealed segment must exist");
-    assert!(storage.file_exists("segments.json"), "manifest must exist");
+    assert!(
+        storage.file_exists("vec/segments.json"),
+        "manifest must exist"
+    );
     let temps: Vec<String> = storage
         .list_files()
         .unwrap()

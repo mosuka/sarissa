@@ -4,7 +4,10 @@
 //! - Field-specific queries: `title:hello`
 //! - Boolean operators: `AND`, `OR`
 //! - Required/prohibited: `+required`, `-forbidden`
-//! - Phrases: `"hello world"`
+//! - Phrases: `"hello world"` (quoted → `PhraseQuery`)
+//! - Bare terms that the analyzer splits into several tokens are OR'd
+//!   (`BooleanQuery` with `Should` clauses), matching Lucene's `match`
+//!   query. Use quotes for phrase semantics.
 //! - Proximity search: `"hello world"~10`
 //! - Fuzzy search: `roam~2`
 //! - Range queries: `[100 TO 500]`, `{A TO Z}`
@@ -646,6 +649,12 @@ impl LexicalQueryParser {
         }
     }
 
+    /// Parse a quoted phrase (`"..."`, optionally `~slop`).
+    ///
+    /// Unlike a bare (unquoted) term whose analyzed tokens are OR'd (see
+    /// `parse_simple_term`), a quoted phrase always builds a `PhraseQuery`
+    /// requiring the tokens to appear in sequence (within `slop`). Quoting
+    /// is how a caller opts into strict adjacency.
     fn parse_phrase_query(
         &self,
         pair: pest::iterators::Pair<Rule>,
@@ -785,13 +794,35 @@ impl LexicalQueryParser {
                     Ok(Box::new(query))
                 }
             } else {
-                // Multiple terms - create a phrase query
-                let query = PhraseQuery::new(field_name, terms);
-                if boost != 1.0 {
-                    Ok(Box::new(query.with_boost(boost)))
-                } else {
-                    Ok(Box::new(query))
+                // The analyzer split one *bare* (unquoted) term into several
+                // tokens. This happens for a Japanese sentence under a
+                // morphological tokenizer, and for inputs like `rust-lang`
+                // under a `\w+` tokenizer.
+                //
+                // Those tokens are OR'd, matching Lucene's `match` query and
+                // Elasticsearch's default. The previous slop-0 `PhraseQuery`
+                // required the document to repeat the exact morpheme
+                // sequence, which made unquoted Japanese queries return
+                // almost nothing.
+                //
+                // Explicit phrase semantics are still available — a quoted
+                // `"..."` goes through `parse_phrase_query`, which keeps
+                // `PhraseQuery` (and its `~slop` modifier).
+                let mut bool_query = BooleanQuery::new();
+                for token in &terms {
+                    bool_query.add_clause(BooleanClause::new(
+                        Box::new(TermQuery::new(field_name, token)),
+                        Occur::Should,
+                    ));
                 }
+
+                // `minimum_should_match` stays at its default of 0, so the
+                // matcher builds a plain disjunction and BM25 scores add up
+                // across the matching clauses.
+                if boost != 1.0 {
+                    bool_query = bool_query.with_boost(boost);
+                }
+                Ok(Box::new(bool_query))
             }
         })
     }
@@ -1090,6 +1121,131 @@ mod tests {
         let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("形態素 AND 解析").unwrap();
         assert!(format!("{query:?}").contains("BooleanQuery"));
+    }
+
+    #[test]
+    fn unquoted_multi_token_term_builds_a_should_boolean_not_a_phrase() {
+        // StandardAnalyzer's `\w+` tokenizer splits "rust-lang" into two
+        // tokens. The previous implementation built a slop-0 PhraseQuery
+        // here, requiring exact adjacency; it now OR's the tokens like
+        // Lucene's `match` query.
+        let parser = create_test_parser().with_default_field("content");
+        let query = parser.parse("rust-lang").unwrap();
+        let bool_q = query
+            .as_any()
+            .downcast_ref::<crate::lexical::query::BooleanQuery>()
+            .unwrap_or_else(|| panic!("expected BooleanQuery, got {query:?}"));
+        let clauses = bool_q.clauses();
+        assert_eq!(clauses.len(), 2, "expected 2 clauses, got {clauses:?}");
+        assert!(
+            clauses.iter().all(|c| c.occur == Occur::Should),
+            "every clause must be Should (OR), got {clauses:?}"
+        );
+        assert!(
+            !format!("{query:?}").contains("PhraseQuery"),
+            "must not build a PhraseQuery for an unquoted multi-token term"
+        );
+    }
+
+    #[test]
+    fn unquoted_multi_token_term_keeps_its_boost() {
+        let parser = create_test_parser().with_default_field("content");
+        let query = parser.parse("rust-lang^2").unwrap();
+        assert_eq!(query.boost(), 2.0);
+    }
+
+    #[test]
+    fn quoted_phrase_still_builds_a_phrase_query() {
+        // Quoting is how a caller opts into strict phrase (adjacency)
+        // semantics; this must be unaffected by the bare-term OR change.
+        let parser = create_test_parser().with_default_field("content");
+        let query = parser.parse("\"hello world\"").unwrap();
+        let phrase_q = query
+            .as_any()
+            .downcast_ref::<PhraseQuery>()
+            .unwrap_or_else(|| panic!("expected PhraseQuery, got {query:?}"));
+        assert_eq!(phrase_q.slop(), 0);
+    }
+
+    #[test]
+    fn quoted_phrase_keeps_its_slop() {
+        let parser = create_test_parser().with_default_field("content");
+        let query = parser.parse("\"hello world\"~5").unwrap();
+        let phrase_q = query
+            .as_any()
+            .downcast_ref::<PhraseQuery>()
+            .unwrap_or_else(|| panic!("expected PhraseQuery, got {query:?}"));
+        assert_eq!(phrase_q.slop(), 5);
+    }
+
+    /// A Japanese sentence tokenized by Lindera into several morphemes
+    /// must be OR'd when unquoted — the direct regression for the
+    /// "unquoted Japanese queries return almost nothing" bug.
+    #[test]
+    fn unquoted_japanese_sentence_ors_its_morphemes() {
+        use crate::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+
+        let analyzer =
+            Arc::new(JapaneseAnalyzer::new("normal", "embedded://ipadic", None).unwrap());
+        let parser = LexicalQueryParser::new(analyzer).with_default_field("content");
+
+        // JapaneseAnalyzer's built-in stop-word filter drops the
+        // particles ("は", "で", "ある"), leaving 2 content morphemes
+        // ("吾輩", "猫") — still more than one, which is the point.
+        let query = parser.parse("吾輩は猫である").unwrap();
+        let bool_q = query
+            .as_any()
+            .downcast_ref::<crate::lexical::query::BooleanQuery>()
+            .unwrap_or_else(|| panic!("expected BooleanQuery, got {query:?}"));
+        assert!(
+            bool_q.clauses().len() >= 2,
+            "expected multiple morphemes OR'd, got {:?}",
+            bool_q.clauses()
+        );
+        assert!(
+            bool_q.clauses().iter().all(|c| c.occur == Occur::Should),
+            "every morpheme clause must be Should (OR)"
+        );
+    }
+
+    #[test]
+    fn unquoted_japanese_sentence_in_a_field_query_ors_too() {
+        use crate::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+
+        let analyzer =
+            Arc::new(JapaneseAnalyzer::new("normal", "embedded://ipadic", None).unwrap());
+        let parser = LexicalQueryParser::new(analyzer).with_default_field("content");
+
+        let query = parser.parse("body:吾輩は猫である").unwrap();
+        assert!(
+            query
+                .as_any()
+                .downcast_ref::<crate::lexical::query::BooleanQuery>()
+                .is_some(),
+            "expected BooleanQuery, got {query:?}"
+        );
+    }
+
+    /// A quoted Japanese phrase must still build a PhraseQuery — the
+    /// morphemes are ordered tokens for `PhraseQuery`, not OR'd terms.
+    #[test]
+    fn quoted_japanese_phrase_still_builds_a_phrase_query() {
+        use crate::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+
+        let analyzer =
+            Arc::new(JapaneseAnalyzer::new("normal", "embedded://ipadic", None).unwrap());
+        let parser = LexicalQueryParser::new(analyzer).with_default_field("content");
+
+        let query = parser.parse("\"吾輩は猫である\"").unwrap();
+        let phrase_q = query
+            .as_any()
+            .downcast_ref::<PhraseQuery>()
+            .unwrap_or_else(|| panic!("expected PhraseQuery, got {query:?}"));
+        assert!(
+            phrase_q.terms().len() >= 2,
+            "expected multiple morphemes, got {:?}",
+            phrase_q.terms()
+        );
     }
 
     #[test]

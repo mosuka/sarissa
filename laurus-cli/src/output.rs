@@ -221,6 +221,13 @@ fn fields_to_json(fields: &HashMap<String, DataValue>) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+/// Maximum number of characters rendered for a text value in table output.
+///
+/// Values longer than this are cut to `TEXT_PREVIEW_CHARS - 3` characters
+/// and suffixed with `...` so the rendered cell never exceeds
+/// `TEXT_PREVIEW_CHARS` characters.
+const TEXT_PREVIEW_CHARS: usize = 80;
+
 /// Format a DataValue for compact display.
 fn format_data_value(value: &DataValue) -> String {
     match value {
@@ -229,8 +236,17 @@ fn format_data_value(value: &DataValue) -> String {
         DataValue::Int64(i) => i.to_string(),
         DataValue::Float64(f) => f.to_string(),
         DataValue::Text(s) => {
-            if s.len() > 80 {
-                format!("{}...", &s[..77])
+            // Truncate on character boundaries, not byte boundaries. The
+            // previous `&s[..77]` sliced raw bytes and panicked whenever
+            // byte 77 landed inside a multi-byte character — i.e. on
+            // essentially any Japanese field value.
+            //
+            // `s.len()` (bytes) is always >= the character count, so the
+            // byte-length guard short-circuits the O(n) `chars().count()`
+            // for the common short-value case without changing the result.
+            if s.len() > TEXT_PREVIEW_CHARS && s.chars().count() > TEXT_PREVIEW_CHARS {
+                let head: String = s.chars().take(TEXT_PREVIEW_CHARS - 3).collect();
+                format!("{head}...")
             } else {
                 s.clone()
             }
@@ -272,5 +288,53 @@ fn data_value_to_json(value: &DataValue) -> serde_json::Value {
         DataValue::GeoEcef(p) => json!({"x": p.x, "y": p.y, "z": p.z}),
         DataValue::Int64Array(arr) => json!(arr),
         DataValue::Float64Array(arr) => json!(arr),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `format_data_value` used to slice `DataValue::Text` at byte offset
+    /// 77, which panics with "byte index 77 is not a char boundary" on any
+    /// multi-byte text whose 77th byte falls inside a character. Table
+    /// output of a Japanese field triggered this on every search.
+    #[test]
+    fn format_data_value_truncates_japanese_text_without_panicking() {
+        // 100 chars x 3 bytes = 300 bytes; byte 77 splits the 26th char.
+        let text = "あ".repeat(100);
+        let out = format_data_value(&DataValue::Text(text));
+        assert!(out.ends_with("..."), "long text must be elided: {out}");
+    }
+
+    /// The 80 limit counts characters, not bytes: 79 Japanese characters
+    /// (237 bytes) must survive untouched even though the byte length
+    /// exceeds the old byte-based threshold.
+    #[test]
+    fn format_data_value_truncation_counts_characters_not_bytes() {
+        let text = "あ".repeat(79);
+        let out = format_data_value(&DataValue::Text(text.clone()));
+        assert_eq!(out, text, "79 chars is under the limit despite 237 bytes");
+    }
+
+    /// ASCII behavior must stay exactly as before: byte length and
+    /// character count coincide for ASCII input.
+    #[test]
+    fn format_data_value_keeps_short_ascii_text_verbatim() {
+        let text = "hello world".to_string();
+        let out = format_data_value(&DataValue::Text(text.clone()));
+        assert_eq!(out, text);
+    }
+
+    /// A 4-byte character (e.g. an emoji) landing exactly at the cut point
+    /// must not panic, and the result must remain valid UTF-8 (guaranteed
+    /// by construction since we build it from `chars()`).
+    #[test]
+    fn format_data_value_handles_emoji_at_the_cut_point() {
+        let mut text = "a".repeat(TEXT_PREVIEW_CHARS - 3);
+        text.push('🍎');
+        text.push_str(&"b".repeat(20));
+        let out = format_data_value(&DataValue::Text(text));
+        assert!(out.ends_with("..."), "long text must be elided: {out}");
     }
 }

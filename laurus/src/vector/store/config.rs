@@ -137,6 +137,89 @@ impl VectorIndexConfig {
     pub fn get_embedder(&self) -> &Arc<dyn Embedder> {
         &self.embedder
     }
+
+    /// Build a per-field [`VectorIndexTypeConfig`] map from this
+    /// collection's schema (Issue [#948](https://github.com/mosuka/laurus/issues/948)).
+    ///
+    /// Replaces the old `VectorStore::extract_index_type_config`, which
+    /// collapsed every vector field down to whichever one happened to be
+    /// first out of `fields` (a `HashMap`, so non-deterministic) --
+    /// silently discarding every other field's dimension, distance metric,
+    /// and HNSW parameters. This converts EVERY field carrying a `vector`
+    /// option, keyed by field name in a [`BTreeMap`] for deterministic
+    /// ordering (feeds directly into
+    /// [`MultiFieldVectorIndex::open_or_create`](crate::vector::index::multi_field::MultiFieldVectorIndex::open_or_create)).
+    ///
+    /// Fields with `vector: None` (lexical-only fields) are skipped. An
+    /// empty result (no field carries a `vector` option) is valid: it
+    /// means this collection has no vector fields at all.
+    pub fn field_index_configs(
+        &self,
+    ) -> std::collections::BTreeMap<String, crate::vector::index::config::VectorIndexTypeConfig>
+    {
+        let mut out = std::collections::BTreeMap::new();
+        for (name, field_config) in &self.fields {
+            let Some(vector_opt) = &field_config.vector else {
+                continue;
+            };
+            out.insert(
+                name.clone(),
+                build_field_index_config(vector_opt, self.embedder.clone(), &self.deletion_config),
+            );
+        }
+        out
+    }
+}
+
+/// Convert one field's schema-level [`FieldOption`] into a full
+/// [`VectorIndexTypeConfig`], given the collection-wide embedder and
+/// deletion policy (Issue [#948](https://github.com/mosuka/laurus/issues/948)).
+///
+/// Shared by [`VectorIndexConfig::field_index_configs`] (batch conversion
+/// at `VectorStore` construction) and
+/// [`crate::vector::store::VectorStore::add_field`] (single-field
+/// conversion at dynamic schema growth), so the two paths convert a
+/// [`FieldOption`] identically and can never drift apart.
+pub fn build_field_index_config(
+    vector_opt: &FieldOption,
+    embedder: Arc<dyn Embedder>,
+    deletion_config: &DeletionConfig,
+) -> crate::vector::index::config::VectorIndexTypeConfig {
+    use crate::vector::core::distance::DistanceMetric;
+    use crate::vector::index::config::{
+        FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexTypeConfig,
+    };
+
+    match vector_opt {
+        FieldOption::Flat(opt) => VectorIndexTypeConfig::Flat(FlatIndexConfig {
+            dimension: opt.dimension,
+            distance_metric: opt.distance,
+            rerank_storage: opt.rerank_storage,
+            normalize_vectors: opt.distance == DistanceMetric::Cosine,
+            auto_compaction: deletion_config.auto_compaction,
+            compaction_threshold: deletion_config.compaction_threshold,
+            embedder,
+            ..Default::default()
+        }),
+        FieldOption::Hnsw(opt) => VectorIndexTypeConfig::HNSW(HnswIndexConfig {
+            auto_compaction: deletion_config.auto_compaction,
+            compaction_threshold: deletion_config.compaction_threshold,
+            embedder,
+            ..HnswIndexConfig::from_hnsw_option(opt)
+        }),
+        FieldOption::Ivf(opt) => VectorIndexTypeConfig::IVF(IvfIndexConfig {
+            dimension: opt.dimension,
+            distance_metric: opt.distance,
+            n_clusters: opt.n_clusters,
+            n_probe: opt.n_probe,
+            rerank_storage: opt.rerank_storage,
+            normalize_vectors: opt.distance == DistanceMetric::Cosine,
+            auto_compaction: deletion_config.auto_compaction,
+            compaction_threshold: deletion_config.compaction_threshold,
+            embedder,
+            ..Default::default()
+        }),
+    }
 }
 
 impl Default for VectorIndexConfig {
@@ -382,3 +465,176 @@ impl VectorFieldConfig {
 
 // Moved to crate::vector::core::field
 // use crate::vector::core::field::{VectorOption, FlatOption, HnswOption, IvfOption, VectorIndexKind};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vector::core::distance::DistanceMetric;
+    use crate::vector::core::field::{FieldOption, FlatOption, HnswOption, IvfOption};
+    use crate::vector::core::quantization::QuantizationMethod;
+    use crate::vector::core::rerank::RerankStorageKind;
+    use crate::vector::index::config::VectorIndexTypeConfig;
+
+    /// Core gate (Issue #948): `field_index_configs` must convert EVERY
+    /// field, not just the first one out of the `HashMap` -- the exact bug
+    /// the old (now-removed) `VectorStore::extract_index_type_config`
+    /// single-config collapse caused.
+    #[test]
+    fn field_index_configs_converts_every_field_not_just_the_first() {
+        let config = VectorIndexConfig::builder()
+            .field(
+                "title_vec",
+                VectorFieldConfig {
+                    vector: Some(FieldOption::Hnsw(HnswOption {
+                        dimension: 8,
+                        distance: DistanceMetric::Cosine,
+                        ..Default::default()
+                    })),
+                    lexical: None,
+                },
+            )
+            .field(
+                "body_vec",
+                VectorFieldConfig {
+                    vector: Some(FieldOption::Hnsw(HnswOption {
+                        dimension: 32,
+                        distance: DistanceMetric::Euclidean,
+                        ..Default::default()
+                    })),
+                    lexical: None,
+                },
+            )
+            .build()
+            .unwrap();
+
+        let field_configs = config.field_index_configs();
+        assert_eq!(
+            field_configs.len(),
+            2,
+            "both fields must be present, not just one"
+        );
+
+        match &field_configs["title_vec"] {
+            VectorIndexTypeConfig::HNSW(c) => {
+                assert_eq!(c.dimension, 8);
+                assert_eq!(c.distance_metric, DistanceMetric::Cosine);
+            }
+            other => panic!("expected HNSW config for title_vec, got {other:?}"),
+        }
+        match &field_configs["body_vec"] {
+            VectorIndexTypeConfig::HNSW(c) => {
+                assert_eq!(c.dimension, 32);
+                assert_eq!(c.distance_metric, DistanceMetric::Euclidean);
+            }
+            other => panic!("expected HNSW config for body_vec, got {other:?}"),
+        }
+    }
+
+    /// Lexical-only fields (`vector: None`) are skipped, and a collection
+    /// with zero vector fields yields an empty map (valid: no vector index
+    /// is needed).
+    #[test]
+    fn field_index_configs_skips_lexical_only_fields() {
+        let config = VectorIndexConfig::builder()
+            .field(
+                "lexical_only",
+                VectorFieldConfig {
+                    vector: None,
+                    lexical: Some(crate::lexical::core::field::FieldOption::default()),
+                },
+            )
+            .build()
+            .unwrap();
+
+        assert!(config.field_index_configs().is_empty());
+    }
+
+    /// Issue #790-style regression, now per-field: rerank storage and
+    /// quantizer must propagate through `field_index_configs`, not just
+    /// the pre-existing dimension/distance/m fields.
+    #[test]
+    fn field_index_configs_propagates_rerank_and_quantizer() {
+        let config = VectorIndexConfig::builder()
+            .field(
+                "vec",
+                VectorFieldConfig {
+                    vector: Some(FieldOption::Hnsw(HnswOption {
+                        dimension: 8,
+                        distance: DistanceMetric::Euclidean,
+                        m: 5,
+                        ef_construction: 33,
+                        default_ef_search: Some(77),
+                        quantizer: QuantizationMethod::ProductQuantization { subvector_count: 4 },
+                        rerank_storage: Some(RerankStorageKind::F32),
+                        ..Default::default()
+                    })),
+                    lexical: None,
+                },
+            )
+            .build()
+            .unwrap();
+
+        match &config.field_index_configs()["vec"] {
+            VectorIndexTypeConfig::HNSW(c) => {
+                assert_eq!(c.rerank_storage, Some(RerankStorageKind::F32));
+                assert_eq!(
+                    c.quantization_method,
+                    QuantizationMethod::ProductQuantization { subvector_count: 4 }
+                );
+                assert_eq!(c.dimension, 8);
+                assert_eq!(c.distance_metric, DistanceMetric::Euclidean);
+                assert_eq!(c.m, 5);
+                assert_eq!(c.ef_construction, 33);
+                assert_eq!(c.default_ef_search, Some(77));
+            }
+            other => panic!("expected HNSW config, got {other:?}"),
+        }
+    }
+
+    /// `normalize_vectors` stays metric-conditional (Issue #794) across all
+    /// three index kinds when derived per-field.
+    #[test]
+    fn field_index_configs_normalize_is_metric_conditional() {
+        fn normalize_of(opt: FieldOption) -> bool {
+            let config = VectorIndexConfig::builder()
+                .field(
+                    "vec",
+                    VectorFieldConfig {
+                        vector: Some(opt),
+                        lexical: None,
+                    },
+                )
+                .build()
+                .unwrap();
+            match &config.field_index_configs()["vec"] {
+                VectorIndexTypeConfig::HNSW(c) => c.normalize_vectors,
+                VectorIndexTypeConfig::Flat(c) => c.normalize_vectors,
+                VectorIndexTypeConfig::IVF(c) => c.normalize_vectors,
+            }
+        }
+
+        let hnsw = |distance| {
+            FieldOption::Hnsw(HnswOption {
+                distance,
+                ..Default::default()
+            })
+        };
+        let flat = |distance| {
+            FieldOption::Flat(FlatOption {
+                distance,
+                ..Default::default()
+            })
+        };
+        let ivf = |distance| {
+            FieldOption::Ivf(IvfOption {
+                distance,
+                ..Default::default()
+            })
+        };
+
+        for opt_fn in [hnsw, flat, ivf] {
+            assert!(normalize_of(opt_fn(DistanceMetric::Cosine)));
+            assert!(!normalize_of(opt_fn(DistanceMetric::Euclidean)));
+        }
+    }
+}

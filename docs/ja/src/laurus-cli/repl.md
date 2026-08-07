@@ -31,7 +31,7 @@ laurus>
 | :--- | :--- |
 | `create index [schema_path]` | インデックスを作成（パス省略時は対話型ウィザード） |
 | `create schema <output_path>` | 対話型スキーマ生成ウィザード |
-| `search <query>` | インデックスを検索 |
+| `search <query>` | インデックスを検索（Lexical / Vector / ハイブリッド DSL） |
 | `add field <name> <json>` | スキーマにフィールドを追加 |
 | `add doc <id> <json>` | ドキュメントを追加（追記、同一 ID で複数チャンク可） |
 | `put doc <id> <json>` | ドキュメントを上書き（同一 ID の既存チャンクを置換） |
@@ -67,6 +67,8 @@ laurus> search body:rust
 │ doc1 │ 0.8532 │ body: Rust is a systems..., title… │
 ╰──────┴────────┴────────────────────────────────────╯
 ```
+
+`search` は [Query DSL](../concepts/query_dsl.md) の全体（Lexical・Vector・ハイブリッド句）を受け付け、単発の `laurus search` コマンドと同様に、クエリを各フィールドに設定されたアナライザー自身で解析します。結果件数は常に 10 件に制限されます。異なる件数が必要な場合は、REPL の外で `laurus search --limit N` を使用してください。
 
 ### フィールドの管理
 

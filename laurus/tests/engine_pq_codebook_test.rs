@@ -184,11 +184,17 @@ async fn train_then_reopen_commits_with_the_shared_codebook() -> laurus::Result<
     engine.commit().await?;
 
     // The sealed segment's embedded codebook must equal the trained file.
+    // The codebook itself lives at the ROOT of the vector namespace (Issue
+    // #948: `pq_codebook_path` is resolved against the root storage,
+    // before per-field `PrefixedStorage` wrapping -- see
+    // `multi_field`'s module docs), while the field's own segment lives
+    // one level deeper, under its own `MultiFieldVectorIndex` sub-namespace.
     let vector_storage: Arc<dyn Storage> =
         Arc::new(PrefixedStorage::new("vector", fresh_storage.clone()));
     let trained = read_pq_codebook(vector_storage.as_ref(), "embedding.pqcb")?;
-    let reader =
-        HnswIndexReader::load(vector_storage, "segment_000000", DistanceMetric::Euclidean)?;
+    let field_storage: Arc<dyn Storage> =
+        Arc::new(PrefixedStorage::new("embedding", vector_storage));
+    let reader = HnswIndexReader::load(field_storage, "segment_000000", DistanceMetric::Euclidean)?;
     let pool = match reader.vectors() {
         VectorStorage::OwnedPq(pool) => pool.clone(),
         other => panic!("the committed segment must stay on PQ, got {other:?}"),

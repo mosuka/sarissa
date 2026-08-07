@@ -61,6 +61,13 @@ pub struct VectorStore {
     writer_cache: Mutex<Option<Box<dyn VectorIndexWriter>>>,
     /// Cached searcher (invalidated after commit/optimize).
     searcher_cache: parking_lot::RwLock<Option<Box<dyn VectorIndexSearcher>>>,
+    /// The collection-wide configuration this store was constructed with
+    /// (Issue #948), retained so [`Self::add_field`] can build a properly
+    /// parametrized [`VectorIndexTypeConfig`] (embedder, deletion policy)
+    /// for a field added after construction. `None` for stores built via
+    /// [`Self::with_index_type_config`] (the single-index constructor),
+    /// which never had a collection-wide config to retain.
+    config: Option<VectorIndexConfig>,
 }
 
 impl std::fmt::Debug for VectorStore {
@@ -75,7 +82,15 @@ impl VectorStore {
     /// Create a new vector store with the given storage and high-level configuration.
     ///
     /// This constructor is compatible with Engine and accepts VectorIndexConfig.
-    /// It extracts the index type configuration from the first field.
+    /// Every vector field gets its own independent sub-index (Issue
+    /// [#948](https://github.com/mosuka/laurus/issues/948)) via
+    /// [`VectorIndexConfig::field_index_configs`] and
+    /// [`VectorIndexFactory::open_or_create_multi_field`] -- this replaces
+    /// the old behavior of collapsing every field down to whichever one
+    /// happened to come first out of `config.fields` (a `HashMap`, so
+    /// non-deterministic), which silently discarded every other field's
+    /// dimension, distance metric, and HNSW parameters, and could corrupt
+    /// data when one document had vectors in more than one field.
     ///
     /// # Arguments
     ///
@@ -86,9 +101,18 @@ impl VectorStore {
     ///
     /// Returns a new `VectorStore` instance.
     pub fn new(storage: Arc<dyn Storage>, config: VectorIndexConfig) -> Result<Self> {
-        // Extract index type config from the first field, or use default
-        let index_type_config = Self::extract_index_type_config(&config);
-        Self::with_index_type_config(storage, index_type_config)
+        let field_configs = config.field_index_configs();
+        let index = VectorIndexFactory::open_or_create_multi_field(
+            storage,
+            &field_configs,
+            config.embedder.clone(),
+        )?;
+        Ok(Self {
+            index: Box::new(index),
+            writer_cache: Mutex::new(None),
+            searcher_cache: parking_lot::RwLock::new(None),
+            config: Some(config),
+        })
     }
 
     /// Create a new vector store with explicit index type configuration.
@@ -113,84 +137,7 @@ impl VectorStore {
             index,
             writer_cache: Mutex::new(None),
             searcher_cache: parking_lot::RwLock::new(None),
-        })
-    }
-
-    /// Extract VectorIndexTypeConfig from VectorIndexConfig.
-    ///
-    /// Uses the first field's configuration if available, otherwise returns default.
-    fn extract_index_type_config(config: &VectorIndexConfig) -> VectorIndexTypeConfig {
-        use crate::vector::core::field::FieldOption;
-        use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig};
-
-        // Try to get config from the first field with vector configuration
-        for field_config in config.fields.values() {
-            if let Some(ref vector_opt) = field_config.vector {
-                return match vector_opt {
-                    FieldOption::Flat(opt) => VectorIndexTypeConfig::Flat(FlatIndexConfig {
-                        dimension: opt.dimension,
-                        distance_metric: opt.distance,
-                        // Stage-2 rerank sidecar (#481, wired for Flat by
-                        // #932 — previously carried on the option but
-                        // dropped here, so the writer never emitted it).
-                        rerank_storage: opt.rerank_storage,
-                        // L2-normalize only for the magnitude-invariant
-                        // Cosine metric (Issue #794); normalizing a
-                        // Euclidean/DotProduct/Manhattan field changes its
-                        // distances.
-                        normalize_vectors: opt.distance
-                            == crate::vector::core::distance::DistanceMetric::Cosine,
-                        // Wire the deletion config's compaction policy into
-                        // the index so commit can auto-compact under the
-                        // segmented layout (Issue #889, mirroring HNSW/#782).
-                        auto_compaction: config.deletion_config.auto_compaction,
-                        compaction_threshold: config.deletion_config.compaction_threshold,
-                        embedder: config.embedder.clone(),
-                        ..Default::default()
-                    }),
-                    // Option-derived fields (incl. rerank_storage and the
-                    // quantizer, Issue #790) come from the shared
-                    // conversion helper; only store-level fields are
-                    // overlaid here.
-                    FieldOption::Hnsw(opt) => VectorIndexTypeConfig::HNSW(HnswIndexConfig {
-                        // Wire the deletion config's compaction policy into the
-                        // index so commit can auto-compact (Issue #782).
-                        auto_compaction: config.deletion_config.auto_compaction,
-                        compaction_threshold: config.deletion_config.compaction_threshold,
-                        embedder: config.embedder.clone(),
-                        ..HnswIndexConfig::from_hnsw_option(opt)
-                    }),
-                    FieldOption::Ivf(opt) => VectorIndexTypeConfig::IVF(IvfIndexConfig {
-                        dimension: opt.dimension,
-                        distance_metric: opt.distance,
-                        n_clusters: opt.n_clusters,
-                        n_probe: opt.n_probe,
-                        // Stage-2 rerank sidecar (#481, wired for IVF by
-                        // #932 — previously carried on the option but
-                        // dropped here, so the writer never emitted it).
-                        rerank_storage: opt.rerank_storage,
-                        // L2-normalize only for the magnitude-invariant
-                        // Cosine metric (Issue #794).
-                        normalize_vectors: opt.distance
-                            == crate::vector::core::distance::DistanceMetric::Cosine,
-                        // Wire the deletion config's compaction policy into
-                        // the index so commit can auto-compact under the
-                        // segmented layout (Issue #889, mirroring Flat/HNSW).
-                        auto_compaction: config.deletion_config.auto_compaction,
-                        compaction_threshold: config.deletion_config.compaction_threshold,
-                        embedder: config.embedder.clone(),
-                        ..Default::default()
-                    }),
-                };
-            }
-        }
-
-        // Default to HNSW with config's embedder
-        VectorIndexTypeConfig::HNSW(HnswIndexConfig {
-            auto_compaction: config.deletion_config.auto_compaction,
-            compaction_threshold: config.deletion_config.compaction_threshold,
-            embedder: config.embedder.clone(),
-            ..Default::default()
+            config: None,
         })
     }
 
@@ -699,7 +646,17 @@ impl VectorStore {
         // (Issue #676); Exact selectors and per-query fields need no lookup.
         let reader_field_names: Vec<String> = match &request.params.fields {
             Some(sels) if sels.iter().any(|s| matches!(s, FieldSelector::Prefix(_))) => {
-                self.index.reader()?.field_names().unwrap_or_default()
+                // Issue #948: `field_dimensions()` is an in-memory lookup,
+                // so prefer it over building a full reader just to read
+                // field names. Empty for index types that do not override
+                // it (single-index `with_index_type_config` construction),
+                // where the reader-based lookup below is still correct.
+                let dims = self.index.field_dimensions();
+                if !dims.is_empty() {
+                    dims.into_keys().collect()
+                } else {
+                    self.index.reader()?.field_names().unwrap_or_default()
+                }
             }
             _ => Vec::new(),
         };
@@ -909,17 +866,30 @@ impl VectorStore {
         let reader = self.index.reader()?;
         let doc_count = reader.vector_count();
         let index_dimension = reader.dimension();
+        // Issue #948: each field's OWN configured dimension, so a field
+        // with zero vectors in a heterogeneous multi-field index (e.g. a
+        // 384-dim `title_vec` alongside an empty 128-dim `other_vec`)
+        // reports its own dimension instead of falling back to
+        // `index_dimension` -- which for `MultiFieldVectorIndex` is just
+        // the first field's dimension in iteration order, not this one's.
+        // Empty for index types that do not override
+        // `field_dimensions` (single-index `with_index_type_config`
+        // construction), where `index_dimension` remains the only and
+        // correct fallback, same as before this fix.
+        let configured_dimensions = self.index.field_dimensions();
 
         let mut fields = std::collections::HashMap::new();
         if let Ok(field_names) = reader.field_names() {
             for name in field_names {
                 let vectors = reader.get_vectors_by_field(&name).unwrap_or_default();
                 let vector_count = vectors.len();
-                // Derive dimension from actual vectors; fall back to
-                // index-level dimension when no vectors exist for this field.
+                // Derive dimension from actual vectors when present (exact
+                // ground truth); otherwise this field's own configured
+                // dimension; otherwise the index-level dimension.
                 let dimension = vectors
                     .first()
                     .map(|(_, v)| v.data.len())
+                    .or_else(|| configured_dimensions.get(&name).copied())
                     .unwrap_or(index_dimension);
                 fields.insert(
                     name,
@@ -1009,7 +979,22 @@ impl VectorStore {
         let _ = self.index.set_last_wal_seq(seq);
     }
 
-    /// Register a field-specific embedder for a dynamically added vector field.
+    /// Add a dynamically-added vector field, creating its sub-index when
+    /// needed and registering a field-specific embedder.
+    ///
+    /// Issue [#948](https://github.com/mosuka/laurus/issues/948): when the
+    /// underlying index is a
+    /// [`MultiFieldVectorIndex`](crate::vector::index::multi_field::MultiFieldVectorIndex)
+    /// (`supports_dynamic_fields() == true`), a brand-new field needs its
+    /// own sub-index created here BEFORE any vectors for it can be
+    /// written -- its writer rejects unknown field names outright rather
+    /// than silently collapsing them into another field's data (the bug
+    /// this whole index type exists to prevent). Index types without field
+    /// boundaries (the single-index
+    /// [`Self::with_index_type_config`] construction) already accept any
+    /// field name as a record-level tag with no schema change needed, so
+    /// `supports_dynamic_fields()` is `false` there and this step is
+    /// skipped.
     ///
     /// If the underlying index's embedder is a
     /// [`PerFieldEmbedder`](crate::embedding::per_field::PerFieldEmbedder),
@@ -1019,12 +1004,35 @@ impl VectorStore {
     /// # Arguments
     ///
     /// * `name` - The vector field name
+    /// * `vector_opt` - The field's schema-level vector option (dimension,
+    ///   distance metric, index kind), used to build its sub-index config
+    ///   when one must be created.
     /// * `embedder` - Optional field-specific embedder to register
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if creating the field's sub-index fails (e.g. the
+    /// field already exists, or a storage I/O error).
     pub async fn add_field(
         &self,
         name: &str,
+        vector_opt: &crate::vector::core::field::FieldOption,
         embedder: Option<Arc<dyn crate::embedding::embedder::Embedder>>,
-    ) {
+    ) -> Result<()> {
+        if self.index.supports_dynamic_fields() {
+            let deletion_config = self
+                .config
+                .as_ref()
+                .map(|c| c.deletion_config.clone())
+                .unwrap_or_default();
+            let field_config = self::config::build_field_index_config(
+                vector_opt,
+                self.index.embedder(),
+                &deletion_config,
+            );
+            self.index.add_field(name, field_config)?;
+        }
+
         if let Some(field_embedder) = embedder {
             let index_embedder = self.index.embedder();
             if let Some(pfe) = index_embedder
@@ -1040,9 +1048,10 @@ impl VectorStore {
         // review / #875): its buffered mutations are the only in-process
         // copy, and the segmented pending WAL checkpoint may already cover
         // them — a bare drop would let a later successful commit's
-        // checkpoint hide the loss from recovery. This method cannot
-        // propagate the error (its signature returns `()`); leaving the
-        // writer cached makes the next `commit()` retry and surface it.
+        // checkpoint hide the loss from recovery. A commit failure here is
+        // intentionally not propagated (pre-existing behavior): leaving
+        // the writer cached makes the next `commit()` retry and surface
+        // it instead.
         {
             let mut writer_guard = self.writer_cache.lock().await;
             if let Some(writer) = writer_guard.as_mut()
@@ -1050,23 +1059,34 @@ impl VectorStore {
                 && writer.commit().is_err()
             {
                 *self.searcher_cache.write() = None;
-                return;
+                return Ok(());
             }
             *writer_guard = None;
         }
         *self.searcher_cache.write() = None;
+        Ok(())
     }
 
     /// Remove a field from the vector store.
     ///
-    /// Unregisters any field-specific embedder from the `PerFieldEmbedder` and
-    /// invalidates writer/searcher caches. Existing vector data in the index is
-    /// not deleted.
+    /// Unregisters the field from routing (Issue #948:
+    /// [`VectorIndex::remove_field`], a no-op for index types without
+    /// field boundaries) and any field-specific embedder from the
+    /// `PerFieldEmbedder`, then invalidates writer/searcher caches.
+    /// Existing vector data in the index is not deleted -- re-adding the
+    /// field with the same name recovers it.
     ///
     /// # Arguments
     ///
     /// * `name` - The vector field name to remove
-    pub async fn delete_field(&self, name: &str) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if unregistering the field from the underlying
+    /// index fails.
+    pub async fn delete_field(&self, name: &str) -> Result<()> {
+        self.index.remove_field(name)?;
+
         // Remove the field-specific embedder from the PerFieldEmbedder if present.
         let index_embedder = self.index.embedder();
         if let Some(pfe) = index_embedder
@@ -1087,11 +1107,12 @@ impl VectorStore {
                 && writer.commit().is_err()
             {
                 *self.searcher_cache.write() = None;
-                return;
+                return Ok(());
             }
             *writer_guard = None;
         }
         *self.searcher_cache.write() = None;
+        Ok(())
     }
 }
 
@@ -1186,116 +1207,11 @@ mod tests {
         assert!(sampled.is_empty());
     }
 
-    /// Issue #790: the store-level config conversion must carry
-    /// `rerank_storage` and the quantizer into `HnswIndexConfig`
-    /// (previously dropped to `..Default::default()`, so the Stage-2
-    /// sidecar was never emitted through `VectorStore`/`Engine`).
-    #[test]
-    fn extract_index_type_config_propagates_rerank_and_quantizer() {
-        use crate::vector::core::distance::DistanceMetric;
-        use crate::vector::core::field::{FieldOption, HnswOption};
-        use crate::vector::core::quantization::QuantizationMethod;
-        use crate::vector::core::rerank::RerankStorageKind;
-        use crate::vector::store::config::{VectorFieldConfig, VectorIndexConfig};
-
-        let config = VectorIndexConfig::builder()
-            .field(
-                "vec",
-                VectorFieldConfig {
-                    vector: Some(FieldOption::Hnsw(HnswOption {
-                        dimension: 8,
-                        distance: DistanceMetric::Euclidean,
-                        m: 5,
-                        ef_construction: 33,
-                        default_ef_search: Some(77),
-                        quantizer: QuantizationMethod::ProductQuantization { subvector_count: 4 },
-                        rerank_storage: Some(RerankStorageKind::F32),
-                        ..Default::default()
-                    })),
-                    lexical: None,
-                },
-            )
-            .build()
-            .unwrap();
-
-        let index_config = VectorStore::extract_index_type_config(&config);
-
-        match index_config {
-            VectorIndexTypeConfig::HNSW(c) => {
-                // Issue #790: the previously dropped fields.
-                assert_eq!(c.rerank_storage, Some(RerankStorageKind::F32));
-                assert_eq!(
-                    c.quantization_method,
-                    QuantizationMethod::ProductQuantization { subvector_count: 4 }
-                );
-                // Pre-existing propagation still flows.
-                assert_eq!(c.dimension, 8);
-                assert_eq!(c.distance_metric, DistanceMetric::Euclidean);
-                assert_eq!(c.m, 5);
-                assert_eq!(c.ef_construction, 33);
-                assert_eq!(c.default_ef_search, Some(77));
-                assert_eq!(c.auto_compaction, config.deletion_config.auto_compaction);
-                // Issue #794: a Euclidean field must not be normalized.
-                assert!(!c.normalize_vectors);
-            }
-            other => panic!("expected HNSW config, got {}", other.index_type_name()),
-        }
-    }
-
-    /// Issue #794: the store-level conversion must set `normalize_vectors`
-    /// from the distance metric for every vector index type — only the
-    /// magnitude-invariant Cosine metric is L2-normalized. Before this
-    /// fix the Hnsw/Flat/Ivf arms all left it at the always-on default,
-    /// silently corrupting non-Cosine distances.
-    #[test]
-    fn extract_index_type_config_normalize_is_metric_conditional() {
-        use crate::vector::core::distance::DistanceMetric;
-        use crate::vector::core::field::{FieldOption, FlatOption, HnswOption, IvfOption};
-        use crate::vector::store::config::{VectorFieldConfig, VectorIndexConfig};
-
-        fn normalize_of(opt: FieldOption) -> bool {
-            let config = VectorIndexConfig::builder()
-                .field(
-                    "vec",
-                    VectorFieldConfig {
-                        vector: Some(opt),
-                        lexical: None,
-                    },
-                )
-                .build()
-                .unwrap();
-            match VectorStore::extract_index_type_config(&config) {
-                VectorIndexTypeConfig::HNSW(c) => c.normalize_vectors,
-                VectorIndexTypeConfig::Flat(c) => c.normalize_vectors,
-                VectorIndexTypeConfig::IVF(c) => c.normalize_vectors,
-            }
-        }
-
-        let hnsw = |distance| {
-            FieldOption::Hnsw(HnswOption {
-                distance,
-                ..Default::default()
-            })
-        };
-        let flat = |distance| {
-            FieldOption::Flat(FlatOption {
-                distance,
-                ..Default::default()
-            })
-        };
-        let ivf = |distance| {
-            FieldOption::Ivf(IvfOption {
-                distance,
-                ..Default::default()
-            })
-        };
-
-        // Cosine normalizes on every path; Euclidean does not.
-        assert!(normalize_of(hnsw(DistanceMetric::Cosine)));
-        assert!(!normalize_of(hnsw(DistanceMetric::Euclidean)));
-        assert!(normalize_of(flat(DistanceMetric::Cosine)));
-        assert!(!normalize_of(flat(DistanceMetric::Euclidean)));
-        assert!(normalize_of(ivf(DistanceMetric::Cosine)));
-        assert!(!normalize_of(ivf(DistanceMetric::Euclidean)));
-    }
+    // Issue #948: `extract_index_type_config` (which collapsed every field
+    // down to whichever one came first out of a `HashMap`) was removed and
+    // replaced by `VectorIndexConfig::field_index_configs`, which converts
+    // EVERY field. Its regression coverage -- including the Issue #790
+    // (rerank/quantizer propagation) and #794 (metric-conditional
+    // normalization) cases these two tests used to cover -- now lives in
+    // `vector::store::config::tests`.
 }

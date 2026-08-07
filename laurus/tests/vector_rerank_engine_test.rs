@@ -27,10 +27,11 @@ use laurus::{FieldOption, QueryVector, Schema, VectorSearchQuery};
 use std::sync::Arc;
 
 /// Sidecar name as seen by the engine's outer storage: the vector
-/// store works behind `PrefixedStorage("vector", ..)`, and the first
-/// sealed segment of the (default, #882) segmented layout is
-/// `segment_000000.hnsw`.
-const SIDECAR_NAME: &str = "vector/segment_000000.hnsw.f32";
+/// store works behind `PrefixedStorage("vector", ..)`, each field then
+/// gets its own further `PrefixedStorage("embedding", ..)` sub-namespace
+/// (Issue #948: `MultiFieldVectorIndex`), and the first sealed segment of
+/// the (default, #882) segmented layout is `segment_000000.hnsw`.
+const SIDECAR_NAME: &str = "vector/embedding/segment_000000.hnsw.f32";
 
 /// Build a search request for `query`, optionally asking for Stage-2
 /// rerank with the given factor.
@@ -104,8 +105,10 @@ async fn engine_search_with_rerank_factor_succeeds_on_stage2_field() -> laurus::
     // independent of the score comparison below.
     let vector_storage: Arc<dyn Storage> =
         Arc::new(PrefixedStorage::new("vector", storage.clone()));
+    let field_storage: Arc<dyn Storage> =
+        Arc::new(PrefixedStorage::new("embedding", vector_storage));
     let reader = HnswIndexReader::load(
-        vector_storage,
+        field_storage,
         "segment_000000",
         VectorDistanceMetric::Cosine,
     )?;

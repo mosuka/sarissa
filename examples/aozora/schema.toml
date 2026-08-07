@@ -1,0 +1,120 @@
+# Aozora Bunko example schema.
+#
+# `@IPADIC_DIR@` is a placeholder: scripts/create_index.sh replaces it with
+# the absolute path to the extracted Lindera IPADIC dictionary before
+# creating the index. Do not pass this file directly to
+# `laurus create index --schema` — run create_index.sh instead.
+
+default_fields = ["title", "author", "body"]
+
+# --- Analyzers --------------------------------------------------------------
+
+# Japanese morphological analyzer (Lindera + IPADIC).
+#
+# This intentionally does NOT use the built-in `{language = "japanese"}`
+# preset, because that preset applies a Japanese stop-word filter. The
+# stop filter removes tokens (particles like "の", "は", "で") without
+# renumbering token positions, and PhraseQuery assumes consecutive
+# positions — so quoted phrase searches containing particles (e.g.
+# `title:"銀河鉄道の夜"`) would silently return zero hits. This custom
+# definition keeps every morpheme, including particles, so phrase queries
+# work as expected.
+[analyzers.ja_ipadic]
+tokenizer = { type = "lindera", mode = "normal", dict = "@IPADIC_DIR@" }
+char_filters = [
+    { type = "unicode_normalization", form = "nfkc" },
+    { type = "japanese_iteration_mark", kanji = true, kana = true },
+]
+token_filters = [{ type = "lowercase" }]
+
+# --- Fields ------------------------------------------------------------------
+
+# 作品名 (work title)
+[fields.title.Text]
+indexed = true
+stored = true
+term_vectors = false
+analyzer = "ja_ipadic"
+
+# 著者名 (author, morphologically analyzed — partial match, e.g. author:太宰)
+[fields.author.Text]
+indexed = true
+stored = true
+term_vectors = false
+analyzer = "ja_ipadic"
+
+# 著者名 (author, exact match only, e.g. author_exact:太宰治)
+[fields.author_exact.Text]
+indexed = true
+stored = true
+term_vectors = false
+analyzer = "keyword"
+
+# 本文 (body text). Not stored — `excerpt` below carries the display copy,
+# keeping the index smaller for long works.
+[fields.body.Text]
+indexed = true
+stored = false
+term_vectors = false
+analyzer = "ja_ipadic"
+
+# 本文の冒頭抜粋 (display excerpt). Not indexed — search targets `body`.
+[fields.excerpt.Text]
+indexed = false
+stored = true
+term_vectors = false
+
+# NDC 分類番号 (e.g. "913"). Uses the engine's default (Standard) analyzer;
+# not part of default_fields since it is metadata, not free text.
+[fields.ndc.Text]
+indexed = true
+stored = true
+term_vectors = false
+
+# 本文の文字数 (character count of the body text)
+[fields.chars.Integer]
+indexed = true
+stored = true
+
+# 図書カード URL (Aozora Bunko card page URL)
+[fields.card_url.Text]
+indexed = false
+stored = true
+term_vectors = false
+
+# --- Vector search / hybrid search -------------------------------------------
+#
+# Text embedder for semantic (vector) search. `title` and `body` are only
+# vectorized, not `author`: an author's name is a proper noun, and semantic
+# similarity search over names is not meaningful (the existing `author` /
+# `author_exact` lexical fields already cover author lookup).
+#
+# Model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+# (384-dim, multilingual, ~470MB safetensors — downloaded once from
+# HuggingFace Hub on first run and cached under $HF_HOME). This is not a
+# Japanese-specific model: at the time this schema was written, the
+# Japanese-specific alternatives (cl-nagoya/sup-simcse-ja-base,
+# sonoisa/sentence-bert-base-ja-mean-tokens-v2,
+# pkshatech/GLuCoSE-base-ja) each lacked either `model.safetensors` or
+# `tokenizer.json` on the Hub, which `CandleBertEmbedder` requires — this
+# multilingual model was the one confirmed to actually load.
+#
+# The model's tokenizer.json embeds a truncation rule (max_length = 128),
+# applied automatically by the `tokenizers` crate, so a long Aozora Bunko
+# body is safely truncated to its first ~128 tokens rather than causing an
+# error — the embedding reflects the opening of the work, not the whole text.
+[embedders.ja_text_embedder]
+type = "candle_bert"
+model = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+# 作品名の意味ベクトル (semantic vector of the work title)
+[fields.title_vec.Hnsw]
+dimension = 384
+distance = "Cosine"
+embedder = "ja_text_embedder"
+
+# 本文（冒頭）の意味ベクトル (semantic vector of the body's opening)
+[fields.body_vec.Hnsw]
+dimension = 384
+distance = "Cosine"
+embedder = "ja_text_embedder"

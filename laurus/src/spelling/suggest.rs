@@ -171,11 +171,13 @@ impl SuggestionEngine {
             }
         }
 
-        // Add prefix matches for autocomplete-like suggestions
-        candidates.extend(
-            self.dictionary
-                .words_with_prefix(&word[..word.len().min(3)]),
-        );
+        // Add prefix matches for autocomplete-like suggestions.
+        //
+        // Take characters, not bytes: `&word[..word.len().min(3)]` can cut
+        // inside a multi-byte character (e.g. a 4-byte emoji or CJK
+        // extension codepoint) and panic.
+        let prefix: String = word.chars().take(3).collect();
+        candidates.extend(self.dictionary.words_with_prefix(&prefix));
 
         // Filter to only include dictionary words
         candidates.retain(|candidate| self.dictionary.contains(candidate));
@@ -458,5 +460,21 @@ mod tests {
         // We can't guarantee "hello" will be found without a more comprehensive dictionary,
         // but the mechanism should work
         assert!(!suggestions.is_empty());
+    }
+
+    /// `generate_candidates` used to take a 3-**byte** prefix
+    /// (`&word[..word.len().min(3)]`), which panics when byte 3 falls
+    /// inside a multi-byte character (a 4-byte emoji, or a CJK
+    /// extension-B codepoint outside the BMP).
+    #[test]
+    fn suggest_does_not_panic_on_multibyte_words() {
+        let dict = BuiltinDictionary::minimal();
+        let engine = SuggestionEngine::new(dict);
+
+        // No assertion beyond "doesn't panic": none of these are expected
+        // to be in the dictionary.
+        let _ = engine.suggest("🍎apple");
+        let _ = engine.suggest("aあb");
+        let _ = engine.suggest("日本語");
     }
 }

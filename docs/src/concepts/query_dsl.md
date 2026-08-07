@@ -36,6 +36,13 @@ hello
 title:hello
 ```
 
+If the field's analyzer splits a bare term into multiple tokens — for
+example, a Japanese sentence under a morphological (Lindera) analyzer, or
+a hyphenated word like `rust-lang` under the default `\w+` tokenizer —
+the resulting tokens are combined with `OR` (matching Lucene's `match`
+query), not required to appear as an exact phrase. Use a quoted
+[Phrase Query](#phrase-query) when exact adjacency is required.
+
 ### Boolean Operators
 
 Combine clauses with `AND` and `OR` (case-insensitive):

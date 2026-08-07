@@ -468,6 +468,17 @@ impl Engine {
             return Ok(());
         }
 
+        // `vector.last_wal_seq()` is itself an aggregate when the vector
+        // store is a `MultiFieldVectorIndex` (Issue #948): each vector
+        // field has its own independent sub-index and therefore its own
+        // checkpoint, and the store reports the MINIMUM across all of
+        // them -- the least-caught-up field, never the most. A `max`
+        // would let a lagging field's WAL records be skipped here forever
+        // (`record.seq <= vector_last_seq` would already be true for them).
+        // The `min` instead makes an already-caught-up field replay a few
+        // extra records it does not need; that is safe because recovery
+        // re-applies each record's upsert under its recorded `doc_id`
+        // (delete-then-add), which is idempotent.
         let vector_last_seq = self.vector.last_wal_seq();
         let lexical_last_seq = self.lexical.last_wal_seq();
 
@@ -510,7 +521,11 @@ impl Engine {
                             .await?;
                     }
 
-                    // Both stores succeeded — now update seq trackers
+                    // Both stores succeeded — now update seq trackers.
+                    // `vector.set_last_wal_seq` propagates `record.seq` to
+                    // EVERY field's sub-index identically (Issue #948); see
+                    // `vector_last_seq`'s comment above for why the store's
+                    // own `last_wal_seq()` aggregate is a `min`, not a `max`.
                     if record.seq > lexical_last_seq {
                         self.lexical.set_last_wal_seq(record.seq)?;
                     }
@@ -537,7 +552,9 @@ impl Engine {
                         self.vector.delete_document_by_internal_id(doc_id).await?;
                     }
 
-                    // Both stores succeeded — now update seq trackers
+                    // Both stores succeeded — now update seq trackers (see
+                    // the `Upsert` arm above for the `MultiFieldVectorIndex`
+                    // min-aggregate rationale, Issue #948).
                     if record.seq > lexical_last_seq {
                         self.lexical.set_last_wal_seq(record.seq)?;
                     }
@@ -801,6 +818,10 @@ impl Engine {
 
         // 6. Update sub-stores sequence tracker AFTER both stores succeed.
         // This ensures failed index operations are retried on recovery.
+        // `vector.set_last_wal_seq` fans `seq` out to every field's
+        // sub-index identically (Issue #948); see `recover()`'s comment on
+        // `vector_last_seq` for why the store's own `last_wal_seq()`
+        // aggregate is a `min` across fields, not a `max`.
         self.lexical.set_last_wal_seq(seq)?;
         self.vector.set_last_wal_seq(seq);
         // Publish the ingest high-water mark only now that BOTH stores hold the
@@ -1049,7 +1070,10 @@ impl Engine {
             // 3. Delete from Vector
             self.vector.delete_document_by_internal_id(doc_id).await?;
             // 4. Update trackers AFTER both deletes succeed.
-            // This ensures failed deletes are retried on recovery.
+            // This ensures failed deletes are retried on recovery. See
+            // `index_internal`'s comment on `vector.set_last_wal_seq`
+            // (Issue #948: fans out to every field identically; the
+            // store's own `last_wal_seq()` is a min across fields).
             self.lexical.set_last_wal_seq(seq)?;
             self.vector.set_last_wal_seq(seq);
             // Publish the high-water mark only once both stores hold the delete
@@ -1196,8 +1220,15 @@ impl Engine {
 
         // All declared field names (lexical + vector), used by the parser to
         // reject typo'd field references at parse time.
-        let known_fields: std::collections::HashSet<String> =
+        //
+        // `_id` is injected by the engine at ingest and indexed with a
+        // `KeywordAnalyzer` (see `split_schema`), but it is never present
+        // in `schema.fields` — users cannot declare it. Add it explicitly
+        // so that `_id:doc-001` keeps working instead of being rejected
+        // as an unknown field.
+        let mut known_fields: std::collections::HashSet<String> =
             schema.fields.keys().cloned().collect();
+        known_fields.insert(schema::RESERVED_ID_FIELD.to_string());
 
         let mut vector_parser = crate::vector::query::parser::VectorQueryParser::new(embedder);
         if !vector_fields.is_empty() {
@@ -1309,7 +1340,12 @@ impl Engine {
                 None
             };
 
-            self.vector.add_field(name, field_embedder).await;
+            let vector_opt = option
+                .to_vector()
+                .expect("is_vector() was true but to_vector() returned None");
+            self.vector
+                .add_field(name, &vector_opt, field_embedder)
+                .await?;
         }
 
         // 3. Update the schema.
@@ -1366,7 +1402,7 @@ impl Engine {
         }
 
         if option.is_vector() {
-            self.vector.delete_field(name).await;
+            self.vector.delete_field(name).await?;
         }
 
         // 3. Update the schema.

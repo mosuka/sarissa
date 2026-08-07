@@ -104,8 +104,10 @@ async fn flat_rerank_succeeds_on_stage2_field() -> laurus::Result<()> {
             rerank_storage: Some(RerankStorageKind::F32),
             ..FlatOption::default()
         }),
-        // Segment-per-commit is the Flat default since #907.
-        "vector/segment_000000.flat.f32",
+        // Segment-per-commit is the Flat default since #907. Nested one
+        // level under the "embedding" field's own sub-namespace (Issue
+        // #948: `MultiFieldVectorIndex`).
+        "vector/embedding/segment_000000.flat.f32",
     )
     .await
 }
@@ -121,7 +123,9 @@ async fn ivf_rerank_succeeds_on_stage2_field() -> laurus::Result<()> {
             rerank_storage: Some(RerankStorageKind::F32),
             ..IvfOption::default()
         }),
-        "vector/segment_000000.ivf.f32",
+        // Nested under the "embedding" field's own sub-namespace (Issue
+        // #948: `MultiFieldVectorIndex`).
+        "vector/embedding/segment_000000.ivf.f32",
     )
     .await
 }
@@ -202,7 +206,7 @@ async fn segmented_flat_rerank_orders_across_segments() -> laurus::Result<()> {
         engine.put_document(id, doc).await?;
     }
     engine.commit().await?;
-    assert!(storage.file_exists("vector/segment_000001.flat.f32"));
+    assert!(storage.file_exists("vector/embedding/segment_000001.flat.f32"));
 
     let hits = engine.search(vector_request(Some(4))).await?;
     assert_eq!(hits[0].id, "doc1", "cross-segment rerank must find doc1");
