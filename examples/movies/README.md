@@ -31,6 +31,31 @@ The schema defines a `clip_embedder` using [CLIP](https://openai.com/index/clip/
 The `poster_vec` field references this embedder so that poster images are automatically
 embedded into a 512-dimensional vector space at index time.
 
+## Sample document
+
+`index_movies.sh` doesn't write an intermediate file — it converts each dataset row into a
+document JSON object with `jq` and pipes `add doc <id> <document>` commands straight into a
+single `laurus repl` process (see [scripts/index_movies.sh](scripts/index_movies.sh)). For
+[_The Matrix_](https://www.themoviedb.org/movie/603), the generated document looks like this:
+
+```json
+{
+  "fields": {
+    "title": {"Text": "The Matrix"},
+    "overview": {"Text": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth."},
+    "genres": {"Text": "Action, Science Fiction"},
+    "poster": {"Text": "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"},
+    "release_date": {"Int64": 922752000},
+    "poster_vec": {"Bytes": [[255, 216, 255, 224, "…"], "image/jpeg"]}
+  }
+}
+```
+
+`poster_vec.Bytes` is `[<raw JPEG byte array>, <MIME type>]`; the byte array above is truncated
+after its JPEG magic number (`FF D8 FF E0`) for readability — the real array holds every byte of
+the downloaded file. `poster_vec` is only added once the poster image has been downloaded to
+`examples/movies/images/<id>.jpg`; a movie with no poster is indexed without it.
+
 ## Usage
 
 ### 1. Create the index

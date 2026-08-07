@@ -54,6 +54,42 @@
 
 `author` は意図的にベクトル化していません。人名は固有名詞であり、名前同士の意味的類似検索には実用上の意味がないためです。代わりに既存の `author`（部分一致）/ `author_exact`（完全一致）のレキシカルフィールドを使用してください。
 
+## ドキュメント例
+
+`build_dataset.py` は `examples/aozora/data/aozora.jsonl` に `put docs` 用のレコードを1行1件
+（`{"id": ..., "document": {"fields": {...}}}`）で書き出します。実際のファイルから2件、
+`body`/`excerpt`/`body_vec` を読みやすさのため `…` で省略して示します（実ファイルでは省略せず全文が1行に入ります）:
+
+```json
+{"id": "000919", "document": {"fields": {
+  "title": {"Text": "いなか、の、じけん"},
+  "author": {"Text": "夢野 久作"},
+  "author_exact": {"Text": "夢野久作"},
+  "body": {"Text": "いなか、の、じけん　備考\n\n　みんな、私の郷里、北九州の某地方の出来事で、私が見聞致しましたことばかりです。…"},
+  "excerpt": {"Text": "いなか、の、じけん　備考　みんな、私の郷里、北九州の某地方の出来事で…"},
+  "ndc": {"Text": "913"},
+  "chars": {"Int64": 169},
+  "card_url": {"Text": "https://www.aozora.gr.jp/cards/000919/card919.html"},
+  "title_vec": {"Text": "いなか、の、じけん"},
+  "body_vec": {"Text": "いなか、の、じけん　備考\n\n　みんな、私の郷里、北九州の某地方の出来事で、私が見聞致しましたことばかりです。…"}
+}}}
+{"id": "001140", "document": {"fields": {
+  "title": {"Text": "長崎"},
+  "author": {"Text": "芥川 竜之介"},
+  "author_exact": {"Text": "芥川竜之介"},
+  "body": {"Text": "菱形の凧。サント・モンタニの空に揚つた凧。うらうらと幾つも漂つた凧。\n　路ばたに商ふ夏蜜柑やバナナ。…"},
+  "excerpt": {"Text": "菱形の凧。サント・モンタニの空に揚つた凧。うらうらと幾つも漂つた凧。　路ばたに商ふ夏蜜柑やバナナ。…"},
+  "ndc": {"Text": "914"},
+  "chars": {"Int64": 318},
+  "card_url": {"Text": "https://www.aozora.gr.jp/cards/001140/card1140.html"},
+  "title_vec": {"Text": "長崎"},
+  "body_vec": {"Text": "菱形の凧。サント・モンタニの空に揚つた凧。うらうらと幾つも漂つた凧。\n　路ばたに商ふ夏蜜柑やバナナ。…"}
+}}}
+```
+
+`title_vec`/`body_vec` は `title`/`body` と同じテキストをコピーしたものです — インデックス時に
+フィールドへ設定された embedder（[Embedder](#embedder) 参照）によって自動的にベクトル化されます。
+
 ## 使い方
 
 ### 1. インデックスの作成

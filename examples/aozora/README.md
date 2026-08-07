@@ -87,6 +87,42 @@ and semantic similarity search over names is not meaningful. Use the
 existing `author` (partial match) / `author_exact` (exact match) lexical
 fields instead.
 
+## Sample document
+
+`build_dataset.py` writes one `put docs` record per line (`{"id": ..., "document": {"fields": {...}}}`)
+to `examples/aozora/data/aozora.jsonl`. Two real records from that file, with `body`/`excerpt`/`body_vec`
+truncated (`…`) for readability — the actual file has the full, untruncated text on one line each:
+
+```json
+{"id": "000919", "document": {"fields": {
+  "title": {"Text": "いなか、の、じけん"},
+  "author": {"Text": "夢野 久作"},
+  "author_exact": {"Text": "夢野久作"},
+  "body": {"Text": "いなか、の、じけん　備考\n\n　みんな、私の郷里、北九州の某地方の出来事で、私が見聞致しましたことばかりです。…"},
+  "excerpt": {"Text": "いなか、の、じけん　備考　みんな、私の郷里、北九州の某地方の出来事で…"},
+  "ndc": {"Text": "913"},
+  "chars": {"Int64": 169},
+  "card_url": {"Text": "https://www.aozora.gr.jp/cards/000919/card919.html"},
+  "title_vec": {"Text": "いなか、の、じけん"},
+  "body_vec": {"Text": "いなか、の、じけん　備考\n\n　みんな、私の郷里、北九州の某地方の出来事で、私が見聞致しましたことばかりです。…"}
+}}}
+{"id": "001140", "document": {"fields": {
+  "title": {"Text": "長崎"},
+  "author": {"Text": "芥川 竜之介"},
+  "author_exact": {"Text": "芥川竜之介"},
+  "body": {"Text": "菱形の凧。サント・モンタニの空に揚つた凧。うらうらと幾つも漂つた凧。\n　路ばたに商ふ夏蜜柑やバナナ。…"},
+  "excerpt": {"Text": "菱形の凧。サント・モンタニの空に揚つた凧。うらうらと幾つも漂つた凧。　路ばたに商ふ夏蜜柑やバナナ。…"},
+  "ndc": {"Text": "914"},
+  "chars": {"Int64": 318},
+  "card_url": {"Text": "https://www.aozora.gr.jp/cards/001140/card1140.html"},
+  "title_vec": {"Text": "長崎"},
+  "body_vec": {"Text": "菱形の凧。サント・モンタニの空に揚つた凧。うらうらと幾つも漂つた凧。\n　路ばたに商ふ夏蜜柑やバナナ。…"}
+}}}
+```
+
+`title_vec`/`body_vec` copy the same text as `title`/`body` — the engine embeds it automatically
+at index time via the field's configured embedder (see [Embedder](#embedder)).
+
 ## Usage
 
 ### 1. Create the index
