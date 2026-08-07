@@ -2557,7 +2557,7 @@ dependencies = [
 
 [[package]]
 name = "laurus"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -2613,7 +2613,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-cli"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2632,7 +2632,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-mcp"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2650,7 +2650,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-nodejs"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "laurus",
@@ -2663,7 +2663,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-php"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "ext-php-rs",
@@ -2673,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-python"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "laurus",
@@ -2683,7 +2683,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-ruby"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "laurus",
@@ -2693,7 +2693,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-server"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2716,7 +2716,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-wasm"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "chrono",

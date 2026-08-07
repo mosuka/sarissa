@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Unified search library for lexical, vector, and semantic retrieval"
@@ -31,9 +31,9 @@ async-trait = "0.1.89"
 axum = "0.8.9"
 chrono = { version = "0.4.44", features = ["serde"] }
 dialoguer = "0.12.0"
-laurus = { version = "0.9.0", path = "laurus", default-features = false }
-laurus-mcp = { version = "0.9.0", path = "laurus-mcp" }
-laurus-server = { version = "0.9.0", path = "laurus-server" }
+laurus = { version = "0.10.0", path = "laurus", default-features = false }
+laurus-mcp = { version = "0.10.0", path = "laurus-mcp" }
+laurus-server = { version = "0.10.0", path = "laurus-server" }
 prost = "0.14.3"
 rmcp = { version = "1.6.0", features = ["server", "transport-io"] }
 rustyline = "18.0.0"
