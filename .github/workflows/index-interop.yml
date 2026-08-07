@@ -1,0 +1,150 @@
+name: Index Interop
+
+# Reusable workflow (Issue #947): builds an index on macOS(aarch64), hands it
+# to a Linux(x86_64) job via an artifact, and verifies that lexical + vector
+# search results agree. Called from regression.yml (PR-gated) and
+# periodic.yml (weekly) rather than duplicated in both.
+on:
+  workflow_call:
+
+env:
+  # Referenced by CandleBertEmbedder (laurus/src/embedding/candle_bert_embedder.rs)
+  # so the sentence-transformers model download is cached across runs instead
+  # of hitting the network on every job.
+  HF_HOME: ${{ github.workspace }}/.hf-cache
+
+jobs:
+  # ============================================================
+  # Build an index on macOS and upload it + its expected query
+  # results as an artifact.
+  # ============================================================
+  build-index:
+    name: Build Index (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Run checkout
+        uses: actions/checkout@v6
+
+      - name: Install protoc
+        uses: ./.github/actions/install-protoc
+        with:
+          version: "24.4"
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-apple-darwin
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "stable-aarch64-apple-darwin"
+
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.HF_HOME }}
+          key: hf-cache-${{ runner.os }}-sentence-transformers-all-MiniLM-L6-v2
+
+      - name: Build laurus CLI
+        run: |
+          cargo build --release --target aarch64-apple-darwin \
+            -p laurus-cli --bin laurus --features embeddings-candle
+
+      - name: Create index and ingest fixtures
+        run: |
+          BIN="target/aarch64-apple-darwin/release/laurus"
+          INDEX_DIR=".interop-work/index"
+          "$BIN" --index-dir "$INDEX_DIR" --format json create index --schema .github/interop/schema.toml
+          "$BIN" --index-dir "$INDEX_DIR" --format json add docs --file .github/interop/documents.jsonl
+
+      - name: Generate expected query results
+        run: |
+          BIN="target/aarch64-apple-darwin/release/laurus"
+          bash .github/interop/run-queries.sh "$BIN" .interop-work/index .interop-work/expected
+
+      - name: Package index and expected results
+        run: tar -czf interop-artifact.tar.gz -C .interop-work index expected
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: index-interop-macos
+          path: interop-artifact.tar.gz
+          if-no-files-found: error
+
+  # ============================================================
+  # Download the macOS-built index on Linux, verify search
+  # results match, and check write compatibility.
+  # ============================================================
+  verify-index:
+    name: Verify Index (Linux)
+    needs: [build-index]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run checkout
+        uses: actions/checkout@v6
+
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+
+      - name: Install protoc
+        uses: ./.github/actions/install-protoc
+        with:
+          version: "24.4"
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-gnu
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "stable-x86_64-unknown-linux-gnu"
+
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.HF_HOME }}
+          key: hf-cache-${{ runner.os }}-sentence-transformers-all-MiniLM-L6-v2
+
+      - name: Build laurus CLI
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu \
+            -p laurus-cli --bin laurus --features embeddings-candle
+
+      - name: Download macOS-built index
+        uses: actions/download-artifact@v8
+        with:
+          name: index-interop-macos
+
+      - name: Extract index and expected results
+        run: |
+          mkdir -p .interop-work
+          tar -xzf interop-artifact.tar.gz -C .interop-work
+
+      - name: Generate actual query results and compare
+        run: |
+          BIN="target/x86_64-unknown-linux-gnu/release/laurus"
+          bash .github/interop/run-queries.sh "$BIN" .interop-work/index .interop-work/actual
+          python3 .github/interop/compare-results.py \
+            .interop-work/expected .interop-work/actual .github/interop/queries.tsv
+
+      - name: Verify write compatibility
+        run: |
+          set -euo pipefail
+          BIN="target/x86_64-unknown-linux-gnu/release/laurus"
+          INDEX_DIR=".interop-work/index"
+
+          "$BIN" --index-dir "$INDEX_DIR" --format json add doc \
+            --id "doc-linux-write-check" \
+            --data '{"fields": {"title": {"Text": "Linux Write Compatibility Check Document"}, "title_ja": {"Text": "リナックスから追加した文書"}, "year": {"Int64": 2025}, "summary": {"Text": "Verifying that a document added by a Linux binary can be committed into a macOS-built index."}}}'
+          "$BIN" --index-dir "$INDEX_DIR" commit
+
+          RESULT=$("$BIN" --index-dir "$INDEX_DIR" --format json search "title:compatibility" --limit 5)
+          echo "$RESULT"
+          echo "$RESULT" | grep -q "doc-linux-write-check" \
+            || (echo "ERROR: document added on Linux was not found after commit" >&2; exit 1)

@@ -1,0 +1,31 @@
+default_fields = ["title"]
+
+[analyzers.ngram_ja.tokenizer]
+type = "ngram"
+min_gram = 2
+max_gram = 2
+
+[embedders.bert_embedder]
+type = "candle_bert"
+model = "sentence-transformers/all-MiniLM-L6-v2"
+
+[fields.title.Text]
+indexed = true
+stored = true
+term_vectors = false
+analyzer = "english"
+
+[fields.title_ja.Text]
+indexed = true
+stored = true
+term_vectors = false
+analyzer = "ngram_ja"
+
+[fields.year.Integer]
+indexed = true
+stored = true
+
+[fields.summary.Hnsw]
+dimension = 384
+distance = "Cosine"
+embedder = "bert_embedder"
