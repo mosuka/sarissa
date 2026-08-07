@@ -21,9 +21,13 @@ use laurus::{DataValue, DistanceMetric, Document, Engine, FieldOption, HnswOptio
 use laurus_server::convert::schema::{from_proto, to_proto};
 
 /// Sidecar file name as it lands under the engine's vector storage
-/// prefix (`PrefixedStorage("vector", ..)`): the first sealed segment of
-/// the (default, #882) segmented layout is `segment_000000.hnsw`.
-const SIDECAR_NAME: &str = "vector/segment_000000.hnsw.f32";
+/// prefix (`PrefixedStorage("vector", ..)`), then one level deeper under
+/// the `embedding` field's own sub-namespace (Issue #948:
+/// `MultiFieldVectorIndex` gives every vector field its own
+/// `PrefixedStorage` directory rather than sharing the storage root): the
+/// first sealed segment of the (default, #882) segmented layout is
+/// `segment_000000.hnsw`.
+const SIDECAR_NAME: &str = "vector/embedding/segment_000000.hnsw.f32";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn grpc_schema_with_rerank_storage_emits_sidecar_on_commit() -> laurus::Result<()> {
