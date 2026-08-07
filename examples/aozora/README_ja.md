@@ -195,6 +195,42 @@ bash examples/aozora/scripts/search_aozora.sh
 ./target/release/laurus --index-dir examples/aozora/index repl
 ```
 
+## gRPCサーバーとMCPサーバー
+
+CLIの代わりに、このインデックスをgRPC（＋任意でHTTPゲートウェイ）でサーブしたり、
+MCPクライアント（Claude Codeなど）に公開したりすることもできます。
+
+```bash
+# gRPCサーバー（--http-portでHTTPゲートウェイも同時起動）を、既に構築済みの
+# aozoraインデックスに対して起動する。インデックスディレクトリ内の schema.toml
+# （レンダリング済みのIPADIC辞書パスを含む）が自動的に使われる
+# — --schema のようなフラグは存在せず、指定も不要
+./target/release/laurus --index-dir examples/aozora/index serve --port 50051 --http-port 8080
+```
+
+```bash
+# HTTPゲートウェイ: gRPCクライアント不要のプレーンなREST/JSON
+curl http://localhost:8080/v1/index
+curl -X POST http://localhost:8080/v1/search -H "Content-Type: application/json" -d '{"query":"title:こころ","limit":3}'
+```
+
+別のターミナルで、MCPサーバーは同じgRPCエンドポイントへ標準入出力（stdio）経由でプロキシします:
+
+```bash
+./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+Claude Codeへ登録する場合:
+
+```bash
+claude mcp add laurus-aozora -- ./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+`title_vec`/`body_vec` を使うには `embeddings-candle` フィーチャー付きでビルドしたバイナリが
+必要です（[使い方](#使い方)の手順どおりであれば既に満たされています）。これが無い場合、
+サーバー自体は正常に起動しますが、このインデックスへのベクトル・ハイブリッド検索クエリは
+リクエスト時にエラーになります。
+
 ## トラブルシューティング
 
 - **「Failed to resolve analyzer for field 'title'」** — IPADIC 辞書が見つからないか壊れています。`bash examples/aozora/scripts/fetch_dict.sh --force` を再実行してください。

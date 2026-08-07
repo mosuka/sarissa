@@ -126,6 +126,40 @@ bash examples/movies/scripts/search_movies.sh
 ./target/release/laurus --index-dir examples/movies/index repl
 ```
 
+## gRPCサーバーとMCPサーバー
+
+CLIの代わりに、このインデックスをgRPC（＋任意でHTTPゲートウェイ）でサーブしたり、
+MCPクライアント（Claude Codeなど）に公開したりすることもできます。
+
+```bash
+# gRPCサーバー（--http-portでHTTPゲートウェイも同時起動）を、既に構築済みの
+# moviesインデックスに対して起動する。インデックスディレクトリ内の schema.toml
+# が自動的に使われる — --schema のようなフラグは存在せず、指定も不要
+./target/release/laurus --index-dir examples/movies/index serve --port 50051 --http-port 8080
+```
+
+```bash
+# HTTPゲートウェイ: gRPCクライアント不要のプレーンなREST/JSON
+curl http://localhost:8080/v1/index
+curl -X POST http://localhost:8080/v1/search -H "Content-Type: application/json" -d '{"query":"title:matrix","limit":3}'
+```
+
+別のターミナルで、MCPサーバーは同じgRPCエンドポイントへ標準入出力（stdio）経由でプロキシします:
+
+```bash
+./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+Claude Codeへ登録する場合:
+
+```bash
+claude mcp add laurus-movies -- ./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+`poster_vec` を使うには `embeddings-multimodal` フィーチャー付きでビルドしたバイナリが必要です
+（[使い方](#使い方)の手順どおりであれば既に満たされています）。これが無い場合、サーバー自体は
+正常に起動しますが、このインデックスへのベクトル検索クエリはリクエスト時にエラーになります。
+
 ## ファイル構成
 
 ```text

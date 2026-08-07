@@ -253,6 +253,40 @@ Or start an interactive session:
 ./target/release/laurus --index-dir examples/aozora/index repl
 ```
 
+## gRPC server and MCP server
+
+Instead of the CLI, you can serve this index over gRPC (with an optional HTTP gateway) and
+expose it to an MCP client (e.g. Claude Code).
+
+```bash
+# gRPC server (+ HTTP gateway on --http-port) over the already-built aozora index.
+# The index directory's own schema.toml (including the rendered IPADIC dict path) is
+# used automatically — no extra --schema flag exists or is needed.
+./target/release/laurus --index-dir examples/aozora/index serve --port 50051 --http-port 8080
+```
+
+```bash
+# HTTP gateway: plain REST/JSON, no gRPC client needed.
+curl http://localhost:8080/v1/index
+curl -X POST http://localhost:8080/v1/search -H "Content-Type: application/json" -d '{"query":"title:こころ","limit":3}'
+```
+
+In another terminal, the MCP server proxies to that same gRPC endpoint over stdio:
+
+```bash
+./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+To register it with Claude Code:
+
+```bash
+claude mcp add laurus-aozora -- ./target/release/laurus mcp --endpoint http://localhost:50051
+```
+
+`title_vec`/`body_vec` need the binary built with `embeddings-candle` (already the case if you
+followed [Usage](#usage) above) — without it, vector/hybrid queries against this index fail at
+request time even though the server starts fine.
+
 ## Troubleshooting
 
 - **"Failed to resolve analyzer for field 'title'"** — the IPADIC dictionary
