@@ -263,6 +263,13 @@ Lexical search behavior is controlled via `LexicalSearchOptions` on the `SearchR
 | `parallel` | false | Enable parallel search across segments |
 | `sort_by` | `Score` | Sort by relevance score, or by a field (`asc` / `desc`) |
 
+Field-sorted searches (`sort_by: Field { .. }`) always scan every candidate
+document — there is no early termination for field sorts, unlike the
+block-max-driven early termination available for score sorts. This
+guarantees the returned hits are the true top-K by field value rather than
+an early-terminated approximation, and it means `total_hits` reflects the
+true number of matches rather than a scan-truncated count.
+
 When `timeout_ms` is set, the time budget is enforced **cooperatively during**
 the search: the scan loops (including each segment of a multi-segment fanout)
 check the deadline periodically and abort as soon as it is exceeded, returning a
