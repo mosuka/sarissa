@@ -469,6 +469,13 @@ Execute a search query using the [Query DSL](../concepts/query_dsl.md).
 laurus search <QUERY> [--limit <N>] [--offset <N>]
 ```
 
+The query string is analyzed with each field's own configured analyzer —
+a field declared with a Japanese (Lindera) analyzer in `schema.toml`, for
+example, is analyzed the same way at query time as it was at index time.
+Referencing a field that is not declared in the schema is rejected with an
+error naming the field (helpful for catching typos); the reserved `_id`
+field is always queryable even though it does not appear in the schema.
+
 **Arguments:**
 
 | Argument / Flag | Required | Default | Description |

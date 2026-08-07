@@ -238,7 +238,7 @@ impl WasmJapaneseAnalyzer {
     /// * `matrix_mtx` - `matrix.mtx`
     /// * `char_def` - `char_def.bin`
     /// * `unk` - `unk.bin`
-    /// * `mode` - `"normal"` (default), `"search"`, or `"decompose"`
+    /// * `mode` - `"normal"` (default) or `"decompose"`
     ///
     /// # Errors
     ///

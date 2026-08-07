@@ -54,8 +54,7 @@ use crate::error::{LaurusError, Result};
 /// # Segmentation Modes
 ///
 /// - `"normal"`: Standard segmentation
-/// - `"search"`: Optimized for search (generates more tokens)
-/// - `"decompose"`: Decomposes compound words
+/// - `"decompose"`: Decomposes compound words (generates more tokens)
 ///
 /// # Examples
 ///
@@ -82,7 +81,7 @@ impl LinderaTokenizer {
     ///
     /// # Arguments
     ///
-    /// * `mode_str` - Segmentation mode: "normal", "search", or "decompose"
+    /// * `mode_str` - Segmentation mode: "normal" or "decompose"
     /// * `dict_uri` - Lindera dictionary URI. In production, supply a
     ///   filesystem path to a dictionary directory (e.g.,
     ///   `"/var/lib/lindera/ipadic"`). `embedded://*` URIs only resolve
@@ -147,8 +146,7 @@ impl LinderaTokenizer {
     ///
     /// # Arguments
     ///
-    /// * `mode_str` - Segmentation mode: `"normal"`, `"search"`, or
-    ///   `"decompose"`.
+    /// * `mode_str` - Segmentation mode: `"normal"` or `"decompose"`.
     /// * `metadata` - Contents of `metadata.json`.
     /// * `dict_da` - Contents of `dict.da` (Double-Array Trie).
     /// * `dict_vals` - Contents of `dict.vals` (word value data).

@@ -126,8 +126,12 @@ pub fn print_search_results(results: &[SearchResult]) {
                     continue;
                 }
                 let formatted = format_data_value(value);
-                let display = if formatted.len() > 80 {
-                    format!("{}...", &formatted[..80])
+                // Truncate by character count, not byte count: slicing
+                // raw bytes panicked on any multi-byte (e.g. Japanese)
+                // field value whose 80th byte fell inside a character.
+                let display = if formatted.chars().count() > 80 {
+                    let head: String = formatted.chars().take(80).collect();
+                    format!("{head}...")
                 } else {
                     formatted
                 };

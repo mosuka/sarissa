@@ -15,8 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use laurus::lexical::query::parser::LexicalQueryParser;
-use laurus::{Document, Engine, FieldOption, LexicalSearchQuery, Schema, SearchRequestBuilder};
+use laurus::{Document, Engine, FieldOption, Schema, SearchRequestBuilder};
 use rustyline::DefaultEditor;
 
 use crate::commands::create;
@@ -111,12 +110,8 @@ pub async fn run(index_dir: &Path, format: OutputFormat) -> Result<()> {
                     eprintln!("{NO_INDEX_MSG}");
                     continue;
                 };
-                let Some(ref sch) = schema else {
-                    eprintln!("{NO_INDEX_MSG}");
-                    continue;
-                };
                 let query_str = parts[1..].join(" ");
-                handle_search(eng, sch, &query_str, format).await
+                handle_search(eng, &query_str, format).await
             }
             "add" => {
                 if parts.len() < 2 {
@@ -217,7 +212,7 @@ fn print_help() {
 Available commands:
   create index [schema_path]   Create a new index (interactive wizard if no path given)
   create schema <output_path>  Interactive schema generation wizard
-  search <query>               Search the index
+  search <query>               Search the index (lexical / vector / hybrid DSL)
   add field <name> <json>      Add a field to the schema
   add doc <id> <json>          Add a document (append, allows multiple chunks per ID)
   put doc <id> <json>          Put (upsert) a document (replaces existing with same ID)
@@ -290,25 +285,30 @@ async fn handle_create(
     }
 }
 
-async fn handle_search(
-    engine: &Engine,
-    schema: &Schema,
-    query_str: &str,
-    format: OutputFormat,
-) -> Result<()> {
-    let mut parser =
-        LexicalQueryParser::with_standard_analyzer().context("Failed to create query parser")?;
-    if !schema.default_fields.is_empty() {
-        parser = parser.with_default_fields(schema.default_fields.clone());
-    }
+/// Result limit used by the REPL's `search` command.
+///
+/// The REPL takes no flags, so this is fixed. Use the one-shot
+/// `laurus search --limit N` for a different page size.
+const REPL_SEARCH_LIMIT: usize = 10;
 
-    let query = parser.parse(query_str)?;
+/// Run a search and print the results.
+///
+/// The query string is handed to the engine as DSL so it is parsed with
+/// the index's own `PerFieldAnalyzer` (a Japanese field declared in
+/// `schema.toml` is analyzed with its Lindera analyzer, not with the
+/// English `StandardAnalyzer`). As a side effect the REPL now accepts the
+/// full unified DSL, including vector and hybrid clauses, which the
+/// previous lexical-only path rejected.
+async fn handle_search(engine: &Engine, query_str: &str, format: OutputFormat) -> Result<()> {
     let request = SearchRequestBuilder::new()
-        .lexical_query(LexicalSearchQuery::Obj(query))
-        .limit(10)
+        .query_dsl(query_str)
+        .limit(REPL_SEARCH_LIMIT)
         .build();
 
-    let results = engine.search(request).await?;
+    let results = engine
+        .search(request)
+        .await
+        .context("Failed to execute search")?;
     output::print_search_results(&results, format);
     Ok(())
 }
@@ -443,5 +443,52 @@ async fn handle_delete(
             eprintln!("Unknown resource: '{resource}'. Use field or docs.");
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Same dictionary-free bigram fixture as `commands::search::tests` —
+    /// a stand-in for a morphological analyzer so a bare query term
+    /// analyzes into several tokens without requiring a Lindera
+    /// dictionary.
+    const BIGRAM_SCHEMA: &str = r#"
+default_fields = ["body"]
+
+[fields.body.Text]
+indexed = true
+stored = true
+analyzer = "ja_bigram"
+
+[analyzers.ja_bigram]
+tokenizer = { type = "ngram", min_gram = 2, max_gram = 2 }
+"#;
+
+    /// `handle_search` used to build a `StandardAnalyzer`-only
+    /// `LexicalQueryParser` regardless of the schema, so a query against a
+    /// custom-analyzer field either matched nothing or (for CJK text)
+    /// errored out. It must now succeed and print without panicking.
+    #[tokio::test]
+    async fn repl_search_uses_the_schema_analyzer() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("schema.toml"), BIGRAM_SCHEMA).unwrap();
+
+        let engine = context::open_index(dir.path()).await.unwrap();
+        engine
+            .put_document(
+                "doc1",
+                Document::builder()
+                    .add_field("body", "吾輩は猫である")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        engine.commit().await.unwrap();
+
+        // 2+ characters: the bigram analyzer needs at least min_gram (2).
+        let result = handle_search(&engine, "吾輩は", OutputFormat::Json).await;
+        assert!(result.is_ok(), "{result:?}");
     }
 }

@@ -220,12 +220,22 @@ impl Highlighter {
         field_name: &str,
         text: &str,
     ) -> Result<FieldHighlight> {
-        // Limit text length
-        let text = if text.len() > self.config.max_analyzed_chars {
-            &text[..self.config.max_analyzed_chars]
+        // Limit text length.
+        //
+        // The config is named `max_analyzed_chars` but the previous code
+        // compared and sliced `text.len()` — bytes — so a Japanese field
+        // was cut ~3x earlier than configured and, worse, `&text[..n]`
+        // panicked whenever `n` fell inside a character.
+        //
+        // A byte length never undershoots the character count, so
+        // `text.len() <= max_analyzed_chars` already proves no truncation
+        // is needed. That keeps the common path O(1).
+        let text: std::borrow::Cow<'_, str> = if text.len() > self.config.max_analyzed_chars {
+            std::borrow::Cow::Owned(text.chars().take(self.config.max_analyzed_chars).collect())
         } else {
-            text
+            std::borrow::Cow::Borrowed(text)
         };
+        let text = text.as_ref();
 
         // Extract terms from query
         let highlight_terms = self.extract_query_terms(query)?;
@@ -423,19 +433,17 @@ impl Highlighter {
         let fragment_groups = self.group_spans_into_fragments(text, spans);
 
         for (group_spans, fragment_range) in fragment_groups {
-            let fragment_text = self.apply_highlighting(
-                &text[fragment_range.clone()],
-                &group_spans,
-                fragment_range.start,
-            )?;
+            // Defensive snap: span ends are derived from *filtered* token
+            // text lengths (`start_offset + token.text.len()`), which can
+            // diverge from the source span when a filter rewrites a token
+            // (NFKC, stemming, ...). Snapping keeps the slice total even
+            // when an upstream offset is off.
+            let start = floor_boundary(text, fragment_range.start);
+            let end = ceil_boundary(text, fragment_range.end).max(start);
+            let fragment_text = self.apply_highlighting(&text[start..end], &group_spans, start)?;
             let score = group_spans.iter().map(|s| s.score).sum::<f32>() / group_spans.len() as f32;
 
-            fragments.push(HighlightFragment::new(
-                fragment_text,
-                fragment_range.start,
-                fragment_range.end,
-                score,
-            ));
+            fragments.push(HighlightFragment::new(fragment_text, start, end, score));
         }
 
         // Sort fragments by score (highest first)
@@ -505,24 +513,38 @@ impl Highlighter {
         groups
     }
 
-    /// Find word boundary near a position.
+    /// Find a word boundary near byte offset `pos`.
+    ///
+    /// `pos` is a **byte** offset, and so is the return value: the caller
+    /// (`group_spans_into_fragments`) feeds the result straight into
+    /// `&text[fragment_range]`. The previous implementation collected
+    /// `text.chars()` into a `Vec<char>` and indexed it with `pos`,
+    /// conflating bytes with characters — for any non-ASCII text this
+    /// returned a nonsense offset and could slice mid-character.
     fn find_word_boundary(&self, text: &str, pos: usize, forward: bool) -> usize {
-        let chars: Vec<char> = text.chars().collect();
-        let mut current_pos = pos.min(chars.len());
-
         if forward {
-            // Find next word boundary
-            while current_pos < chars.len() && chars[current_pos].is_alphanumeric() {
-                current_pos += 1;
+            let mut pos = ceil_boundary(text, pos);
+            while pos < text.len() {
+                // `pos` is a char boundary by construction, so the slice
+                // always yields at least one character.
+                let c = text[pos..].chars().next().expect("pos < len");
+                if !c.is_alphanumeric() {
+                    break;
+                }
+                pos += c.len_utf8();
             }
+            pos
         } else {
-            // Find previous word boundary
-            while current_pos > 0 && chars[current_pos - 1].is_alphanumeric() {
-                current_pos -= 1;
+            let mut pos = floor_boundary(text, pos);
+            while pos > 0 {
+                let c = text[..pos].chars().next_back().expect("pos > 0");
+                if !c.is_alphanumeric() {
+                    break;
+                }
+                pos -= c.len_utf8();
             }
+            pos
         }
-
-        current_pos
     }
 
     /// Apply highlighting markup to text.
@@ -541,15 +563,23 @@ impl Highlighter {
 
         for span in spans {
             if span.highlight {
+                // Defensive snap: `span.range` came through `create_fragments`
+                // relative to a fragment window whose own bounds were
+                // already snapped, but token-derived offsets can still
+                // misalign after a char-changing filter. Snapping here
+                // keeps every slice below total.
+                let start = floor_boundary(text, span.range.start).max(last_pos);
+                let end = ceil_boundary(text, span.range.end).max(start);
+
                 // Add text before the highlight
-                result.push_str(&text[last_pos..span.range.start]);
+                result.push_str(&text[last_pos..start]);
 
                 // Add highlighted text
                 result.push_str(&self.config.opening_tag());
-                result.push_str(&text[span.range.clone()]);
+                result.push_str(&text[start..end]);
                 result.push_str(&self.config.closing_tag());
 
-                last_pos = span.range.end;
+                last_pos = end;
             }
         }
 
@@ -678,50 +708,101 @@ impl SimpleHighlighter {
     }
 
     /// Create a snippet of text around the first occurrence of any term.
+    ///
+    /// `max_length` counts **characters**. The previous implementation
+    /// sliced raw bytes (`&text[..max_length]`, `&text[start..end]`),
+    /// which panicked on any Japanese input.
     pub fn create_snippet(&self, text: &str, terms: &[&str], max_length: usize) -> String {
+        /// Take at most `n` characters from the head of `s`.
+        fn head(s: &str, n: usize) -> String {
+            s.chars().take(n).collect()
+        }
+
+        let total_chars = text.chars().count();
+
         if terms.is_empty() || text.is_empty() {
-            return if text.len() <= max_length {
+            return if total_chars <= max_length {
                 text.to_string()
             } else {
-                format!("{}...", &text[..max_length])
+                format!("{}...", head(text, max_length))
             };
         }
 
-        // Find the first occurrence of any term
-        let mut first_match_pos = None;
+        // Find the first occurrence of any term, as a character index.
+        //
+        // `find` reports a byte offset into the lower-cased copy; convert
+        // it to a character index before doing any arithmetic. Case
+        // folding can change character counts for a handful of code
+        // points, so the result is clamped rather than trusted — the
+        // char-iterator slicing below is total for any value anyway.
+        let lowered = text.to_lowercase();
+        let mut first_match_pos: Option<usize> = None;
         for term in terms {
-            if let Some(pos) = text.to_lowercase().find(&term.to_lowercase())
-                && (first_match_pos.is_none() || pos < first_match_pos.unwrap())
-            {
-                first_match_pos = Some(pos);
+            if let Some(byte_pos) = lowered.find(&term.to_lowercase()) {
+                let char_pos = lowered[..byte_pos].chars().count().min(total_chars);
+                if first_match_pos.is_none_or(|p| char_pos < p) {
+                    first_match_pos = Some(char_pos);
+                }
             }
         }
 
-        if let Some(match_pos) = first_match_pos {
-            // Create snippet around the match
-            let start = match_pos.saturating_sub(max_length / 3);
-            let end = (match_pos + max_length * 2 / 3).min(text.len());
-
-            let mut snippet = text[start..end].to_string();
-
-            // Add ellipsis if we truncated
-            if start > 0 {
-                snippet = format!("...{snippet}");
-            }
-            if end < text.len() {
-                snippet = format!("{snippet}...");
-            }
-
-            snippet
-        } else {
+        let Some(match_pos) = first_match_pos else {
             // No matches found, return beginning of text
-            if text.len() <= max_length {
+            return if total_chars <= max_length {
                 text.to_string()
             } else {
-                format!("{}...", &text[..max_length])
-            }
+                format!("{}...", head(text, max_length))
+            };
+        };
+
+        // Create snippet around the match
+        let start = match_pos.saturating_sub(max_length / 3);
+        let end = (match_pos + max_length * 2 / 3).min(total_chars);
+
+        let mut snippet: String = text
+            .chars()
+            .skip(start)
+            .take(end.saturating_sub(start))
+            .collect();
+
+        // Add ellipsis if we truncated
+        if start > 0 {
+            snippet = format!("...{snippet}");
         }
+        if end < total_chars {
+            snippet = format!("{snippet}...");
+        }
+
+        snippet
     }
+}
+
+/// Snap `pos` down to the nearest UTF-8 char boundary at or below it,
+/// clamped to `text.len()`.
+///
+/// Highlight spans are byte offsets produced by arithmetic (fragment
+/// windows, span merges, analyzer token lengths). Any of those can land
+/// mid-character, which makes the subsequent `&text[a..b]` panic. Snapping
+/// makes every slice in this module total.
+#[inline]
+fn floor_boundary(text: &str, pos: usize) -> usize {
+    let mut pos = pos.min(text.len());
+    while pos > 0 && !text.is_char_boundary(pos) {
+        pos -= 1;
+    }
+    pos
+}
+
+/// Snap `pos` up to the nearest UTF-8 char boundary at or above it,
+/// clamped to `text.len()`.
+#[inline]
+fn ceil_boundary(text: &str, pos: usize) -> usize {
+    let len = text.len();
+    let mut pos = pos.min(len);
+    while pos < len && !text.is_char_boundary(pos) {
+        pos += 1;
+    }
+    pos
 }
 
 /// Return `true` if `s` contains any upper-case character.
@@ -816,6 +897,48 @@ mod tests {
         assert!(snippet.contains("test"));
     }
 
+    /// `create_snippet` used to slice `&text[..max_length]` and
+    /// `&text[start..end]` as raw byte ranges, which panicked for any
+    /// Japanese text whose cut point fell inside a character.
+    #[test]
+    fn create_snippet_does_not_panic_on_japanese_text() {
+        let config = HighlightConfig::default();
+        let highlighter = SimpleHighlighter::new(config);
+        let text = "吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。".repeat(3);
+
+        let with_match = highlighter.create_snippet(&text, &["猫"], 20);
+        assert!(with_match.contains('猫'));
+
+        let without_match = highlighter.create_snippet(&text, &["犬"], 20);
+        assert!(!without_match.is_empty());
+    }
+
+    /// `max_length` counts characters: truncating 100 Japanese characters
+    /// to 30 must yield exactly 30 characters (plus the `...` suffix),
+    /// not an arbitrary byte-length cut.
+    #[test]
+    fn create_snippet_truncates_by_characters() {
+        let config = HighlightConfig::default();
+        let highlighter = SimpleHighlighter::new(config);
+        let text = "あ".repeat(100);
+
+        let snippet = highlighter.create_snippet(&text, &[], 30);
+        assert!(snippet.ends_with("..."));
+        assert_eq!(snippet.chars().count(), 33); // 30 chars + "..."
+    }
+
+    /// No-match path (terms given but none found) must also truncate on
+    /// character boundaries.
+    #[test]
+    fn create_snippet_without_matches_truncates_japanese_head() {
+        let config = HighlightConfig::default();
+        let highlighter = SimpleHighlighter::new(config);
+        let text = "吾輩は猫である。".repeat(20);
+
+        let snippet = highlighter.create_snippet(&text, &["犬"], 30);
+        assert!(snippet.ends_with("..."));
+    }
+
     #[test]
     fn test_highlighter_extract_terms() {
         let config = HighlightConfig::default();
@@ -892,5 +1015,72 @@ mod tests {
         // Find word boundary after position 7
         let boundary = highlighter.find_word_boundary(text, 7, true);
         assert_eq!(boundary, 9); // End of "quick"
+    }
+
+    /// `find_word_boundary` used to collect `text.chars()` into a
+    /// `Vec<char>` and index it with a **byte** offset, conflating bytes
+    /// and characters. For Japanese text the returned offset was
+    /// nonsensical and often not even a valid char boundary.
+    #[test]
+    fn find_word_boundary_returns_char_boundaries_for_japanese() {
+        let config = HighlightConfig::default();
+        let highlighter = Highlighter::new(config);
+        let text = "吾輩は猫である。名前はまだ無い。";
+
+        for pos in 0..=text.len() {
+            let back = highlighter.find_word_boundary(text, pos, false);
+            let fwd = highlighter.find_word_boundary(text, pos, true);
+            assert!(
+                text.is_char_boundary(back),
+                "backward boundary {back} from pos {pos} is not a char boundary"
+            );
+            assert!(
+                text.is_char_boundary(fwd),
+                "forward boundary {fwd} from pos {pos} is not a char boundary"
+            );
+        }
+    }
+
+    /// A mid-character byte position (not just an out-of-range one) must
+    /// not panic and must snap to a real char boundary.
+    #[test]
+    fn find_word_boundary_snaps_a_mid_character_position() {
+        let config = HighlightConfig::default();
+        let highlighter = Highlighter::new(config);
+        let text = "猫";
+        // Byte 1 and 2 are both mid-character for a 3-byte kanji.
+        let back = highlighter.find_word_boundary(text, 1, false);
+        let fwd = highlighter.find_word_boundary(text, 2, true);
+        assert!(text.is_char_boundary(back));
+        assert!(text.is_char_boundary(fwd));
+    }
+
+    /// End-to-end: highlighting a Japanese field must not panic. This is
+    /// the combination of `find_highlight_spans`, `group_spans_into_fragments`
+    /// (which calls `find_word_boundary`), and `apply_highlighting`.
+    #[test]
+    fn highlight_japanese_text_end_to_end_does_not_panic() {
+        let config = HighlightConfig::default();
+        let highlighter = Highlighter::new(config);
+        let query = TermQuery::new("body", "search");
+        let text = "吾輩は猫である。".repeat(50);
+        let result = highlighter.highlight(&query, "body", &text);
+        assert!(result.is_ok(), "highlighting Japanese text must not panic");
+    }
+
+    /// `max_analyzed_chars` is named for characters; a Japanese text
+    /// longer than the configured limit (in characters, not bytes) must
+    /// be truncated without panicking.
+    #[test]
+    fn highlight_does_not_panic_when_max_analyzed_chars_cuts_a_multibyte_char() {
+        let config = HighlightConfig {
+            max_analyzed_chars: 10,
+            ..HighlightConfig::new()
+        };
+        let highlighter = Highlighter::new(config);
+        let query = TermQuery::new("body", "猫");
+        let text = "吾輩は猫である。名前はまだ無い。".repeat(3);
+        let result = highlighter.highlight(&query, "body", &text);
+        assert!(result.is_ok(), "must not panic when truncating mid-field");
     }
 }

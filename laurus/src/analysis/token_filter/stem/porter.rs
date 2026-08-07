@@ -48,19 +48,26 @@ impl PorterStemmer {
         }
     }
 
-    /// Check if a character is a vowel.
+    /// Check whether the byte at `pos` is an ASCII vowel.
+    ///
+    /// `pos` is a **byte** offset: every caller derives it from
+    /// `word.len()`, which is a byte length. The previous implementation
+    /// mixed the two — it guarded on `pos >= word.len()` (bytes) then
+    /// indexed a `Vec<char>` with `pos` (chars), so any word holding a
+    /// multi-byte character panicked with an out-of-bounds index
+    /// (e.g. `stem("naïve")`). The Porter algorithm is English-only, so
+    /// treating every non-ASCII byte as a consonant is both faithful to
+    /// the algorithm and panic-free.
     #[allow(clippy::only_used_in_recursion)]
     fn is_vowel(&self, word: &str, pos: usize) -> bool {
-        if pos >= word.len() {
+        let bytes = word.as_bytes();
+        if pos >= bytes.len() {
             return false;
         }
 
-        let chars: Vec<char> = word.chars().collect();
-        let c = chars[pos].to_ascii_lowercase();
-
-        match c {
-            'a' | 'e' | 'i' | 'o' | 'u' => true,
-            'y' if pos > 0 => !self.is_vowel(word, pos - 1),
+        match bytes[pos].to_ascii_lowercase() {
+            b'a' | b'e' | b'i' | b'o' | b'u' => true,
+            b'y' if pos > 0 => !self.is_vowel(word, pos - 1),
             _ => false,
         }
     }
@@ -98,12 +105,26 @@ impl PorterStemmer {
         m
     }
 
-    /// Check if word ends with a specific suffix.
+    /// Check if word ends with `suffix` (ASCII, case-insensitive).
+    ///
+    /// Compares raw bytes: `&word[word.len() - suffix.len()..]` panics
+    /// when the split point lands inside a multi-byte character. Every
+    /// Porter suffix is ASCII, so a byte-tail comparison is exactly
+    /// equivalent for ASCII input and simply yields `false` for a
+    /// multi-byte tail — every suffix passed to `replace_suffix` below is
+    /// ASCII, so once this returns true, `word.len() - suffix.len()` is
+    /// guaranteed to land on a char boundary and the slice there is safe.
     fn ends_with(&self, word: &str, suffix: &str) -> bool {
-        word.len() >= suffix.len() && word[word.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+        let w = word.as_bytes();
+        let s = suffix.as_bytes();
+        w.len() >= s.len() && w[w.len() - s.len()..].eq_ignore_ascii_case(s)
     }
 
     /// Replace suffix if conditions are met.
+    ///
+    /// Every suffix this module strips is ASCII (see `ends_with`'s doc),
+    /// so `&word[..word.len() - old_suffix.len()]` below always lands on
+    /// a char boundary once `ends_with` has matched.
     fn replace_suffix(
         &self,
         word: &str,
@@ -191,15 +212,24 @@ impl PorterStemmer {
         false
     }
 
-    /// Check if word ends with double consonant.
+    /// Check if word ends with a doubled ASCII consonant.
+    ///
+    /// The ASCII check is load-bearing, not cosmetic: callers strip the
+    /// final **byte** when this returns true (see `step1b`), which is
+    /// only a valid char boundary for a single-byte character. Without
+    /// it, two identical UTF-8 continuation bytes (e.g. the tail of a
+    /// 4-byte character) would satisfy a naive byte-equality test and
+    /// make the caller slice mid-character.
     fn ends_with_double_consonant(&self, word: &str) -> bool {
-        let len = word.len();
+        let bytes = word.as_bytes();
+        let len = bytes.len();
         if len < 2 {
             return false;
         }
 
-        let chars: Vec<char> = word.chars().collect();
-        chars[len - 1] == chars[len - 2] && !self.is_vowel(word, len - 1)
+        bytes[len - 1].is_ascii_alphabetic()
+            && bytes[len - 1] == bytes[len - 2]
+            && !self.is_vowel(word, len - 1)
     }
 
     /// Check if word ends with consonant-vowel-consonant pattern.
@@ -377,5 +407,52 @@ mod tests {
         assert!(!stemmer.is_vowel(word, 4)); // b
         assert!(!stemmer.is_vowel(word, 5)); // l
         assert!(stemmer.is_vowel(word, 6)); // e
+    }
+
+    /// `is_vowel` used to guard on a byte length but index a `Vec<char>`
+    /// with the same value, so any word holding a multi-byte character
+    /// panicked with an out-of-bounds index. `naïve` (`ï` is 2 bytes)
+    /// reaches `is_vowel(word, 4)` via `step5`'s "e" trim — this used to
+    /// panic.
+    #[test]
+    fn stem_does_not_panic_on_latin_accented_words() {
+        let stemmer = PorterStemmer::new();
+        // No panic is the assertion; the exact stem isn't the point since
+        // Porter is English-only.
+        let _ = stemmer.stem("naïve");
+        let _ = stemmer.stem("café");
+        let _ = stemmer.stem("Zürich");
+    }
+
+    /// Japanese input holds no ASCII vowels at all, so every byte is
+    /// treated as a consonant. The word is returned unchanged (measure
+    /// stays 0 / no known suffix matches) rather than panicking.
+    #[test]
+    fn stem_does_not_panic_on_japanese_input() {
+        let stemmer = PorterStemmer::new();
+        let _ = stemmer.stem("日本語");
+        let _ = stemmer.stem("形態素解析");
+    }
+
+    /// `ends_with_double_consonant` used to compare `chars()` for
+    /// equality without an ASCII guard: two identical UTF-8 continuation
+    /// bytes from a 4-byte character (e.g. an astral-plane codepoint or
+    /// emoji) could satisfy that check and make `step1b` slice off a
+    /// single byte, landing mid-character.
+    #[test]
+    fn stem_does_not_panic_on_astral_plane_input() {
+        let stemmer = PorterStemmer::new();
+        let _ = stemmer.stem("a𠀀ing");
+        let _ = stemmer.stem("🍎🍎🍎");
+    }
+
+    /// `ends_with` now compares raw ASCII bytes; a multi-byte-suffixed
+    /// word should simply fail to match rather than panic, and true
+    /// ASCII matches must still work.
+    #[test]
+    fn ends_with_compares_ascii_suffixes_by_bytes() {
+        let stemmer = PorterStemmer::new();
+        assert!(stemmer.ends_with("日本語s", "s"));
+        assert!(!stemmer.ends_with("日本語", "s"));
     }
 }

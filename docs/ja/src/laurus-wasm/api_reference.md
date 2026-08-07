@@ -531,7 +531,7 @@ IPADIC のバイト列から analyzer を構築する static ファクトリ。
 | `matrixMtx` | `matrix.mtx` |
 | `charDef` | `char_def.bin` |
 | `unk` | `unk.bin` |
-| `mode` | `"normal"`（デフォルト）/ `"search"` / `"decompose"` |
+| `mode` | `"normal"`（デフォルト）/ `"decompose"` |
 
 いずれかのコンポーネントの deserialization に失敗した場合、または
 mode 文字列が不正な場合は throw します。

@@ -31,7 +31,7 @@ Commands follow the same `<operation> <resource>` ordering as the CLI.
 | :--- | :--- |
 | `create index [schema_path]` | Create a new index (interactive wizard if no path given) |
 | `create schema <output_path>` | Interactive schema generation wizard |
-| `search <query>` | Search the index |
+| `search <query>` | Search the index (lexical / vector / hybrid DSL) |
 | `add field <name> <json>` | Add a field to the schema |
 | `add doc <id> <json>` | Add a document (append, allows multiple chunks per ID) |
 | `put doc <id> <json>` | Put (upsert) a document (replaces existing with same ID) |
@@ -67,6 +67,12 @@ laurus> search body:rust
 │ doc1 │ 0.8532 │ body: Rust is a systems..., title… │
 ╰──────┴────────┴────────────────────────────────────╯
 ```
+
+`search` accepts the full [Query DSL](../concepts/query_dsl.md) — lexical,
+vector, and hybrid clauses — and analyzes the query with each field's own
+configured analyzer, the same as the one-shot `laurus search` command.
+Results are always limited to 10; use `laurus search --limit N` outside the
+REPL for a different page size.
 
 ### Managing Fields
 

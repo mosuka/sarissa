@@ -75,7 +75,7 @@ impl JapaneseAnalyzer {
     ///
     /// # Arguments
     ///
-    /// * `mode_str` - Lindera segmentation mode: `"normal"`, `"search"`, or
+    /// * `mode_str` - Lindera segmentation mode: `"normal"` or
     ///   `"decompose"`.
     /// * `dict_uri` - Lindera dictionary URI. In production builds, supply
     ///   a filesystem path to a Lindera dictionary directory (typically
@@ -124,8 +124,8 @@ impl JapaneseAnalyzer {
     ///
     /// # Arguments
     ///
-    /// * `mode_str` - Lindera segmentation mode: `"normal"`, `"search"`,
-    ///   or `"decompose"`.
+    /// * `mode_str` - Lindera segmentation mode: `"normal"` or
+    ///   `"decompose"`.
     /// * `metadata` / `dict_da` / `dict_vals` / `dict_words_idx` /
     ///   `dict_words` / `matrix_mtx` / `char_def` / `unk` - the eight
     ///   files that make up a built Lindera dictionary directory.

@@ -358,7 +358,10 @@ fn prompt_text_option() -> Result<FieldOption> {
         let dict: String = dialoguer::Input::new()
             .with_prompt("Lindera dictionary path (e.g. /var/lib/lindera/ipadic)")
             .interact_text()?;
-        let mode_choices = ["normal", "search", "decompose"];
+        // Lindera 3.x's `Mode::from_str` only accepts "normal"/"decompose"
+        // (there is no "search" mode); offering it here would let the
+        // wizard write a schema.toml that fails at index-open time.
+        let mode_choices = ["normal", "decompose"];
         let mode_idx = dialoguer::Select::new()
             .with_prompt("Lindera segmentation mode")
             .items(mode_choices)

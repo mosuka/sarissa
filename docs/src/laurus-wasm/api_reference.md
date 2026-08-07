@@ -541,7 +541,7 @@ Arguments (all `Uint8Array` except `mode`):
 | `matrixMtx` | `matrix.mtx` |
 | `charDef` | `char_def.bin` |
 | `unk` | `unk.bin` |
-| `mode` | `"normal"` (default), `"search"`, or `"decompose"` |
+| `mode` | `"normal"` (default) or `"decompose"` |
 
 Throws if any component fails to deserialize or the mode string is
 invalid.

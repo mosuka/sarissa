@@ -269,6 +269,56 @@ async fn query_dsl_rejects_unknown_field() -> Result<()> {
     Ok(())
 }
 
+/// `_id` is a reserved field injected by the engine at ingest time — it is
+/// never present in `schema.fields`, so `known_fields` must special-case
+/// it. Without that, `_id:doc-001` (previously handled by the CLI's own
+/// `StandardAnalyzer`-only parser, which never validated field names) is
+/// rejected as an "unknown field" once the CLI moves onto this DSL path.
+#[tokio::test(flavor = "multi_thread")]
+async fn query_dsl_accepts_the_reserved_id_field() -> Result<()> {
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let schema = Schema::builder()
+        .add_field("title", FieldOption::Text(TextOption::default()))
+        .build();
+    let engine = Engine::new(storage, schema).await?;
+
+    let doc = Document::builder().add_field("title", "hello").build();
+    engine.put_document("doc-001", doc).await?;
+    engine.commit().await?;
+
+    let parser = engine.unified_query_parser()?;
+    let request = parser.parse("_id:doc-001").await?;
+    let results = engine.search(request).await?;
+
+    assert_eq!(
+        results.len(),
+        1,
+        "_id must be queryable without being rejected as an unknown field"
+    );
+
+    Ok(())
+}
+
+/// The `_id` carve-out must not open the door to other underscore-prefixed
+/// field names; only the exact reserved name is allowed.
+#[tokio::test(flavor = "multi_thread")]
+async fn query_dsl_still_rejects_other_underscore_fields() -> Result<()> {
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let schema = Schema::builder()
+        .add_field("title", FieldOption::Text(TextOption::default()))
+        .build();
+    let engine = Engine::new(storage, schema).await?;
+
+    let parser = engine.unified_query_parser()?;
+    let err = match parser.parse("_secret:x").await {
+        Ok(_) => panic!("undeclared underscore field must still be rejected"),
+        Err(e) => e,
+    };
+    assert!(err.to_string().contains("_secret"), "{err}");
+
+    Ok(())
+}
+
 /// User-supplied `_`-prefixed field names are rejected under any policy.
 #[tokio::test(flavor = "multi_thread")]
 async fn reserved_prefix_rejected() -> Result<()> {

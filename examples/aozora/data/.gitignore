@@ -1,0 +1,4 @@
+# Ignore downloaded/generated data (work list CSV, cached zips, and the
+# generated JSONL dataset).
+*
+!.gitignore

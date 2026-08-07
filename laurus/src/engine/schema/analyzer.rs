@@ -56,8 +56,8 @@ pub enum AnalyzerSpec {
 pub enum BuiltinAnalyzerSpec {
     /// Japanese analyzer (Lindera + Japanese filters).
     Japanese {
-        /// Lindera segmentation mode: `"normal"`, `"search"`, or
-        /// `"decompose"`. Defaults to `"normal"` when omitted.
+        /// Lindera segmentation mode: `"normal"` or `"decompose"`.
+        /// Defaults to `"normal"` when omitted.
         #[serde(default = "default_lindera_mode")]
         mode: String,
         /// Filesystem path to the lindera dictionary directory
@@ -148,7 +148,7 @@ pub enum TokenizerConfig {
 
     /// Morphological tokenizer using Lindera.
     Lindera {
-        /// Tokenization mode: `"normal"`, `"search"`, or `"decompose"`.
+        /// Tokenization mode: `"normal"` or `"decompose"`.
         mode: String,
         /// Dictionary URI. In production builds, supply a filesystem path
         /// to a Lindera dictionary directory (e.g. `"/var/lib/lindera/ipadic"`).
@@ -382,9 +382,12 @@ mod tests {
 
     #[test]
     fn test_analyzer_spec_japanese_with_mode_and_user_dict() {
+        // "decompose" (not "search" — Lindera 3.x's `Mode::from_str` only
+        // accepts "normal"/"decompose"; this crate's doc comments used to
+        // claim "search" was valid too, which was a documentation bug).
         let json = r#"{
             "language": "japanese",
-            "mode": "search",
+            "mode": "decompose",
             "dict": "/var/lib/lindera/ipadic",
             "user_dict": "/etc/laurus/user.csv"
         }"#;
@@ -395,7 +398,7 @@ mod tests {
                 dict,
                 user_dict,
             }) => {
-                assert_eq!(mode, "search");
+                assert_eq!(mode, "decompose");
                 assert_eq!(dict, "/var/lib/lindera/ipadic");
                 assert_eq!(user_dict.as_deref(), Some("/etc/laurus/user.csv"));
             }

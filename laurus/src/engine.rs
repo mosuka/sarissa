@@ -1196,8 +1196,15 @@ impl Engine {
 
         // All declared field names (lexical + vector), used by the parser to
         // reject typo'd field references at parse time.
-        let known_fields: std::collections::HashSet<String> =
+        //
+        // `_id` is injected by the engine at ingest and indexed with a
+        // `KeywordAnalyzer` (see `split_schema`), but it is never present
+        // in `schema.fields` — users cannot declare it. Add it explicitly
+        // so that `_id:doc-001` keeps working instead of being rejected
+        // as an unknown field.
+        let mut known_fields: std::collections::HashSet<String> =
             schema.fields.keys().cloned().collect();
+        known_fields.insert(schema::RESERVED_ID_FIELD.to_string());
 
         let mut vector_parser = crate::vector::query::parser::VectorQueryParser::new(embedder);
         if !vector_fields.is_empty() {
