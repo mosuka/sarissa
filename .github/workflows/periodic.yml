@@ -480,3 +480,14 @@ jobs:
         run: |
           composer install
           php -d extension=../target/release/liblaurus_php.so vendor/bin/phpunit tests/LaurusTest.php
+
+  # ============================================================
+  # Cross-platform index interop (Issue #947)
+  # ------------------------------------------------------------
+  # Verifies that an index built on macOS(aarch64) can be searched
+  # and written to from Linux(x86_64) with matching results.
+  # ============================================================
+  index-interop:
+    name: Index Interop
+    needs: [test-laurus]
+    uses: ./.github/workflows/index-interop.yml

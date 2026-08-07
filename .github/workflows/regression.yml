@@ -32,6 +32,7 @@ jobs:
       wasm: ${{ steps.resolve.outputs.wasm }}
       ruby: ${{ steps.resolve.outputs.ruby }}
       php: ${{ steps.resolve.outputs.php }}
+      interop: ${{ steps.resolve.outputs.interop }}
     steps:
       - name: Run checkout
         uses: actions/checkout@v6
@@ -115,6 +116,15 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - '.github/workflows/regression.yml'
+            # interop: cross-platform index interop check (Issue #947)
+            interop:
+              - 'laurus/**'
+              - 'laurus-cli/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/interop/**'
+              - '.github/workflows/index-interop.yml'
+              - '.github/workflows/regression.yml'
 
       # For non-PR events (push / workflow_dispatch), filter outputs are empty.
       # Default to true so all jobs run.
@@ -131,6 +141,7 @@ jobs:
           WASM: ${{ steps.filter.outputs.wasm }}
           RUBY: ${{ steps.filter.outputs.ruby }}
           PHP: ${{ steps.filter.outputs.php }}
+          INTEROP: ${{ steps.filter.outputs.interop }}
         run: |
           echo "code=${CODE:-true}" >> "$GITHUB_OUTPUT"
           echo "laurus=${LAURUS:-true}" >> "$GITHUB_OUTPUT"
@@ -142,6 +153,7 @@ jobs:
           echo "wasm=${WASM:-true}" >> "$GITHUB_OUTPUT"
           echo "ruby=${RUBY:-true}" >> "$GITHUB_OUTPUT"
           echo "php=${PHP:-true}" >> "$GITHUB_OUTPUT"
+          echo "interop=${INTEROP:-true}" >> "$GITHUB_OUTPUT"
 
   # ============================================================
   # Format code with rustfmt
@@ -664,6 +676,18 @@ jobs:
           php -d extension=../target/release/liblaurus_php.so vendor/bin/phpunit tests/LaurusTest.php
 
   # ============================================================
+  # Cross-platform index interop (Issue #947)
+  # ------------------------------------------------------------
+  # Verifies that an index built on macOS(aarch64) can be searched
+  # and written to from Linux(x86_64) with matching results.
+  # ============================================================
+  index-interop:
+    name: Index Interop
+    needs: [changes, test-laurus]
+    if: ${{ !failure() && !cancelled() && needs.changes.outputs.interop == 'true' }}
+    uses: ./.github/workflows/index-interop.yml
+
+  # ============================================================
   # Gate: ensure all tests pass
   # ============================================================
   test-all:
@@ -680,6 +704,7 @@ jobs:
         test-wasm,
         test-ruby,
         test-php,
+        index-interop,
       ]
     runs-on: ubuntu-latest
     steps:

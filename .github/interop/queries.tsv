@@ -1,0 +1,10 @@
+lexical_term_rust	lexical	10	title:rust
+lexical_phrase_data_science	lexical	10	title:"data science"
+lexical_boolean_python_learning	lexical	10	title:python AND title:learning
+lexical_range_year	lexical	10	year:[2000 TO 2010]
+lexical_wildcard_roman	lexical	10	title:rom*
+lexical_ngram_sushi	lexical	10	title_ja:寿司
+vector_music	vector	4	summary:"classical music history and composers"
+vector_space	vector	4	summary:"space exploration and rockets"
+vector_ocean	vector	4	summary:"marine biology and ocean life"
+vector_baking_boosted	vector	4	summary:"French pastry baking techniques"^1.5
