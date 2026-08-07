@@ -31,10 +31,13 @@ const N: u64 = 50;
 const STEP: f32 = 0.01;
 /// First sealed segment of the (default, #882) segmented layout — the
 /// same LVS file format (and CRC footer semantics) as the monolithic file.
-const HNSW_FILE: &str = "segment_000000.hnsw";
+/// Lives under the "vec" field's own sub-namespace (Issue #948:
+/// `MultiFieldVectorIndex` gives every vector field its own
+/// `PrefixedStorage` directory rather than sharing the storage root).
+const HNSW_FILE: &str = "vec/segment_000000.hnsw";
 /// The segmented layout's commit pivot (#879): CRC-framed and
 /// atomically replaced, so corruption must fail the open loudly.
-const METADATA_FILE: &str = "segments.json";
+const METADATA_FILE: &str = "vec/segments.json";
 
 #[derive(Debug)]
 struct MockEmbedder {

@@ -34,7 +34,11 @@ use laurus::{LaurusError, Result};
 const DIM: usize = 16;
 const N: u64 = 100;
 const STEP: f32 = 0.01;
-const DELMAP_FILE: &str = "vector_index.delmap";
+/// Deletion bitmap for the "vec" field's sub-index (Issue #948:
+/// `MultiFieldVectorIndex` gives every vector field its own
+/// `PrefixedStorage` directory, and each field's sub-index is internally
+/// named `"index"`, not the field name).
+const DELMAP_FILE: &str = "vec/index.delmap";
 const THRESHOLD: f64 = 0.3;
 
 #[derive(Debug)]

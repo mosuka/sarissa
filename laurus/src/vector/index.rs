@@ -15,6 +15,7 @@ pub mod format;
 pub mod hnsw;
 pub mod io;
 pub mod ivf;
+pub mod multi_field;
 pub mod pq_codebook;
 pub mod pq_fastscan_avx2;
 #[cfg(feature = "pq-fastscan")]
@@ -206,6 +207,53 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     /// Returns an error if the triggered compaction fails.
     fn maybe_auto_compact(&self) -> Result<bool> {
         Ok(false)
+    }
+
+    /// Whether this index supports adding/removing vector fields after
+    /// construction (Issue [#948](https://github.com/mosuka/laurus/issues/948)).
+    ///
+    /// Defaults to `false`; only
+    /// [`MultiFieldVectorIndex`](crate::vector::index::multi_field::MultiFieldVectorIndex)
+    /// (one independent sub-index per field) can grow a genuinely new field
+    /// without disturbing the others. A monolithic single-field index
+    /// (Flat/HNSW/IVF `open_or_create`) has no field boundary to add to.
+    fn supports_dynamic_fields(&self) -> bool {
+        false
+    }
+
+    /// Add a new vector field to this index (Issue #948: dynamic schema
+    /// evolution).
+    ///
+    /// # Errors
+    ///
+    /// The default implementation always errors; callers must gate on
+    /// [`Self::supports_dynamic_fields`] first.
+    fn add_field(&self, _name: &str, _config: VectorIndexTypeConfig) -> Result<()> {
+        Err(LaurusError::InvalidOperation(
+            "this index type does not support adding fields dynamically".to_string(),
+        ))
+    }
+
+    /// Remove a vector field from this index's routing (Issue #948: dynamic
+    /// schema evolution). Does NOT delete the field's on-disk data --
+    /// mirrors [`crate::vector::store::VectorStore`]'s existing
+    /// "unregister only" contract for `delete_field`, so the data can be
+    /// recovered by re-adding the field with the same name.
+    ///
+    /// Defaults to `Ok(())` (a no-op): index types without field boundaries
+    /// have nothing to unregister.
+    fn remove_field(&self, _name: &str) -> Result<()> {
+        Ok(())
+    }
+
+    /// The configured vector dimension of every field, keyed by field name
+    /// (Issue #948: multi-field stats/routing need per-field dimensions
+    /// without paying for a full `reader()`/`stats()` round trip).
+    ///
+    /// Defaults to empty: index types without field boundaries report their
+    /// single dimension through [`Self::stats`] instead.
+    fn field_dimensions(&self) -> std::collections::BTreeMap<String, usize> {
+        std::collections::BTreeMap::new()
     }
 }
 

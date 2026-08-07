@@ -41,8 +41,11 @@ const DIM: usize = 16;
 const N: u64 = 120;
 const STEP: f32 = 0.008;
 /// The single-segment `HnswIndex` is always created under this name, so its
-/// deletion bitmap lives at `vector_index.delmap`.
-const DELMAP_FILE: &str = "vector_index.delmap";
+/// deletion bitmap lives at `vec/index.delmap` -- the "vec" field's own
+/// sub-namespace (Issue #948: `MultiFieldVectorIndex` gives every vector
+/// field its own `PrefixedStorage` directory, and each field's sub-index
+/// is internally named `"index"`, not the field name).
+const DELMAP_FILE: &str = "vec/index.delmap";
 
 #[derive(Debug)]
 struct MockEmbedder {
