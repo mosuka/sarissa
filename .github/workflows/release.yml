@@ -596,6 +596,17 @@ jobs:
       - name: Run checkout
         uses: actions/checkout@v6
 
+      - name: Compute release version string
+        id: version
+        shell: bash
+        run: |
+          # github.ref_name is the tag name on a tag push (e.g. "v0.10.0",
+          # never contains '/') but is the branch name on a workflow_dispatch
+          # run (e.g. "ci/musl-release-binaries"). A literal '/' breaks the
+          # tar/zip filenames below, since tar/Compress-Archive interpret it
+          # as a path separator. Sanitizing is a no-op for real tag builds.
+          echo "value=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
       - name: Free disk space
         if: runner.os == 'Linux'
         uses: ./.github/actions/free-disk-space
@@ -655,7 +666,7 @@ jobs:
         if: runner.os == 'Linux' || runner.os == 'macOS'
         run: |
           tar \
-            -czf "laurus-${{ github.ref_name }}-${{ matrix.platform.target }}.tar.gz" \
+            -czf "laurus-${{ steps.version.outputs.value }}-${{ matrix.platform.target }}.tar.gz" \
             -C "target/${{ matrix.platform.target }}/release" "${{ matrix.platform.binary }}"
 
       - name: Package binary (Windows)
@@ -664,13 +675,13 @@ jobs:
         run: |
           Compress-Archive `
             -Path "target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary }}" `
-            -DestinationPath "laurus-${{ github.ref_name }}-${{ matrix.platform.target }}.zip"
+            -DestinationPath "laurus-${{ steps.version.outputs.value }}-${{ matrix.platform.target }}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: laurus-${{ matrix.platform.target }}
-          path: laurus-${{ github.ref_name }}-${{ matrix.platform.target }}.${{ matrix.platform.archive }}
+          path: laurus-${{ steps.version.outputs.value }}-${{ matrix.platform.target }}.${{ matrix.platform.archive }}
 
   # ============================================================
   # Build Python source distribution
