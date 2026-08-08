@@ -136,14 +136,14 @@ schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}
 | 名前 | 型 | 必須 | 説明 |
 | :--- | :--- | :--- | :--- |
 | `id` | string | はい | 外部ドキュメント識別子 |
-| `document` | object | はい | JSON オブジェクトとしてのドキュメントフィールド |
+| `fields` | object | はい | JSON オブジェクトとしてのドキュメントフィールド |
 
 ### 例
 
 ```text
 Tool: put_document
 id: "doc-1"
-document: {"title": "Hello World", "body": "これはテストドキュメントです。"}
+fields: {"title": "Hello World", "body": "これはテストドキュメントです。"}
 ```
 
 結果: `Document 'doc-1' put (upserted). Call commit to persist changes.`
@@ -153,10 +153,10 @@ document: {"title": "Hello World", "body": "これはテストドキュメント
 ```text
 Tool: put_document
 id: "drone-1"
-document: {"title": "東京上空のドローン", "position": {"x": -3955182.0, "y": 3350553.0, "z": 3700276.0}}
+fields: {"title": "東京上空のドローン", "position": {"x": -3955182.0, "y": 3350553.0, "z": 3700276.0}}
 ```
 
-MCP サーバーは 3D ECEF 点を `x`、`y`、`z` キーを持つ JSON オブジェクト（メートル単位）として受け付けます。これは HTTP ゲートウェイの挙動とは異なり、HTTP ゲートウェイでは現在 JSON から Geo3d を推論しません。MCP では書き込み・読み出しともに完全対応しています。
+MCP サーバーは 3D ECEF 点を `x`、`y`、`z` キーを持つ JSON オブジェクト（メートル単位）として受け付けます。これは HTTP ゲートウェイや laurus-cli と同じ形式です（[HTTP Gateway](../laurus-server/http_gateway.md) の「JSON フィールド値の型推論」セクション参照）。
 
 ---
 
@@ -169,14 +169,14 @@ MCP サーバーは 3D ECEF 点を `x`、`y`、`z` キーを持つ JSON オブ�
 | 名前 | 型 | 必須 | 説明 |
 | :--- | :--- | :--- | :--- |
 | `id` | string | はい | 外部ドキュメント識別子 |
-| `document` | object | はい | JSON オブジェクトとしてのドキュメントフィールド |
+| `fields` | object | はい | JSON オブジェクトとしてのドキュメントフィールド |
 
 ### 例
 
 ```text
 Tool: add_document
 id: "doc-1"
-document: {"title": "Hello World - Part 2", "body": "これは続きです。"}
+fields: {"title": "Hello World - Part 2", "body": "これは続きです。"}
 ```
 
 結果: `Document 'doc-1' added as chunk. Call commit to persist changes.`
@@ -191,15 +191,15 @@ document: {"title": "Hello World - Part 2", "body": "これは続きです。"}
 
 | 名前 | 型 | 必須 | 説明 |
 | :--- | :--- | :--- | :--- |
-| `documents` | array | はい | `{"id": "...", "document": {...}}` エントリの配列。各 `document` は `put_document` と同じ形式 |
+| `documents` | array | はい | `{"id": "...", "fields": {...}}` エントリの配列。各エントリの `fields` は `put_document` と同じ形式 |
 
 ### 例
 
 ```text
 Tool: put_documents
 documents: [
-  {"id": "doc-1", "document": {"title": "Hello"}},
-  {"id": "doc-2", "document": {"title": "World"}}
+  {"id": "doc-1", "fields": {"title": "Hello"}},
+  {"id": "doc-2", "fields": {"title": "World"}}
 ]
 ```
 
@@ -222,8 +222,8 @@ documents: [
 ```text
 Tool: add_documents
 documents: [
-  {"id": "doc-1", "document": {"title": "Part 1"}},
-  {"id": "doc-1", "document": {"title": "Part 2"}}
+  {"id": "doc-1", "fields": {"title": "Part 1"}},
+  {"id": "doc-1", "fields": {"title": "Part 2"}}
 ]
 ```
 
@@ -247,7 +247,7 @@ documents: [
 {
   "id": "doc-1",
   "documents": [
-    { "title": "Hello World", "body": "これはテストドキュメントです。" }
+    { "fields": { "title": "Hello World", "body": "これはテストドキュメントです。" } }
   ]
 }
 ```
@@ -404,12 +404,12 @@ laurus 統一クエリ DSL を使用してドキュメントを検索します�
     {
       "id": "doc-1",
       "score": 3.14,
-      "document": { "title": "Hello World", "body": "..." }
+      "fields": { "title": "Hello World", "body": "..." }
     },
     {
       "id": "doc-2",
       "score": 1.57,
-      "document": { "title": "Hello Again", "body": "..." }
+      "fields": { "title": "Hello Again", "body": "..." }
     }
   ]
 }
@@ -442,13 +442,13 @@ laurus 統一クエリ DSL を使用してドキュメントを検索します�
     {
       "total": 1,
       "results": [
-        { "id": "doc-1", "score": 3.14, "document": { "title": "Hello World" } }
+        { "id": "doc-1", "score": 3.14, "fields": { "title": "Hello World" } }
       ]
     },
     {
       "total": 1,
       "results": [
-        { "id": "doc-2", "score": 2.71, "document": { "title": "Vector Search" } }
+        { "id": "doc-2", "score": 2.71, "fields": { "title": "Vector Search" } }
       ]
     }
   ]

@@ -125,13 +125,11 @@ curl http://localhost:8080/v1/index
 curl -X PUT http://localhost:8080/v1/documents/doc001 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Introduction to Rust Programming",
-        "body": "Rust is a modern systems programming language that focuses on safety, speed, and concurrency.",
-        "category": "programming",
-        "embedding": [0.9, 0.1, 0.2, 0.0]
-      }
+    "fields": {
+      "title": "Introduction to Rust Programming",
+      "body": "Rust is a modern systems programming language that focuses on safety, speed, and concurrency.",
+      "category": "programming",
+      "embedding": [0.9, 0.1, 0.2, 0.0]
     }
   }'
 ```
@@ -140,13 +138,11 @@ curl -X PUT http://localhost:8080/v1/documents/doc001 \
 curl -X PUT http://localhost:8080/v1/documents/doc002 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Web Development with Rust",
-        "body": "Building web applications with Rust has become increasingly popular. Frameworks like Actix and Rocket make it easy to create fast and secure web services.",
-        "category": "web-development",
-        "embedding": [0.7, 0.3, 0.5, 0.1]
-      }
+    "fields": {
+      "title": "Web Development with Rust",
+      "body": "Building web applications with Rust has become increasingly popular. Frameworks like Actix and Rocket make it easy to create fast and secure web services.",
+      "category": "web-development",
+      "embedding": [0.7, 0.3, 0.5, 0.1]
     }
   }'
 ```
@@ -155,13 +151,11 @@ curl -X PUT http://localhost:8080/v1/documents/doc002 \
 curl -X PUT http://localhost:8080/v1/documents/doc003 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Python for Data Science",
-        "body": "Python is the most popular language for data science and machine learning. Libraries like NumPy and Pandas provide powerful tools for data analysis.",
-        "category": "data-science",
-        "embedding": [0.1, 0.8, 0.1, 0.9]
-      }
+    "fields": {
+      "title": "Python for Data Science",
+      "body": "Python is the most popular language for data science and machine learning. Libraries like NumPy and Pandas provide powerful tools for data analysis.",
+      "category": "data-science",
+      "embedding": [0.1, 0.8, 0.1, 0.9]
     }
   }'
 ```
@@ -329,13 +323,11 @@ curl http://localhost:8080/v1/documents/doc001
 curl -X PUT http://localhost:8080/v1/documents/doc001 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Introduction to Rust Programming",
-        "body": "Rust is a modern systems programming language that focuses on safety, speed, and concurrency. It provides memory safety without garbage collection.",
-        "category": "programming",
-        "embedding": [0.9, 0.1, 0.2, 0.0]
-      }
+    "fields": {
+      "title": "Introduction to Rust Programming",
+      "body": "Rust is a modern systems programming language that focuses on safety, speed, and concurrency. It provides memory safety without garbage collection.",
+      "category": "programming",
+      "embedding": [0.9, 0.1, 0.2, 0.0]
     }
   }'
 ```
@@ -456,12 +448,10 @@ curl -X POST http://localhost:8080/v1/index \
 curl -X PUT http://localhost:8080/v1/documents/doc001 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Introduction to Rust Programming",
-        "body": "Rust is a modern systems programming language.",
-        "embedding": "Rust is a modern systems programming language."
-      }
+    "fields": {
+      "title": "Introduction to Rust Programming",
+      "body": "Rust is a modern systems programming language.",
+      "embedding": "Rust is a modern systems programming language."
     }
   }'
 ```
@@ -470,12 +460,10 @@ curl -X PUT http://localhost:8080/v1/documents/doc001 \
 curl -X PUT http://localhost:8080/v1/documents/doc002 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Web Development with Rust",
-        "body": "Building web applications with Rust using Actix and Rocket.",
-        "embedding": "Building web applications with Rust using Actix and Rocket."
-      }
+    "fields": {
+      "title": "Web Development with Rust",
+      "body": "Building web applications with Rust using Actix and Rocket.",
+      "embedding": "Building web applications with Rust using Actix and Rocket."
     }
   }'
 ```

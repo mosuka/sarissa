@@ -3,15 +3,18 @@
 //! These helpers translate between the laurus-server proto `Document` / `Value`
 //! types and `serde_json::Value` for the MCP tool input/output.
 
+use base64::Engine as _;
 use laurus_server::proto::laurus::v1;
 use serde_json::{Value, json};
 
-/// Convert a proto [`v1::Document`] to a [`serde_json::Value`] (JSON object).
+/// Convert a proto [`v1::Document`]'s fields into a JSON fields map:
+/// `{field: value, ...}`, with no `"fields"` wrapper and no `id`.
 ///
-/// # Arguments
-///
-/// * `doc` - The proto document to convert.
-pub fn document_to_json(doc: &v1::Document) -> Value {
+/// Shared by [`document_to_json`] (wraps the result under `"fields"`) and
+/// the `search`/`search_batch` tool handlers (insert it directly under a
+/// search result's own `"fields"` key), so every MCP tool agrees on the
+/// same `{"fields": {...}}` shape [`json_to_document`] accepts back.
+pub fn document_fields_to_json(doc: &v1::Document) -> Value {
     let fields: serde_json::Map<String, Value> = doc
         .fields
         .iter()
@@ -20,38 +23,37 @@ pub fn document_to_json(doc: &v1::Document) -> Value {
     Value::Object(fields)
 }
 
-/// Convert a [`serde_json::Value`] (JSON object) to a proto [`v1::Document`].
-///
-/// JSON types are mapped to proto `Value` kinds as follows:
-///
-/// | JSON type | Proto Value kind |
-/// |-----------|-----------------|
-/// | null | `null_value` |
-/// | boolean | `bool_value` |
-/// | integer number | `int64_value` |
-/// | float number | `float64_value` |
-/// | string | `text_value` |
-/// | array of numbers | `vector_value` (f32 elements) |
-/// | other | `null_value` |
+/// Convert a proto [`v1::Document`] to a [`serde_json::Value`] of the shape
+/// `{"fields": {...}}` — the same shape [`json_to_document`] accepts back,
+/// and the same one laurus-cli and the HTTP gateway use.
 ///
 /// # Arguments
 ///
-/// * `value` - A JSON object whose keys become document field names.
+/// * `doc` - The proto document to convert.
+pub fn document_to_json(doc: &v1::Document) -> Value {
+    json!({ "fields": document_fields_to_json(doc) })
+}
+
+/// Convert a JSON value of the shape `{"fields": {...}}` into a proto
+/// [`v1::Document`].
+///
+/// Delegates to [`laurus::json_to_document`] — the same canonical converter
+/// used by laurus-cli and the HTTP gateway, so all three JSON-accepting
+/// transports agree on one document shape — and lowers the resulting
+/// [`laurus::Document`] to the proto wire form via
+/// [`laurus_server::convert::document::to_proto`].
+///
+/// # Arguments
+///
+/// * `value` - A JSON value of the shape `{"fields": {...}}`.
 ///
 /// # Errors
 ///
-/// Returns an error if `value` is not a JSON object.
-pub fn json_to_document(value: Value) -> anyhow::Result<v1::Document> {
-    let obj = value
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("document must be a JSON object"))?;
-
-    let fields = obj
-        .iter()
-        .map(|(k, v)| (k.clone(), json_to_proto_value(v)))
-        .collect();
-
-    Ok(v1::Document { fields })
+/// Returns an error when `value` lacks a `fields` object or any individual
+/// field value cannot be inferred.
+pub fn json_to_document(value: &Value) -> anyhow::Result<v1::Document> {
+    let doc = laurus::json_to_document(value)?;
+    Ok(laurus_server::convert::document::to_proto(&doc))
 }
 
 fn proto_value_to_json(val: &v1::Value) -> Value {
@@ -63,7 +65,10 @@ fn proto_value_to_json(val: &v1::Value) -> Value {
         Some(Kind::Float64Value(f)) => json!(f),
         Some(Kind::TextValue(s)) => Value::String(s.clone()),
         Some(Kind::BytesValue(b)) => {
-            Value::String(b.iter().map(|byte| format!("{byte:02x}")).collect())
+            // Base64, matching the HTTP gateway's BytesValue -> JSON
+            // encoding and the plain-string shape `coerce_to_bytes`
+            // decodes back into a declared `Bytes` field.
+            Value::String(base64::engine::general_purpose::STANDARD.encode(b))
         }
         Some(Kind::VectorValue(v)) => json!(v.values),
         Some(Kind::DatetimeValue(us)) => {
@@ -81,58 +86,6 @@ fn proto_value_to_json(val: &v1::Value) -> Value {
         Some(Kind::Int64ArrayValue(arr)) => json!(arr.values),
         Some(Kind::Float64ArrayValue(arr)) => json!(arr.values),
     }
-}
-
-fn json_to_proto_value(val: &Value) -> v1::Value {
-    use v1::value::Kind;
-    let kind = match val {
-        Value::Null => Some(Kind::NullValue(true)),
-        Value::Bool(b) => Some(Kind::BoolValue(*b)),
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Some(Kind::Int64Value(i))
-            } else if let Some(f) = n.as_f64() {
-                Some(Kind::Float64Value(f))
-            } else {
-                Some(Kind::NullValue(true))
-            }
-        }
-        Value::String(s) => Some(Kind::TextValue(s.clone())),
-        Value::Array(arr) => {
-            let floats: Option<Vec<f32>> =
-                arr.iter().map(|v| v.as_f64().map(|f| f as f32)).collect();
-            floats.map(|values| Kind::VectorValue(v1::VectorValue { values }))
-        }
-        Value::Object(obj) => {
-            // 3D ECEF point: { x, y, z } — must be checked before 2D geo
-            // since both are objects.
-            if let (Some(x), Some(y), Some(z)) = (
-                obj.get("x").and_then(|v| v.as_f64()),
-                obj.get("y").and_then(|v| v.as_f64()),
-                obj.get("z").and_then(|v| v.as_f64()),
-            ) {
-                Some(Kind::Geo3dValue(v1::Geo3dPoint { x, y, z }))
-            } else if let (Some(lat), Some(lon)) = (
-                // 2D geo point: { lat, lon } (also accepts the full names
-                // "latitude" / "longitude" for symmetry with the gateway
-                // converter that infers `DataValue::Geo` from JSON).
-                obj.get("lat")
-                    .or_else(|| obj.get("latitude"))
-                    .and_then(|v| v.as_f64()),
-                obj.get("lon")
-                    .or_else(|| obj.get("longitude"))
-                    .and_then(|v| v.as_f64()),
-            ) {
-                Some(Kind::GeoValue(v1::GeoPoint {
-                    latitude: lat,
-                    longitude: lon,
-                }))
-            } else {
-                Some(Kind::NullValue(true))
-            }
-        }
-    };
-    v1::Value { kind }
 }
 
 /// Parse a JSON string into a proto [`v1::FusionAlgorithm`].
@@ -237,9 +190,9 @@ mod tests {
         let doc = v1::Document { fields };
 
         let json = document_to_json(&doc);
-        assert_eq!(json["title"], "hello");
-        assert_eq!(json["score"], 1.5);
-        assert_eq!(json["count"], 42);
+        assert_eq!(json["fields"]["title"], "hello");
+        assert_eq!(json["fields"]["score"], 1.5);
+        assert_eq!(json["fields"]["count"], 42);
     }
 
     #[test]
@@ -310,15 +263,17 @@ mod tests {
     #[test]
     fn test_json_to_document() {
         let json_val = json!({
-            "text_field": "hello",
-            "int_field": 10,
-            "float_field": 2.78,
-            "bool_field": true,
-            "null_field": null,
-            "vec_field": [0.1_f32, 0.2_f32, 0.3_f32]
+            "fields": {
+                "text_field": "hello",
+                "int_field": 10,
+                "float_field": 2.78,
+                "bool_field": true,
+                "null_field": null,
+                "vec_field": [0.1_f32, 0.2_f32, 0.3_f32]
+            }
         });
 
-        let doc = json_to_document(json_val).unwrap();
+        let doc = json_to_document(&json_val).unwrap();
         assert!(matches!(
             doc.fields["text_field"].kind,
             Some(v1::value::Kind::TextValue(_))
@@ -331,13 +286,16 @@ mod tests {
             doc.fields["bool_field"].kind,
             Some(v1::value::Kind::BoolValue(true))
         ));
-        assert!(matches!(
-            doc.fields["null_field"].kind,
-            Some(v1::value::Kind::NullValue(_))
-        ));
+        assert!(
+            !doc.fields.contains_key("null_field"),
+            "a null field must be omitted, not inserted as NullValue"
+        );
+        // A plain numeric JSON array is inferred as Int64ArrayValue /
+        // Float64ArrayValue (json_to_document has no schema access, so it
+        // never produces VectorValue directly — see type_inference.rs).
         assert!(matches!(
             doc.fields["vec_field"].kind,
-            Some(v1::value::Kind::VectorValue(_))
+            Some(v1::value::Kind::Float64ArrayValue(_))
         ));
     }
 
@@ -346,9 +304,10 @@ mod tests {
         // `{ x, y, z }` JSON input must be encoded as a Geo3dValue proto
         // kind so MCP `put_document` can pass ECEF coordinates through
         // to laurus-server.
-        let json_val =
-            json!({ "position": { "x": 1_000_000.0, "y": 2_000_000.0, "z": 3_000_000.0 } });
-        let doc = json_to_document(json_val).unwrap();
+        let json_val = json!({
+            "fields": { "position": { "x": 1_000_000.0, "y": 2_000_000.0, "z": 3_000_000.0 } }
+        });
+        let doc = json_to_document(&json_val).unwrap();
         match &doc.fields["position"].kind {
             Some(v1::value::Kind::Geo3dValue(p)) => {
                 assert_eq!(p.x, 1_000_000.0);
@@ -365,10 +324,12 @@ mod tests {
         // produces a 2D GeoValue. Confirms #305 wiring did not break
         // the historical 2D shape.
         let json_val = json!({
-            "spot_a": { "lat": 35.6, "lon": 139.7 },
-            "spot_b": { "latitude": -33.86, "longitude": 151.21 },
+            "fields": {
+                "spot_a": { "lat": 35.6, "lon": 139.7 },
+                "spot_b": { "latitude": -33.86, "longitude": 151.21 },
+            }
         });
-        let doc = json_to_document(json_val).unwrap();
+        let doc = json_to_document(&json_val).unwrap();
         for field in ["spot_a", "spot_b"] {
             assert!(
                 matches!(doc.fields[field].kind, Some(v1::value::Kind::GeoValue(_))),
@@ -394,6 +355,33 @@ mod tests {
         );
         let doc = v1::Document { fields };
         let json = document_to_json(&doc);
-        assert_eq!(json["position"], json!({"x": 4.0, "y": 5.0, "z": 6.0}));
+        assert_eq!(
+            json["fields"]["position"],
+            json!({"x": 4.0, "y": 5.0, "z": 6.0})
+        );
+    }
+
+    #[test]
+    fn json_to_proto_bytes_base64() {
+        let json_val = json!({"fields": {"thumb": {"data": "aGk=", "mime": "image/jpeg"}}});
+        let doc = json_to_document(&json_val).unwrap();
+        match &doc.fields["thumb"].kind {
+            Some(v1::value::Kind::BytesValue(b)) => assert_eq!(b, b"hi"),
+            other => panic!("expected BytesValue, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn proto_bytes_to_json_is_base64_string() {
+        let mut fields = HashMap::new();
+        fields.insert(
+            "thumb".to_string(),
+            v1::Value {
+                kind: Some(v1::value::Kind::BytesValue(b"hi".to_vec())),
+            },
+        );
+        let doc = v1::Document { fields };
+        let json = document_to_json(&doc);
+        assert_eq!(json["fields"]["thumb"], json!("aGk="));
     }
 }

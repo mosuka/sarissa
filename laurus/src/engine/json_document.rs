@@ -75,9 +75,7 @@ pub fn json_to_document(json: &JsonValue) -> Result<Document> {
 
     let mut fields: HashMap<String, DataValue> = HashMap::with_capacity(fields_obj.len());
     for (name, value) in fields_obj {
-        match infer_from_json(value)
-            .map_err(|e| LaurusError::invalid_argument(format!("field \"{name}\": {e}")))?
-        {
+        match infer_from_json(value).map_err(|e| field_error(name, e))? {
             InferredValue::Skip => {}
             InferredValue::Inferred { value, .. } => {
                 fields.insert(name.clone(), value);
@@ -86,6 +84,23 @@ pub fn json_to_document(json: &JsonValue) -> Result<Document> {
     }
 
     Ok(Document { fields })
+}
+
+/// Prefix a per-field inference error with the field name.
+///
+/// `infer_from_json`'s errors are all built via `LaurusError::invalid_argument`,
+/// which renders as `"Error: Invalid argument: <msg>"`. Re-wrapping that
+/// rendered string with `invalid_argument` again (i.e. `format!("field
+/// \"{name}\": {e}")`) would double the `"Error: Invalid argument: "`
+/// prefix, so the inner message is unwrapped from `LaurusError::Other`
+/// first — the field-name prefix then gets the single, correctly-formatted
+/// `"Error: Invalid argument: "` prefix instead of two nested copies.
+fn field_error(name: &str, e: LaurusError) -> LaurusError {
+    let inner = match e {
+        LaurusError::Other(msg) => msg,
+        other => other.to_string(),
+    };
+    LaurusError::invalid_argument(format!("field \"{name}\": {inner}"))
 }
 
 #[cfg(test)]
@@ -170,6 +185,24 @@ mod tests {
             json_to_document(&json!({"fields": {"loc": {"lat": 999.0, "lon": 0.0}}})).unwrap_err();
         assert!(err.to_string().contains("\"loc\""));
         assert!(err.to_string().contains("latitude"));
+    }
+
+    #[test]
+    fn field_error_does_not_double_wrap_the_error_prefix() {
+        // `infer_from_json`'s own errors already render as `"Error: Invalid
+        // argument: <msg>"`; naively re-wrapping that whole rendered string
+        // a second time (`format!("field \"{name}\": {e}")` fed straight
+        // into another `invalid_argument`) would duplicate the "Error: "
+        // prefix. The inner message ("Invalid argument: <msg>", without the
+        // "Error: " prefix Display adds) is expected to survive once.
+        let err =
+            json_to_document(&json!({"fields": {"loc": {"lat": 999.0, "lon": 0.0}}})).unwrap_err();
+        let msg = err.to_string();
+        assert_eq!(
+            msg.matches("Error:").count(),
+            1,
+            "message must not double-wrap the \"Error: \" prefix: {msg}"
+        );
     }
 
     #[test]

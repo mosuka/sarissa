@@ -192,14 +192,14 @@ Put (upsert) a document into the index. If a document with the same ID already e
 | Name | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | string | Yes | External document identifier |
-| `document` | object | Yes | Document fields as a JSON object |
+| `fields` | object | Yes | Document fields as a JSON object |
 
 ### Example
 
 ```text
 Tool: put_document
 id: "doc-1"
-document: {"title": "Hello World", "body": "This is a test document."}
+fields: {"title": "Hello World", "body": "This is a test document."}
 ```
 
 Result: `Document 'doc-1' put (upserted). Call commit to persist changes.`
@@ -209,10 +209,10 @@ Result: `Document 'doc-1' put (upserted). Call commit to persist changes.`
 ```text
 Tool: put_document
 id: "drone-1"
-document: {"title": "Drone over Tokyo", "position": {"x": -3955182.0, "y": 3350553.0, "z": 3700276.0}}
+fields: {"title": "Drone over Tokyo", "position": {"x": -3955182.0, "y": 3350553.0, "z": 3700276.0}}
 ```
 
-The MCP server accepts a 3D ECEF point as a JSON object with `x`, `y`, `z` keys (meters). This is distinct from the HTTP gateway, which currently does not infer Geo3d from JSON — the MCP path is fully supported for both writes and reads.
+The MCP server accepts a 3D ECEF point as a JSON object with `x`, `y`, `z` keys (meters) — the same shape the HTTP gateway and laurus-cli accept (see [JSON Field Value Inference](../laurus-server/http_gateway.md#json-field-value-inference)).
 
 ---
 
@@ -225,14 +225,14 @@ Add a document as a new chunk to the index. Unlike `put_document`, this appends 
 | Name | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | string | Yes | External document identifier |
-| `document` | object | Yes | Document fields as a JSON object |
+| `fields` | object | Yes | Document fields as a JSON object |
 
 ### Example
 
 ```text
 Tool: add_document
 id: "doc-1"
-document: {"title": "Hello World - Part 2", "body": "This is a continuation."}
+fields: {"title": "Hello World - Part 2", "body": "This is a continuation."}
 ```
 
 Result: `Document 'doc-1' added as chunk. Call commit to persist changes.`
@@ -247,15 +247,15 @@ Put (upsert) many documents in one call. Entries are applied sequentially, in in
 
 | Name | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `documents` | array | Yes | Array of `{"id": "...", "document": {...}}` entries; each `document` has the same shape as `put_document`'s |
+| `documents` | array | Yes | Array of `{"id": "...", "fields": {...}}` entries; each entry's `fields` has the same shape as `put_document`'s |
 
 ### Example
 
 ```text
 Tool: put_documents
 documents: [
-  {"id": "doc-1", "document": {"title": "Hello"}},
-  {"id": "doc-2", "document": {"title": "World"}}
+  {"id": "doc-1", "fields": {"title": "Hello"}},
+  {"id": "doc-2", "fields": {"title": "World"}}
 ]
 ```
 
@@ -278,8 +278,8 @@ Same as `put_documents`.
 ```text
 Tool: add_documents
 documents: [
-  {"id": "doc-1", "document": {"title": "Part 1"}},
-  {"id": "doc-1", "document": {"title": "Part 2"}}
+  {"id": "doc-1", "fields": {"title": "Part 1"}},
+  {"id": "doc-1", "fields": {"title": "Part 2"}}
 ]
 ```
 
@@ -303,7 +303,7 @@ Retrieve all stored documents (including chunks) by external ID.
 {
   "id": "doc-1",
   "documents": [
-    { "title": "Hello World", "body": "This is a test document." }
+    { "fields": { "title": "Hello World", "body": "This is a test document." } }
   ]
 }
 ```
@@ -417,12 +417,12 @@ Search documents using the laurus unified query DSL. Supports lexical search, ve
     {
       "id": "doc-1",
       "score": 3.14,
-      "document": { "title": "Hello World", "body": "..." }
+      "fields": { "title": "Hello World", "body": "..." }
     },
     {
       "id": "doc-2",
       "score": 1.57,
-      "document": { "title": "Hello Again", "body": "..." }
+      "fields": { "title": "Hello Again", "body": "..." }
     }
   ]
 }
@@ -455,13 +455,13 @@ The `batch` array preserves input order: `batch[i]` is the result set for
     {
       "total": 1,
       "results": [
-        { "id": "doc-1", "score": 3.14, "document": { "title": "Hello World" } }
+        { "id": "doc-1", "score": 3.14, "fields": { "title": "Hello World" } }
       ]
     },
     {
       "total": 1,
       "results": [
-        { "id": "doc-2", "score": 2.71, "document": { "title": "Vector Search" } }
+        { "id": "doc-2", "score": 2.71, "fields": { "title": "Vector Search" } }
       ]
     }
   ]

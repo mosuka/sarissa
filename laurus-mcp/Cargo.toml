@@ -17,6 +17,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+base64 = "0.22.1"
 chrono = { workspace = true }
 laurus = { workspace = true, features = ["native"] }
 laurus-server = { workspace = true }

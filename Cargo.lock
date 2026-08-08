@@ -2615,6 +2615,7 @@ name = "laurus-mcp"
 version = "0.10.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "laurus",
  "laurus-server",

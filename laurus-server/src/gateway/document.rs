@@ -11,16 +11,16 @@ use super::error::{BadRequest, GatewayError};
 use crate::proto::laurus::v1;
 
 /// `PUT /v1/documents/:id` — Inserts or replaces a document.
+///
+/// Body shape: `{"fields": {...}}` — the same document JSON shape used by
+/// laurus-cli and laurus-mcp.
 pub async fn put_document(
     State(mut state): State<GatewayState>,
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, Response> {
-    let document = convert::json_to_proto_document(
-        body.get("document")
-            .ok_or_else(|| BadRequest("missing \"document\" key".to_string()).into_response())?,
-    )
-    .map_err(|e| BadRequest(e).into_response())?;
+    let document =
+        convert::json_to_proto_document(&body).map_err(|e| BadRequest(e).into_response())?;
 
     state
         .document_client
@@ -35,16 +35,16 @@ pub async fn put_document(
 }
 
 /// `POST /v1/documents/:id` — Adds a document as a chunk.
+///
+/// Body shape: `{"fields": {...}}` — the same document JSON shape used by
+/// laurus-cli and laurus-mcp.
 pub async fn add_document(
     State(mut state): State<GatewayState>,
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, Response> {
-    let document = convert::json_to_proto_document(
-        body.get("document")
-            .ok_or_else(|| BadRequest("missing \"document\" key".to_string()).into_response())?,
-    )
-    .map_err(|e| BadRequest(e).into_response())?;
+    let document =
+        convert::json_to_proto_document(&body).map_err(|e| BadRequest(e).into_response())?;
 
     state
         .document_client
@@ -60,11 +60,12 @@ pub async fn add_document(
 
 /// `POST /v1/documents:bulk?mode=put|add` — Batched document ingestion.
 ///
-/// Body shape: `{"documents": [{"id": "...", "document": {"fields": {...}}}, ...]}`.
-/// Entries are applied sequentially, in input order, with one WAL fsync for
-/// the whole batch (see the core `Engine::put_documents` semantics):
-/// `mode=put` (the default) upserts — duplicate ids within one batch dedup,
-/// last occurrence wins — while `mode=add` appends chunks, so repeated ids
+/// Body shape: `{"documents": [{"id": "...", "fields": {...}}, ...]}` — the
+/// same `{"id", "fields"}` entry shape as laurus-cli's bulk JSONL. Entries
+/// are applied sequentially, in input order, with one WAL fsync for the
+/// whole batch (see the core `Engine::put_documents` semantics): `mode=put`
+/// (the default) upserts — duplicate ids within one batch dedup, last
+/// occurrence wins — while `mode=add` appends chunks, so repeated ids
 /// accumulate. Fails fast at the first entry that cannot be applied;
 /// already-applied entries are not rolled back, and the error carries the
 /// failing position, so retrying the batch (or its suffix) is idempotent.
@@ -95,12 +96,8 @@ pub async fn bulk_documents(
                 .get("id")
                 .and_then(Value::as_str)
                 .ok_or_else(|| format!("documents[{index}]: missing string \"id\""))?;
-            let document = convert::json_to_proto_document(
-                entry
-                    .get("document")
-                    .ok_or_else(|| format!("documents[{index}]: missing \"document\" key"))?,
-            )
-            .map_err(|e| format!("documents[{index}]: {e}"))?;
+            let document = convert::json_to_proto_document(entry)
+                .map_err(|e| format!("documents[{index}]: {e}"))?;
             Ok(v1::DocumentEntry {
                 id: id.to_string(),
                 document: Some(document),

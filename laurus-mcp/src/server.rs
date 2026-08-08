@@ -78,10 +78,10 @@ struct PutDocumentParams {
     /// External document identifier (used for retrieval and deduplication).
     id: String,
 
-    /// Document fields as a JSON object.
+    /// Document fields as a JSON object, e.g. `{"title": "Hello", "year": 2024}`.
     ///
     /// Field names and value types must match the index schema.
-    document: Value,
+    fields: Value,
 }
 
 /// Parameters for the `add_document` tool.
@@ -90,20 +90,20 @@ struct AddDocumentParams {
     /// External document identifier (used for retrieval and deduplication).
     id: String,
 
-    /// Document fields as a JSON object.
+    /// Document fields as a JSON object, e.g. `{"title": "Hello", "year": 2024}`.
     ///
     /// Field names and value types must match the index schema.
-    document: Value,
+    fields: Value,
 }
 
 /// Parameters for the `put_documents` / `add_documents` tools.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct BulkDocumentsParams {
-    /// Array of `{"id": "...", "document": {...}}` entries, applied
+    /// Array of `{"id": "...", "fields": {...}}` entries, applied
     /// sequentially in input order with one WAL fsync for the whole batch.
     ///
-    /// Each `document` is a JSON object of fields matching the index schema
-    /// (the same shape as the `put_document` tool's `document`).
+    /// Each entry's `fields` is a JSON object of fields matching the index
+    /// schema (the same shape as the `put_document` tool's `fields`).
     documents: Vec<Value>,
 }
 
@@ -505,7 +505,7 @@ impl LaurusMcpServer {
             }
         };
 
-        let doc = match convert::json_to_document(params.document) {
+        let doc = match convert::json_to_document(&json!({"fields": params.fields})) {
             Ok(d) => d,
             Err(e) => {
                 return Ok(Self::tool_error(format!("Invalid document: {e}")));
@@ -547,7 +547,7 @@ impl LaurusMcpServer {
             }
         };
 
-        let doc = match convert::json_to_document(params.document) {
+        let doc = match convert::json_to_document(&json!({"fields": params.fields})) {
             Ok(d) => d,
             Err(e) => {
                 return Ok(Self::tool_error(format!("Invalid document: {e}")));
@@ -569,11 +569,12 @@ impl LaurusMcpServer {
         }
     }
 
-    /// Convert the bulk tools' JSON entries into proto `DocumentEntry`
-    /// values, naming the offending position on the first invalid entry.
+    /// Convert the bulk tools' JSON entries — each a `{"id": "...", "fields":
+    /// {...}}` object — into proto `DocumentEntry` values, naming the
+    /// offending position on the first invalid entry.
     fn bulk_entries(documents: Vec<Value>) -> Result<Vec<DocumentEntry>, String> {
         documents
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(index, entry)| {
                 let id = entry
@@ -581,11 +582,7 @@ impl LaurusMcpServer {
                     .and_then(Value::as_str)
                     .ok_or_else(|| format!("documents[{index}]: missing string \"id\""))?
                     .to_string();
-                let document = entry
-                    .get("document")
-                    .cloned()
-                    .ok_or_else(|| format!("documents[{index}]: missing \"document\" key"))?;
-                let document = convert::json_to_document(document)
+                let document = convert::json_to_document(entry)
                     .map_err(|e| format!("documents[{index}]: {e}"))?;
                 Ok(DocumentEntry {
                     id,
@@ -601,7 +598,7 @@ impl LaurusMcpServer {
     /// for the whole batch; a failure aborts at the offending entry without
     /// rolling back the already-applied prefix (retrying is idempotent).
     #[tool(
-        description = "Put (upsert) MANY documents in one call. Pass documents as an array of {\"id\": \"...\", \"document\": {...}} entries; they are applied in order (duplicate ids dedup, last wins) with one WAL fsync for the whole batch, which is much faster than calling put_document per document. Call commit afterwards to persist changes."
+        description = "Put (upsert) MANY documents in one call. Pass documents as an array of {\"id\": \"...\", \"fields\": {...}} entries; they are applied in order (duplicate ids dedup, last wins) with one WAL fsync for the whole batch, which is much faster than calling put_document per document. Call commit afterwards to persist changes."
     )]
     async fn put_documents(
         &self,
@@ -638,7 +635,7 @@ impl LaurusMcpServer {
     /// Like `put_documents` but never deletes existing documents, so a batch
     /// may repeat an id to add multiple chunks of one logical document.
     #[tool(
-        description = "Add MANY documents as new chunks in one call. Pass documents as an array of {\"id\": \"...\", \"document\": {...}} entries; unlike put_documents, existing documents are never deleted, so repeating an id adds multiple chunks. One WAL fsync covers the whole batch. Call commit afterwards to persist changes."
+        description = "Add MANY documents as new chunks in one call. Pass documents as an array of {\"id\": \"...\", \"fields\": {...}} entries; unlike put_documents, existing documents are never deleted, so repeating an id adds multiple chunks. One WAL fsync covers the whole batch. Call commit afterwards to persist changes."
     )]
     async fn add_documents(
         &self,
@@ -772,7 +769,7 @@ impl LaurusMcpServer {
 
     /// Search documents using the laurus unified query DSL.
     #[tool(
-        description = "Search documents using the laurus unified query DSL. Supports three modes: (1) Lexical search: term queries (title:hello), boolean operators (AND, OR, NOT), phrase queries (\"exact phrase\"), fuzzy queries (roam~2), range queries (field:[from TO to]). (2) Vector search: ~\"text\" syntax for semantic similarity (content:~\"cute kitten\", ~\"text\"^0.8). (3) Hybrid search: mix both in one query (title:hello content:~\"cute kitten\"). Returns JSON with total count and array of results (id, score, document)."
+        description = "Search documents using the laurus unified query DSL. Supports three modes: (1) Lexical search: term queries (title:hello), boolean operators (AND, OR, NOT), phrase queries (\"exact phrase\"), fuzzy queries (roam~2), range queries (field:[from TO to]). (2) Vector search: ~\"text\" syntax for semantic similarity (content:~\"cute kitten\", ~\"text\"^0.8). (3) Hybrid search: mix both in one query (title:hello content:~\"cute kitten\"). Returns JSON with total count and array of results (id, score, fields)."
     )]
     async fn search(
         &self,
@@ -826,7 +823,7 @@ impl LaurusMcpServer {
                         json!({
                             "id": result.id,
                             "score": result.score,
-                            "document": result.document.as_ref().map(convert::document_to_json),
+                            "fields": result.document.as_ref().map(convert::document_fields_to_json),
                         })
                     })
                     .collect();
@@ -844,7 +841,7 @@ impl LaurusMcpServer {
     }
 
     #[tool(
-        description = "Execute multiple independent searches in a single round trip. Takes an array of query strings (each in the laurus unified query DSL, same syntax as the search tool) and runs them in parallel on the server. The same limit and offset apply to every query. Returns JSON with a `batch` array; batch[i] holds the total count and results (id, score, document) for queries[i], in input order. Useful for agents issuing several sub-queries per turn."
+        description = "Execute multiple independent searches in a single round trip. Takes an array of query strings (each in the laurus unified query DSL, same syntax as the search tool) and runs them in parallel on the server. The same limit and offset apply to every query. Returns JSON with a `batch` array; batch[i] holds the total count and results (id, score, fields) for queries[i], in input order. Useful for agents issuing several sub-queries per turn."
     )]
     async fn search_batch(
         &self,
@@ -898,7 +895,7 @@ impl LaurusMcpServer {
                                 json!({
                                     "id": result.id,
                                     "score": result.score,
-                                    "document": result.document.as_ref().map(convert::document_to_json),
+                                    "fields": result.document.as_ref().map(convert::document_fields_to_json),
                                 })
                             })
                             .collect();

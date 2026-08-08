@@ -2,56 +2,14 @@
 
 use std::collections::HashMap;
 
-use laurus::{InferredValue, infer_from_json};
 use serde_json::{Map, Value, json};
 
-use crate::convert::document::data_value_to_proto;
+use crate::convert::document::to_proto;
 use crate::proto::laurus::v1;
 
 // ---------------------------------------------------------------------------
 // Value conversion
 // ---------------------------------------------------------------------------
-
-/// Convert a JSON value to a proto `Value` using engine type inference.
-///
-/// Delegates to [`laurus::engine::type_inference::infer_from_json`] so the
-/// gateway path produces the same [`laurus::DataValue`] shapes as the
-/// engine's schema-less ingestion path. The resulting `DataValue` is then
-/// lowered to a proto `Value` via
-/// [`crate::convert::document::data_value_to_proto`].
-///
-/// Mapping summary:
-///
-/// | JSON | proto `Value` |
-/// | --- | --- |
-/// | `null` | `NullValue` |
-/// | `bool` | `BoolValue` |
-/// | integer (fits in i64) | `Int64Value` |
-/// | non-integer / large number | `Float64Value` |
-/// | `string` | `TextValue` |
-/// | numeric array (all i64) | `Int64ArrayValue` |
-/// | numeric array (any non-i64 number) | `Float64ArrayValue` |
-/// | empty array | `NullValue` (treated as skip) |
-/// | object with `lat\|latitude` + `lon\|lng\|longitude` | `GeoValue` |
-///
-/// # Arguments
-///
-/// * `json` - The JSON value to convert.
-///
-/// # Errors
-///
-/// Returns the engine error message (as a `String`) when the JSON value
-/// cannot be inferred — for example, mixed-type arrays, non-geo objects,
-/// or out-of-range geo coordinates.
-pub fn json_value_to_proto(json: &Value) -> Result<v1::Value, String> {
-    use v1::value::Kind;
-    match infer_from_json(json).map_err(|e| e.to_string())? {
-        InferredValue::Skip => Ok(v1::Value {
-            kind: Some(Kind::NullValue(true)),
-        }),
-        InferredValue::Inferred { value, .. } => Ok(data_value_to_proto(&value)),
-    }
-}
 
 /// Converts a proto `Value` to a JSON value.
 pub fn proto_value_to_json(val: &v1::Value) -> Value {
@@ -134,10 +92,11 @@ fn base64_encode(_engine: &Base64Engine, data: &[u8]) -> String {
 
 /// Convert a JSON object to a proto `Document`.
 ///
-/// Input format: `{"fields": {"field_name": value, ...}}`. Each field value
-/// is run through [`json_value_to_proto`], so the same type-inference rules
-/// as the engine apply (geo aliases, range checks, multi-valued numerics,
-/// mixed-array rejection).
+/// Input format: `{"fields": {"field_name": value, ...}}`. Delegates to
+/// [`laurus::json_to_document`] — the same canonical converter used by
+/// laurus-cli and laurus-mcp, so all three transports accept identical
+/// document JSON — and lowers the resulting [`laurus::Document`] to the
+/// proto wire form via [`crate::convert::document::to_proto`].
 ///
 /// # Arguments
 ///
@@ -149,35 +108,32 @@ fn base64_encode(_engine: &Base64Engine, data: &[u8]) -> String {
 /// (missing `fields` key, non-object `fields`) or when any field value
 /// cannot be inferred. The error includes the offending field name.
 pub fn json_to_proto_document(json: &Value) -> Result<v1::Document, String> {
-    let fields_val = json
-        .get("fields")
-        .ok_or_else(|| "missing \"fields\" key".to_string())?;
-    let fields_obj = fields_val
-        .as_object()
-        .ok_or_else(|| "\"fields\" must be an object".to_string())?;
-
-    let mut fields: HashMap<String, v1::Value> = HashMap::with_capacity(fields_obj.len());
-    for (k, v) in fields_obj {
-        let proto_val = json_value_to_proto(v).map_err(|e| format!("field \"{k}\": {e}"))?;
-        fields.insert(k.clone(), proto_val);
-    }
-
-    Ok(v1::Document { fields })
+    let doc = laurus::json_to_document(json).map_err(|e| e.to_string())?;
+    Ok(to_proto(&doc))
 }
 
-/// Converts a proto `Document` to a JSON value.
+/// Converts a proto `Document`'s fields into a JSON fields map: `{field:
+/// value, ...}`, with no `"fields"` wrapper and no `id`.
+///
+/// Shared by [`proto_document_to_json`] (wraps the result under `"fields"`)
+/// and [`proto_search_result_to_json`] (inserts it directly under the
+/// search result's own `"fields"` key), so both surfaces agree on the same
+/// `{"fields": {...}}` shape [`json_to_proto_document`] accepts back.
 ///
 /// The internal `_id` system field is excluded from the output since it
 /// is already available as the top-level `id` in search results and
 /// document responses.
-pub fn proto_document_to_json(doc: &v1::Document) -> Value {
-    let fields: Map<String, Value> = doc
-        .fields
+fn proto_document_fields_to_json(doc: &v1::Document) -> Map<String, Value> {
+    doc.fields
         .iter()
         .filter(|(k, _)| k.as_str() != "_id")
         .map(|(k, v)| (k.clone(), proto_value_to_json(v)))
-        .collect();
-    json!({ "fields": fields })
+        .collect()
+}
+
+/// Converts a proto `Document` to a JSON value: `{"fields": {...}}`.
+pub fn proto_document_to_json(doc: &v1::Document) -> Value {
+    json!({ "fields": proto_document_fields_to_json(doc) })
 }
 
 // ---------------------------------------------------------------------------
@@ -929,14 +885,17 @@ fn json_to_vector_params(json: &Value) -> Option<v1::VectorParams> {
     })
 }
 
-/// Converts a proto `SearchResult` to a JSON value.
+/// Converts a proto `SearchResult` to a JSON value: `{"id", "score",
+/// "fields"}` — the same `"fields"` key (no `"document"` wrapper) that
+/// [`proto_document_to_json`] and laurus-cli's search output use, so a hit
+/// can be re-submitted through `put doc` / `PUT /v1/documents/:id` as-is.
 pub fn proto_search_result_to_json(result: &v1::SearchResult) -> Value {
     let mut obj = json!({
         "id": result.id,
         "score": result.score,
     });
     if let Some(doc) = &result.document {
-        obj["document"] = proto_document_to_json(doc);
+        obj["fields"] = Value::Object(proto_document_fields_to_json(doc));
     }
     obj
 }
@@ -1108,7 +1067,25 @@ fn proto_embedder_definition_to_json(def: &v1::EmbedderConfig) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use laurus::{InferredValue, infer_from_json};
+
     use super::*;
+    use crate::convert::document::data_value_to_proto;
+
+    /// Regression coverage for the JSON -> `DataValue` -> proto `Value`
+    /// pipeline (`infer_from_json` + `data_value_to_proto`). No longer used
+    /// by [`json_to_proto_document`] itself, which now delegates to
+    /// [`laurus::json_to_document`] + [`to_proto`], but kept here as a
+    /// single-value round-trip check against `proto_value_to_json`.
+    fn json_value_to_proto(json: &Value) -> Result<v1::Value, String> {
+        use v1::value::Kind;
+        match infer_from_json(json).map_err(|e| e.to_string())? {
+            InferredValue::Skip => Ok(v1::Value {
+                kind: Some(Kind::NullValue(true)),
+            }),
+            InferredValue::Inferred { value, .. } => Ok(data_value_to_proto(&value)),
+        }
+    }
 
     #[test]
     fn test_json_value_roundtrip_null() {
@@ -1259,6 +1236,51 @@ mod tests {
         assert_eq!(doc.fields.len(), 2);
     }
 
+    /// The gateway document endpoints accept a bare `{"fields": {...}}`
+    /// body (the `id` comes from the URL path) — `json_to_proto_document`
+    /// must not require a `document` wrapper around it.
+    #[test]
+    fn test_json_to_proto_document_accepts_bare_fields_body() {
+        let json = json!({"fields": {"title": "hello"}});
+        let doc = json_to_proto_document(&json).unwrap();
+        assert_eq!(doc.fields.len(), 1);
+    }
+
+    /// Round-trips a proto `Document` through `proto_document_to_json`,
+    /// confirming the output is `{"fields": {...}}` (no `document`
+    /// wrapper) and feeds straight back into `json_to_proto_document`.
+    #[test]
+    fn test_proto_document_to_json_round_trips_through_json_to_proto_document() {
+        let original = json!({"fields": {"title": "hello", "count": 42}});
+        let doc = json_to_proto_document(&original).unwrap();
+        let rendered = proto_document_to_json(&doc);
+        assert_eq!(rendered["fields"]["title"], json!("hello"));
+        assert_eq!(rendered["fields"]["count"], json!(42));
+        assert!(rendered.get("document").is_none());
+
+        let doc2 = json_to_proto_document(&rendered).unwrap();
+        assert_eq!(doc2.fields.len(), doc.fields.len());
+    }
+
+    /// A search result's document is exposed under `"fields"`, not
+    /// `"document"`, matching `proto_document_to_json` and laurus-cli's
+    /// search output — so a hit can be resubmitted through `put doc`.
+    #[test]
+    fn test_proto_search_result_to_json_uses_fields_not_document() {
+        let doc = json_to_proto_document(&json!({"fields": {"title": "hello"}})).unwrap();
+        let result = v1::SearchResult {
+            id: "doc1".to_string(),
+            score: 0.5,
+            document: Some(doc),
+        };
+        let json = proto_search_result_to_json(&result);
+        assert_eq!(json["fields"]["title"], json!("hello"));
+        assert!(
+            json.get("document").is_none(),
+            "search result JSON must not have a \"document\" key: {json}"
+        );
+    }
+
     #[test]
     fn test_json_to_proto_document_field_error_includes_name() {
         let json = json!({
@@ -1268,7 +1290,7 @@ mod tests {
             }
         });
         let err = json_to_proto_document(&json).unwrap_err();
-        assert!(err.starts_with("field \"bad\":"), "unexpected error: {err}");
+        assert!(err.contains("field \"bad\":"), "unexpected error: {err}");
     }
 
     #[test]

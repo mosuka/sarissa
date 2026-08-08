@@ -116,11 +116,9 @@ curl -X DELETE http://localhost:8080/v1/schema/fields/category
 curl -X PUT http://localhost:8080/v1/documents/doc1 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Hello World",
-        "body": "This is a test document."
-      }
+    "fields": {
+      "title": "Hello World",
+      "body": "This is a test document."
     }
   }'
 ```
@@ -133,11 +131,9 @@ curl -X PUT http://localhost:8080/v1/documents/doc1 \
 curl -X POST http://localhost:8080/v1/documents/doc1 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Hello World",
-        "body": "This is a test document."
-      }
+    "fields": {
+      "title": "Hello World",
+      "body": "This is a test document."
     }
   }'
 ```
@@ -151,8 +147,8 @@ curl -X POST 'http://localhost:8080/v1/documents:bulk?mode=put' \
   -H 'Content-Type: application/json' \
   -d '{
     "documents": [
-      {"id": "doc1", "document": {"fields": {"title": "Hello"}}},
-      {"id": "doc2", "document": {"fields": {"title": "World"}}}
+      {"id": "doc1", "fields": {"title": "Hello"}},
+      {"id": "doc2", "fields": {"title": "World"}}
     ]
   }'
 # => {"applied": 2}
@@ -232,22 +228,23 @@ curl -N -X POST http://localhost:8080/v1/search/stream \
 レスポンスは SSE イベントのストリームです。
 
 ```text
-data: {"id":"doc1","score":0.8532,"document":{...}}
+data: {"id":"doc1","score":0.8532,"fields":{...}}
 
-data: {"id":"doc2","score":0.4210,"document":{...}}
+data: {"id":"doc2","score":0.4210,"fields":{...}}
 ```
 
 ## JSON フィールド値の型推論
 
 ドキュメント投入リクエスト（`PUT /v1/documents/{id}` または
-`POST /v1/documents/{id}`）のボディに含まれる `document.fields` の各値は、
+`POST /v1/documents/{id}`）のボディに含まれる `fields` の各値は、
+laurus-cli や laurus-mcp と共通の正典コンバータ `json_to_document` により、
 スキーマレス取り込みと同じ推論ルールでエンジンの
 [`DataValue`](../concepts/schema_and_fields.md) に変換されます。これにより
-HTTP 経路と gRPC 経路で挙動が一致します。
+HTTP・gRPC・CLI・MCP のすべての経路で挙動が一致します。
 
 | JSON 値 | 推論されるフィールド型 | 備考 |
 | :--- | :--- | :--- |
-| `null` | (スキップ) | `NullValue` として送出され、取り込み時に破棄されます。 |
+| `null` | (スキップ) | フィールドごと省略されます（明示的な null としてもエンジンには送られません）。 |
 | `true` / `false` | `boolean` | |
 | 整数（`i64` に収まる） | `integer` | |
 | 浮動小数点 / 巨大整数 | `float` | |
@@ -258,20 +255,26 @@ HTTP 経路と gRPC 経路で挙動が一致します。
 | `{"latitude": ..., "longitude": ...}` | `geo` | |
 | `{"lat": ..., "lon": ...}` / `{"lat": ..., "lng": ...}` | `geo` | latitude / longitude の短縮別名を受け付けます。 |
 | `{"x": ..., "y": ..., "z": ...}` | `geo3d` | 3 キーすべて必須、有限な数値、ECEF メートル単位。`lat`/`lon` キーとの混在は拒否されます。 |
+| `{"data": "<base64>", "mime": "..."}` | `bytes` | `mime` は省略可能。マルチモーダルなベクトルフィールド（`Text` と `Bytes` の両方を受け付ける embedder）に対して、素の文字列と画像バイト列を区別するために使います — 詳細は [スキーマとフィールド](../concepts/schema_and_fields.md) を参照してください。 |
 
 以下の場合、ゲートウェイは HTTP 400（`Bad Request`）を返します:
 
 - 配列が混在型もしくは非数値要素を含む（例: `[1, "x"]`）
-- オブジェクトが有効な地理座標ではない（2D は latitude/longitude キーが、
-  3D は `x`/`y`/`z` のいずれかが欠けている）
+- オブジェクトが上記のいずれの形にも一致しない（2D は latitude/longitude
+  キーが、3D は `x`/`y`/`z` のいずれかが欠けている、または `data` が
+  文字列でない、など）
 - 緯度が `[-90, 90]` の範囲外、または経度が `[-180, 180]` の範囲外
 - 3D ECEF の座標が有限値でない（`NaN` / `Inf`）
-- 同一オブジェクトに 2D（`lat`/`lon`）と 3D（`x`/`y`/`z`）のキーが混在
+- 同一オブジェクトに複数の形（2D の `lat`/`lon`、3D の `x`/`y`/`z`、
+  Bytes の `data`）のキーが混在
 
-ベクトルおよびバイト列フィールドは JSON だけからは推論できないため、
-スキーマで明示的に宣言する必要があります。宣言済みのベクトルフィールドに
-数値配列が送られた場合は自動的に `f32` ベクトルへキャストされるので、
-REST クライアントは埋め込みベクトルを通常の JSON 配列として送信できます。
+ベクトルフィールドは JSON だけからは推論できません（次元数・距離関数・
+embedder の設定を値だけから復元できないため）。スキーマで明示的に
+宣言する必要があります。宣言済みのベクトルフィールドに数値配列が送られた
+場合は自動的に `f32` ベクトルへキャストされるので、REST クライアントは
+埋め込みベクトルを通常の JSON 配列として送信できます。バイト列フィールドは
+上表の `{"data", "mime"}` オブジェクト形式、または宣言済み `Bytes`
+フィールドであれば素の base64 文字列でも投入できます。
 
 ### 3D 地理クエリ
 
