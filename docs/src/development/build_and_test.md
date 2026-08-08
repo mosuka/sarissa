@@ -5,6 +5,9 @@
 - **Rust** 1.85 or later (edition 2024)
 - **Cargo** (included with Rust)
 - **protobuf compiler** (`protoc`) -- required for building `laurus-server`
+- **[cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild)** --
+  optional, only needed to cross-compile static musl binaries locally (see
+  [Cross-compiling static musl binaries](#cross-compiling-static-musl-binaries))
 
 ## Building
 
@@ -18,6 +21,52 @@ cargo build --features embeddings-candle
 # Build in release mode
 cargo build --release
 ```
+
+## Cross-compiling static musl binaries
+
+`laurus-cli`'s release workflow builds fully static
+`x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl` binaries in
+addition to the dynamically-linked glibc ones (see
+[Prebuilt binaries](../laurus-cli/installation.md#prebuilt-binaries)).
+
+Prerequisites:
+
+```bash
+rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+pip install cargo-zigbuild
+```
+
+Then build with `cargo zigbuild` in place of `cargo build`:
+
+```bash
+cargo zigbuild --release --target x86_64-unknown-linux-musl \
+  -p laurus-cli --features embeddings-all
+```
+
+(equivalent to `make build-laurus-cli-musl` for the `x86_64` target).
+
+**Why `cargo-zigbuild` and not `apt install musl-tools`?** Ubuntu's
+`musl-tools` package provides `musl-gcc` (C) but no `musl-g++` (C++). Most of
+laurus's `--features embeddings-all` dependency graph is C-only or pure Rust
+(`aws-lc-sys`, `onig_sys`), but a plain `musl-tools` setup is one dependency
+feature flip away from needing C++ again (`tokenizers`' `esaxx_fast`, which
+laurus deliberately disables -- see [Feature Flags](feature_flags.md)).
+`cargo-zigbuild` uses [Zig](https://ziglang.org/) as the cross C/C++
+toolchain, which bundles musl headers and libraries for every target and
+needs no Docker.
+
+Verify a build is genuinely static:
+
+```bash
+file target/x86_64-unknown-linux-musl/release/laurus
+# -> ELF 64-bit LSB executable, ..., statically linked
+readelf -d target/x86_64-unknown-linux-musl/release/laurus | grep NEEDED
+# -> (no output)
+```
+
+See `build-binary` in
+[`.github/workflows/release.yml`](../../../.github/workflows/release.yml)
+for the CI configuration this mirrors.
 
 ## Testing
 

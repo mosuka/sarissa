@@ -539,7 +539,12 @@ jobs:
   # ============================================================
   build-binary:
     name: Build Binary
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Also allow workflow_dispatch: release.yml has no PR-time coverage
+    # (it isn't referenced by any regression.yml path filter), so this is
+    # the only way to exercise the musl legs before tagging a release.
+    # create-release and every publish-* job below stay tag-gated, so a
+    # dispatch run never publishes anything.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [test-all]
     strategy:
       matrix:
@@ -552,6 +557,24 @@ jobs:
             target: aarch64-unknown-linux-gnu
             binary: laurus
             archive: tar.gz
+          # Fully static musl builds for Alpine / distroless / scratch.
+          # The --features embeddings-all graph builds native C crates
+          # (aws-lc-sys, onig_sys) via cargo-zigbuild, which bundles a musl
+          # C/C++ cross-toolchain -- Ubuntu's musl-tools package ships only
+          # musl-gcc, no C++ support (needed historically for tokenizers'
+          # esaxx-rs; laurus now builds tokenizers without it, but zigbuild
+          # is kept since it's already verified end-to-end for this
+          # dependency set with no Docker requirement).
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            binary: laurus
+            archive: tar.gz
+            build_cmd: zigbuild
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            binary: laurus
+            archive: tar.gz
+            build_cmd: zigbuild
           - runner: macos-latest
             target: aarch64-apple-darwin
             binary: laurus
@@ -573,6 +596,10 @@ jobs:
       - name: Run checkout
         uses: actions/checkout@v6
 
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
+
       - name: Install protoc
         uses: ./.github/actions/install-protoc
         with:
@@ -584,8 +611,45 @@ jobs:
           toolchain: stable
           target: ${{ matrix.platform.target }}
 
+      - name: Set up Python
+        if: matrix.platform.build_cmd == 'zigbuild'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install zig and cargo-zigbuild
+        if: matrix.platform.build_cmd == 'zigbuild'
+        run: |
+          set -euo pipefail
+          # cargo-zigbuild falls back to `python3 -m ziglang` when `zig` is
+          # not on PATH, so the PyPI distribution is sufficient. Both
+          # versions are pinned so a zig or cargo-zigbuild release cannot
+          # break a tag build.
+          pip install "ziglang==0.16.0"
+          cargo install cargo-zigbuild --version 0.23.0 --locked
+
       - name: Build binary
-        run: cargo build --release --target ${{ matrix.platform.target }} -p laurus-cli --features embeddings-all
+        run: cargo ${{ matrix.platform.build_cmd || 'build' }} --release --target ${{ matrix.platform.target }} -p laurus-cli --features embeddings-all
+
+      - name: Verify static linking
+        if: matrix.platform.build_cmd == 'zigbuild'
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary }}"
+          file "$BIN"
+          file "$BIN" | grep -Eq 'statically linked|static-pie linked' || {
+            echo "ERROR: $BIN is not statically linked" >&2
+            exit 1
+          }
+          # A truly static executable has no DT_NEEDED entries.
+          if readelf -d "$BIN" 2>/dev/null | grep -q 'NEEDED'; then
+            echo "ERROR: $BIN has dynamic library dependencies:" >&2
+            readelf -d "$BIN" >&2
+            exit 1
+          fi
+          if [ "${{ matrix.platform.target }}" = "x86_64-unknown-linux-musl" ]; then
+            "$BIN" --version
+          fi
 
       - name: Package binary (Unix)
         if: runner.os == 'Linux' || runner.os == 'macOS'

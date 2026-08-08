@@ -148,6 +148,10 @@ build-laurus: ## Build laurus (release)
 build-laurus-cli: ## Build laurus-cli (release)
 	cargo build -p laurus-cli --release
 
+build-laurus-cli-musl: ## Build laurus-cli for x86_64-unknown-linux-musl (static, requires cargo-zigbuild)
+	cargo zigbuild --release -p laurus-cli --features embeddings-all \
+	  --target x86_64-unknown-linux-musl
+
 build-laurus-server: ## Build laurus-server (release)
 	cargo build -p laurus-server --release
 

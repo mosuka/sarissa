@@ -16,6 +16,12 @@
 
 ## インストール
 
+ビルド済みバイナリ（Alpine/scratch 向けの完全静的リンク musl ビルドを含む）は
+各 [GitHub リリース](https://github.com/mosuka/laurus/releases)に添付されています。
+全ターゲットの一覧とダウンロード例は
+[インストール](https://mosuka.github.io/laurus/ja/laurus-cli/installation.html)
+を参照してください。
+
 ```bash
 cargo install laurus-cli
 ```
