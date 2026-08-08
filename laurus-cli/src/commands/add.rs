@@ -8,9 +8,10 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use laurus::{Document, FieldOption};
+use laurus::FieldOption;
 
 use crate::context;
+use crate::json_doc::parse_document_json;
 
 /// Execute the `add field` command.
 ///
@@ -56,18 +57,18 @@ pub async fn run_field(name: &str, field_option_json: &str, index_dir: &Path) ->
 /// # Arguments
 ///
 /// * `id` - External document ID.
-/// * `data_json` - A JSON string representing the document data.
+/// * `data_json` - A JSON string of the shape `{"fields": {...}}`.
 /// * `index_dir` - Path to the index directory holding the index.
 ///
 /// # Errors
 ///
 /// Returns an error if:
 /// - The index cannot be opened.
-/// - The JSON string cannot be parsed into a [`Document`].
+/// - The JSON string cannot be parsed into a [`laurus::Document`].
 /// - The engine rejects the document.
 pub async fn run_doc(id: &str, data_json: &str, index_dir: &Path) -> Result<()> {
     let engine = context::open_index(index_dir).await?;
-    let doc: Document = serde_json::from_str(data_json).context("Failed to parse document JSON")?;
+    let doc = parse_document_json(data_json).context("Failed to parse document JSON")?;
     engine.add_document(id, doc).await?;
     println!("Document '{id}' added. Run 'commit' to persist changes.");
     Ok(())

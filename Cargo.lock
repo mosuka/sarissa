@@ -2595,6 +2595,7 @@ name = "laurus-cli"
 version = "0.10.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "clap",
  "dialoguer",
  "laurus",

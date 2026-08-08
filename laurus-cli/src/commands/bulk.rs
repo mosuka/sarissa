@@ -1,7 +1,7 @@
 //! Implementations for the `put docs` / `add docs` bulk-ingest subcommands.
 //!
-//! Streams a JSONL file — one `{"id": "...", "document": {"fields": {...}}}`
-//! entry per line — and applies it through the engine's batch API
+//! Streams a JSONL file — one `{"id": "...", "fields": {...}}` entry per
+//! line — and applies it through the engine's batch API
 //! ([`Engine::put_documents`](laurus::Engine::put_documents) /
 //! [`Engine::add_documents`](laurus::Engine::add_documents)), which pays one
 //! WAL fsync per batch instead of one per record. Unlike the singular
@@ -15,6 +15,7 @@ use anyhow::{Context, Result, bail};
 use laurus::Document;
 
 use crate::context;
+use crate::json_doc::document_from_value;
 
 /// Whether a bulk run upserts (`put docs`) or appends chunks (`add docs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,20 +26,13 @@ pub enum BulkMode {
     Add,
 }
 
-/// One parsed JSONL entry.
-#[derive(serde::Deserialize)]
-struct BulkEntry {
-    /// External document ID.
-    id: String,
-    /// The document, in the same serde JSON shape as `put doc --data`
-    /// (`{"fields": {"title": {"Text": "..."}}}`).
-    document: Document,
-}
-
 /// Parse one JSONL line into an `(id, document)` pair.
 ///
-/// Shared with the `train pq-codebook` command (Issue #631), which reads
-/// the same JSONL shape and extracts the training vectors from one field.
+/// Each line must be a JSON object of the shape `{"id": "...", "fields":
+/// {...}}` — the same document JSON shape as `put doc --data`, with the
+/// external ID as a sibling top-level key. Shared with the `train
+/// pq-codebook` command (Issue #631), which reads the same JSONL shape and
+/// extracts the training vectors from one field.
 ///
 /// # Arguments
 ///
@@ -47,12 +41,22 @@ struct BulkEntry {
 ///
 /// # Errors
 ///
-/// Returns an error naming the line when the JSON does not parse into a
-/// `{"id", "document"}` entry.
+/// Returns an error naming the line when the text is not valid JSON, the
+/// `id` key is missing or not a string, or the `fields` object cannot be
+/// converted into a [`Document`] (see [`document_from_value`]).
 pub(crate) fn parse_entry(line: &str, line_no: usize) -> Result<(String, Document)> {
-    let entry: BulkEntry = serde_json::from_str(line)
-        .with_context(|| format!("line {line_no}: failed to parse JSONL entry"))?;
-    Ok((entry.id, entry.document))
+    let value: serde_json::Value = serde_json::from_str(line)
+        .with_context(|| format!("line {line_no}: failed to parse JSON"))?;
+    let id = value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .with_context(|| format!("line {line_no}: missing string \"id\""))?
+        .to_string();
+    // `anyhow::Context::with_context` would bury the original message (with
+    // its migration hint) as a source that `to_string()` never shows, so
+    // the line prefix is folded into a fresh message instead.
+    let doc = document_from_value(&value).map_err(|e| anyhow::anyhow!("line {line_no}: {e}"))?;
+    Ok((id, doc))
 }
 
 /// Execute the `put docs` / `add docs` command.
@@ -193,7 +197,7 @@ mod tests {
 
     #[test]
     fn parse_entry_accepts_the_put_doc_data_shape() {
-        let line = r#"{"id": "doc1", "document": {"fields": {"title": {"Text": "Hello"}}}}"#;
+        let line = r#"{"id": "doc1", "fields": {"title": "Hello"}}"#;
         let (id, doc) = parse_entry(line, 1).unwrap();
         assert_eq!(id, "doc1");
         assert!(doc.fields.contains_key("title"));
@@ -207,11 +211,20 @@ mod tests {
             "error must carry the line number: {err}"
         );
 
-        let err = parse_entry(r#"{"document": {"fields": {}}}"#, 7).unwrap_err();
+        let err = parse_entry(r#"{"fields": {}}"#, 7).unwrap_err();
         assert!(
             err.to_string().contains("line 7"),
             "a missing id must also name the line: {err}"
         );
+    }
+
+    #[test]
+    fn parse_entry_rejects_old_tagged_format_with_a_hint() {
+        let err =
+            parse_entry(r#"{"id": "doc1", "fields": {"title": {"Text": "Hi"}}}"#, 3).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("line 3"), "must name the line: {msg}");
+        assert!(msg.contains("hint"), "must include a migration hint: {msg}");
     }
 
     /// End-to-end: `put docs` ingests a JSONL file (small batches + periodic
@@ -229,14 +242,12 @@ mod tests {
         let mut jsonl = String::new();
         for i in 0..7 {
             jsonl.push_str(&format!(
-                "{{\"id\": \"doc{i}\", \"document\": {{\"fields\": {{\"title\": {{\"Text\": \"t{i}\"}}}}}}}}\n",
+                "{{\"id\": \"doc{i}\", \"fields\": {{\"title\": \"t{i}\"}}}}\n",
             ));
         }
         // Blank line + a duplicate id (must dedup, last wins under put mode).
         jsonl.push('\n');
-        jsonl.push_str(
-            "{\"id\": \"doc0\", \"document\": {\"fields\": {\"title\": {\"Text\": \"t0v2\"}}}}\n",
-        );
+        jsonl.push_str("{\"id\": \"doc0\", \"fields\": {\"title\": \"t0v2\"}}\n");
         std::fs::write(&jsonl_path, jsonl).unwrap();
 
         // batch_size 3 exercises multiple flushes; commit_every 5 exercises

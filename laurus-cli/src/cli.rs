@@ -76,12 +76,12 @@ pub enum CreateResource {
         /// interactive schema wizard is launched instead.
         #[arg(long)]
         schema: Option<PathBuf>,
-        /// Path to a JSONL training file (the `put docs` / `add docs`
-        /// shape; pre-computed Vector values). When given, every HNSW
-        /// field that configures ProductQuantization + pq_codebook_path
-        /// gets its shared codebook trained from this file immediately
-        /// after creation, so the very first commit can already encode
-        /// against it.
+        /// Path to a JSONL training file (the `put docs` / `add docs` shape;
+        /// each field value a plain numeric array, e.g. `"embedding": [0.1,
+        /// 0.2, ...]`). When given, every HNSW field that configures
+        /// ProductQuantization + pq_codebook_path gets its shared codebook
+        /// trained from this file immediately after creation, so the very
+        /// first commit can already encode against it.
         #[arg(long)]
         train_pq_codebook: Option<PathBuf>,
     },
@@ -136,16 +136,16 @@ pub enum AddResource {
         /// External document ID.
         #[arg(long)]
         id: String,
-        /// Document data as a JSON string.
+        /// Document data as a JSON string, e.g. `{"fields": {"title": "Hello"}}`.
         #[arg(long)]
         data: String,
     },
     /// Bulk-add document chunks from a JSONL file (one entry per line).
     ///
-    /// Each line is `{"id": "...", "document": {"fields": {...}}}` — the
-    /// same document JSON shape as `add doc --data`. Unlike `put docs`,
-    /// repeated ids accumulate as chunks. Commits automatically (per
-    /// `--commit-every` and once at the end).
+    /// Each line is `{"id": "...", "fields": {...}}` — the same document
+    /// JSON shape as `add doc --data`, with the external ID as a sibling
+    /// top-level key. Unlike `put docs`, repeated ids accumulate as chunks.
+    /// Commits automatically (per `--commit-every` and once at the end).
     Docs {
         /// Path to the JSONL file to ingest.
         #[arg(long)]
@@ -195,16 +195,17 @@ pub enum PutResource {
         /// External document ID.
         #[arg(long)]
         id: String,
-        /// Document data as a JSON string.
+        /// Document data as a JSON string, e.g. `{"fields": {"title": "Hello"}}`.
         #[arg(long)]
         data: String,
     },
     /// Bulk-upsert documents from a JSONL file (one entry per line).
     ///
-    /// Each line is `{"id": "...", "document": {"fields": {...}}}` — the
-    /// same document JSON shape as `put doc --data`. Entries are applied in
-    /// order (duplicate ids dedup, last wins) with one WAL fsync per batch.
-    /// Commits automatically (per `--commit-every` and once at the end).
+    /// Each line is `{"id": "...", "fields": {...}}` — the same document
+    /// JSON shape as `put doc --data`, with the external ID as a sibling
+    /// top-level key. Entries are applied in order (duplicate ids dedup,
+    /// last wins) with one WAL fsync per batch. Commits automatically (per
+    /// `--commit-every` and once at the end).
     Docs {
         /// Path to the JSONL file to ingest.
         #[arg(long)]
@@ -262,10 +263,11 @@ pub enum TrainResource {
     /// Train a shared PQ codebook for an HNSW vector field (Issue #631).
     ///
     /// Reads training vectors either from a JSONL file (--input, the same
-    /// `{"id": "...", "document": {"fields": {...}}}` shape as `put docs` /
-    /// `add docs`; the field value must be a pre-computed `Vector`) or from
-    /// the vectors already committed to this index (--from-index, Issue
-    /// #920), and persists the codebook into the index's vector storage.
+    /// `{"id": "...", "fields": {...}}` shape as `put docs` / `add docs`;
+    /// the field value must be a plain numeric array, e.g. `"embedding":
+    /// [0.1, 0.2, ...]`) or from the vectors already committed to this
+    /// index (--from-index, Issue #920), and persists the codebook into
+    /// the index's vector storage.
     /// Subsequent commits encode segments against it instead of re-training
     /// k-means per segment — provided the schema's `pq_codebook_path` names
     /// the trained file (pass --update-schema to set it automatically).

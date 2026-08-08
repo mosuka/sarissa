@@ -777,13 +777,10 @@ ef_construction = 16
                         )
                     })
                     .collect();
-                cells.push(format!(
-                    "\"{field}\": {{\"Vector\": [{}]}}",
-                    data.join(", ")
-                ));
+                cells.push(format!("\"{field}\": [{}]", data.join(", ")));
             }
             jsonl.push_str(&format!(
-                "{{\"id\": \"doc{i}\", \"document\": {{\"fields\": {{{}}}}}}}\n",
+                "{{\"id\": \"doc{i}\", \"fields\": {{{}}}}}\n",
                 cells.join(", ")
             ));
         }

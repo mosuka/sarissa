@@ -1,8 +1,8 @@
 //! Implementation for the `train pq-codebook` subcommand (Issue #631).
 //!
 //! Trains a shared PQ codebook for one HNSW vector field — from a JSONL
-//! file (the same `{"id": "...", "document": {"fields": {...}}}` shape
-//! the bulk-ingest commands read), or with `--from-index` (Issue #920)
+//! file (the same `{"id": "...", "fields": {...}}` shape the bulk-ingest
+//! commands read), or with `--from-index` (Issue #920)
 //! from the vectors already committed to the index itself — and persists
 //! it into the index's vector storage namespace via
 //! [`Engine::train_pq_codebook`](laurus::Engine::train_pq_codebook).
@@ -22,10 +22,17 @@ use crate::commands::bulk::parse_entry;
 use crate::context;
 
 /// Collect pre-computed training vectors for `field` from a JSONL file
-/// (bulk-ingest shape: `{"id": "...", "document": {"fields": {...}}}`).
+/// (bulk-ingest shape: `{"id": "...", "fields": {...}}`).
 ///
 /// Blank lines are skipped; every non-blank entry must carry a
-/// pre-computed `Vector` value for `field`. Collection stops after the
+/// pre-computed vector value for `field` as a plain numeric JSON array
+/// (`[0.1, 0.2, ...]`). Parsing here goes through
+/// [`laurus::json_to_document`] directly — the same as [`parse_entry`], with
+/// no schema access and no engine-side coercion — so a numeric array always
+/// arrives as `Float64Array`/`Int64Array`, never `DataValue::Vector`
+/// (`type_inference::infer_from_json` never produces `Vector` from JSON).
+/// A `DataValue::Vector` value is accepted too, as a pass-through, in case
+/// entries are constructed some other way. Collection stops after the
 /// first `sample_size` vectors when set (deterministic file order — no
 /// random sampling).
 ///
@@ -64,14 +71,23 @@ pub(crate) fn collect_vectors_from_jsonl(
         let Some(value) = doc.fields.get(field) else {
             bail!("line {line_no}: entry has no '{field}' field");
         };
-        let Some(data) = value.as_vector() else {
+        // A JSON numeric array is inferred as Float64Array/Int64Array (see
+        // the doc comment above), never Vector directly — accept all three
+        // shapes and cast element-wise to f32.
+        let data: Vec<f32> = if let Some(v) = value.as_vector() {
+            v.clone()
+        } else if let Some(arr) = value.as_float64_array() {
+            arr.iter().map(|f| *f as f32).collect()
+        } else if let Some(arr) = value.as_int64_array() {
+            arr.iter().map(|i| *i as f32).collect()
+        } else {
             bail!(
                 "line {line_no}: field '{field}' is not a pre-computed vector \
                  (embedder-generated training input is not supported; provide \
-                 `{{\"{field}\": {{\"Vector\": [..]}}}}` values)"
+                 a numeric array, e.g. `\"{field}\": [0.1, 0.2, ...]`)"
             );
         };
-        vectors.push(Vector::new(data.clone()));
+        vectors.push(Vector::new(data));
         if let Some(cap) = sample_size
             && vectors.len() >= cap
         {
@@ -240,8 +256,7 @@ mod tests {
                 })
                 .collect();
             jsonl.push_str(&format!(
-                "{{\"id\": \"doc{i}\", \"document\": {{\"fields\": {{\"embedding\": \
-                 {{\"Vector\": [{}]}}}}}}}}\n",
+                "{{\"id\": \"doc{i}\", \"fields\": {{\"embedding\": [{}]}}}}\n",
                 data.join(", ")
             ));
         }
@@ -460,7 +475,7 @@ mod tests {
         let jsonl = dir.path().join("bad.jsonl");
         std::fs::write(
             &jsonl,
-            "{\"id\": \"doc0\", \"document\": {\"fields\": {\"embedding\": {\"Text\": \"oops\"}}}}\n",
+            "{\"id\": \"doc0\", \"fields\": {\"embedding\": \"oops\"}}\n",
         )
         .unwrap();
 

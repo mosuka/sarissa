@@ -24,7 +24,7 @@ laurus create schema
 laurus --index-dir ./my_index create index --schema schema.toml
 
 # Add a document
-laurus --index-dir ./my_index add doc --id doc1 --data '{"title":"Hello","body":"World"}'
+laurus --index-dir ./my_index add doc --id doc1 --data '{"fields":{"title":"Hello","body":"World"}}'
 
 # Commit changes
 laurus --index-dir ./my_index commit

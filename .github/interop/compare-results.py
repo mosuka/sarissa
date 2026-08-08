@@ -40,8 +40,8 @@ def compare_search_results(name, mode, expected, actual, epsilon, errors):
         return
 
     for exp_r, act_r in zip(expected, actual):
-        exp_doc = exp_r.get("document")
-        act_doc = act_r.get("document")
+        exp_doc = exp_r.get("fields")
+        act_doc = act_r.get("fields")
         if exp_doc != act_doc:
             errors.append(
                 f"[{name}] stored fields mismatch for doc '{exp_r['id']}':\n"

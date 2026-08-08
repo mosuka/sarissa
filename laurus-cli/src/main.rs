@@ -18,6 +18,7 @@
 mod cli;
 mod commands;
 mod context;
+mod json_doc;
 mod output;
 
 use anyhow::Result;

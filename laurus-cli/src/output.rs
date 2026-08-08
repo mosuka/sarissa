@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use base64::Engine as _;
 use clap::ValueEnum;
 use laurus::{DataValue, Document, EngineStats, SearchResult};
 use serde_json::json;
@@ -38,7 +39,7 @@ pub fn print_search_results(results: &[SearchResult], format: OutputFormat) {
                         "score": r.score,
                     });
                     if let Some(ref doc) = r.document {
-                        obj["document"] = fields_to_json(&doc.fields);
+                        obj["fields"] = fields_to_json(&doc.fields);
                     }
                     obj
                 })
@@ -88,7 +89,7 @@ pub fn print_documents(id: &str, documents: &[Document], format: OutputFormat) {
                 .map(|doc| {
                     json!({
                         "id": id,
-                        "document": fields_to_json(&doc.fields),
+                        "fields": fields_to_json(&doc.fields),
                     })
                 })
                 .collect();
@@ -274,6 +275,13 @@ fn format_data_value(value: &DataValue) -> String {
 }
 
 /// Convert DataValue to serde_json::Value.
+///
+/// The output uses the same field-value shapes that
+/// [`laurus::json_to_document`] accepts as input, so `get docs --format
+/// json` output round-trips through `put docs` / `add doc --data`. In
+/// particular, [`DataValue::Bytes`] is rendered as `{"data": "<base64>",
+/// "mime": ...}` — the same object shape `json_to_document` parses back into
+/// bytes — rather than a byte count, which would lose the payload entirely.
 fn data_value_to_json(value: &DataValue) -> serde_json::Value {
     match value {
         DataValue::Null => serde_json::Value::Null,
@@ -281,7 +289,9 @@ fn data_value_to_json(value: &DataValue) -> serde_json::Value {
         DataValue::Int64(i) => json!(i),
         DataValue::Float64(f) => json!(f),
         DataValue::Text(s) => json!(s),
-        DataValue::Bytes(b, mime) => json!({"bytes_len": b.len(), "mime": mime}),
+        DataValue::Bytes(b, mime) => {
+            json!({"data": base64::engine::general_purpose::STANDARD.encode(b), "mime": mime})
+        }
         DataValue::Vector(v) => json!(v),
         DataValue::DateTime(dt) => json!(dt.to_rfc3339()),
         DataValue::Geo(p) => json!({"lat": p.lat, "lon": p.lon}),

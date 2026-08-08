@@ -31,7 +31,7 @@ laurus create index [--schema <FILE>] [--train-pq-codebook <JSONL>]
 | フラグ | 必須 | 説明 |
 | :--- | :--- | :--- |
 | `--schema <FILE>` | いいえ | インデックススキーマを定義する TOML ファイルのパス。省略時はインデックスディレクトリに既存の `schema.toml` があればそれを使用し、なければ対話型ウィザードが起動します。 |
-| `--train-pq-codebook <JSONL>` | いいえ | インデックス作成の一部として共有 PQ codebook を学習します（Issue #920）。`ProductQuantization`（または `pq-fastscan` feature 有効時は `ProductQuantizationFastScan`）+ `pq_codebook_path` を設定したすべての HNSW フィールドを、作成直後にこの JSONL ファイル（`put docs` / `add docs` と同じ形式、事前計算済み `Vector` 値）から学習します。最初の commit がすぐに codebook でエンコードできるため、create → `train pq-codebook` → ingest の順序を手動で守る必要がなくなります。ファイル不在または対象フィールドなしの場合は、何も作成する前にエラーになります。 |
+| `--train-pq-codebook <JSONL>` | いいえ | インデックス作成の一部として共有 PQ codebook を学習します（Issue #920）。`ProductQuantization`（または `pq-fastscan` feature 有効時は `ProductQuantizationFastScan`）+ `pq_codebook_path` を設定したすべての HNSW フィールドを、作成直後にこの JSONL ファイル（`put docs` / `add docs` と同じ形式、フィールド値は素の数値配列）から学習します。最初の commit がすぐに codebook でエンコードできるため、create → `train pq-codebook` → ingest の順序を手動で守る必要がなくなります。ファイル不在または対象フィールドなしの場合は、何も作成する前にエラーになります。 |
 
 **スキーマファイルの形式:**
 
@@ -245,14 +245,15 @@ laurus add doc --id <ID> --data <JSON>
 | `--id <ID>` | はい | 外部ドキュメント ID（文字列） |
 | `--data <JSON>` | はい | JSON 文字列としてのドキュメントフィールド |
 
-JSON はドキュメントの serde 形式です: `fields` オブジェクトの各フィールド名に、外部タグ付きの値（`Text`・`Int64`・`Float64`・`Bool`・`VectorValue` など）を対応付けます。
+JSON は `{"fields": {...}}` 形式です: 各フィールド名にその素の値を対応付けます。型タグはありません
+— 値の宣言済みスキーマ型（未宣言フィールドの場合は推論された型）が曖昧さを解決します。
 
 ```json
 {
   "fields": {
-    "title": {"Text": "Introduction to Rust"},
-    "body": {"Text": "Rust is a systems programming language."},
-    "year": {"Int64": 2024}
+    "title": "Introduction to Rust",
+    "body": "Rust is a systems programming language.",
+    "year": 2024
   }
 }
 ```
@@ -260,7 +261,7 @@ JSON はドキュメントの serde 形式です: `fields` オブジェクトの
 **例:**
 
 ```bash
-laurus add doc --id doc1 --data '{"fields":{"title":{"Text":"Hello World"},"body":{"Text":"This is a test document."}}}'
+laurus add doc --id doc1 --data '{"fields":{"title":"Hello World","body":"This is a test document."}}'
 # Document 'doc1' added. Run 'commit' to persist changes.
 ```
 
@@ -268,7 +269,7 @@ laurus add doc --id doc1 --data '{"fields":{"title":{"Text":"Hello World"},"body
 
 ### `add docs`
 
-JSONL ファイルからドキュメントチャンクをバルク追加します — 1 行に 1 エントリの `{"id": "...", "document": {"fields": {...}}}` 形式で、`document` は `add doc --data` と同じ JSON 形式です。エントリはエンジンのバッチ API（バッチごとに WAL fsync 1 回）で適用され、`add doc` と異なり**自動的にコミット**します（`--commit-every` 件ごと + 最後に 1 回）。
+JSONL ファイルからドキュメントチャンクをバルク追加します — 1 行に 1 エントリの `{"id": "...", "fields": {...}}` 形式で、外部 ID は `add doc --data` と同じ `fields` 形式に並ぶトップレベルキーです。エントリはエンジンのバッチ API（バッチごとに WAL fsync 1 回）で適用され、`add doc` と異なり**自動的にコミット**します（`--commit-every` 件ごと + 最後に 1 回）。
 
 ```bash
 laurus add docs --file <JSONL> [--batch-size 1000] [--commit-every 0]
@@ -306,7 +307,7 @@ laurus put doc --id <ID> --data <JSON>
 **例:**
 
 ```bash
-laurus put doc --id doc1 --data '{"fields":{"title":{"Text":"Updated Title"},"body":{"Text":"This replaces the existing document."}}}'
+laurus put doc --id doc1 --data '{"fields":{"title":"Updated Title","body":"This replaces the existing document."}}'
 # Document 'doc1' put (upserted). Run 'commit' to persist changes.
 ```
 
@@ -314,7 +315,7 @@ laurus put doc --id doc1 --data '{"fields":{"title":{"Text":"Updated Title"},"bo
 
 ### `put docs`
 
-JSONL ファイルからドキュメントをバルク Upsert します — 1 行に 1 エントリの `{"id": "...", "document": {"fields": {...}}}` 形式で、エンジンのバッチ API（バッチごとに WAL fsync 1 回）で適用されます。重複した ID は順にデデュープされます（最後の出現が勝ち）。`add docs` と同じく**自動的にコミット**します。
+JSONL ファイルからドキュメントをバルク Upsert します — 1 行に 1 エントリの `{"id": "...", "fields": {...}}` 形式で、エンジンのバッチ API（バッチごとに WAL fsync 1 回）で適用されます。重複した ID は順にデデュープされます（最後の出現が勝ち）。`add docs` と同じく**自動的にコミット**します。
 
 ```bash
 laurus put docs --file <JSONL> [--batch-size 1000] [--commit-every 0]
@@ -326,8 +327,8 @@ laurus put docs --file <JSONL> [--batch-size 1000] [--commit-every 0]
 
 ```bash
 cat > docs.jsonl <<'JSONL'
-{"id": "doc1", "document": {"fields": {"title": {"Text": "Hello"}}}}
-{"id": "doc2", "document": {"fields": {"title": {"Text": "World"}}}}
+{"id": "doc1", "fields": {"title": "Hello"}}
+{"id": "doc2", "fields": {"title": "World"}}
 JSONL
 laurus put docs --file docs.jsonl
 # 2 documents put (upserted) and committed.
@@ -419,7 +420,7 @@ laurus train pq-codebook --field <FIELD> (--input <JSONL> | --from-index) \
 | 引数 | 説明 |
 | :--- | :--- |
 | `--field` | 学習対象の HNSW ベクトルフィールド。`ProductQuantization` quantizer（または `pq-fastscan` feature 有効時は `ProductQuantizationFastScan` — その場合 codebook は k=16 で学習されます、Issue #920）が設定されている必要があります。 |
-| `--input` | JSONL 学習ファイル — `put docs` / `add docs` と同じ `{"id": "...", "document": {"fields": {...}}}` 形式。フィールド値は事前計算済み `Vector` である必要があります（embedder 生成の入力は未対応）。`--input` と `--from-index` はどちらか一方のみ指定できます。 |
+| `--input` | JSONL 学習ファイル — `put docs` / `add docs` と同じ `{"id": "...", "fields": {...}}` 形式。フィールド値は素の数値配列（例: `"embedding": [0.1, 0.2, ...]`）である必要があります（embedder 生成の入力は未対応）。`--input` と `--from-index` はどちらか一方のみ指定できます。 |
 | `--from-index` | ファイルの代わりに、このインデックスにコミット済みのベクトルを直接サンプリングします（Issue #920）— JSONL エクスポート不要。`--input` と `--from-index` はどちらか一方のみ指定できます。注意: 既に PQ エンコード済みのフィールドではサンプルは有損の再構成ベクトルになります。想定フローはフィールドの PQ 有効化**前**にコミットしたベクトルからの学習です。 |
 | `--sample-size` | 先頭 N 件のみを使用（決定的: `--input` はファイル順、`--from-index` は doc_id 昇順）。省略時は全件を使用。代表的なベクトル数千件で十分です。 |
 | `--output` | ストレージ相対の codebook ファイル名。デフォルトはフィールドの `pq_codebook_path`、未設定なら `{field}.pqcb`。稼働中の codebook の横に v2 を学習する場合に使用。 |
@@ -439,8 +440,8 @@ commit が codebook を使うのは、スキーマの `pq_codebook_path` が
 
 ```bash
 cat > train.jsonl <<'JSONL'
-{"id": "t1", "document": {"fields": {"embedding": {"Vector": [0.1, 0.2, 0.3, 0.4]}}}}
-{"id": "t2", "document": {"fields": {"embedding": {"Vector": [0.5, 0.6, 0.7, 0.8]}}}}
+{"id": "t1", "fields": {"embedding": [0.1, 0.2, 0.3, 0.4]}}
+{"id": "t2", "fields": {"embedding": [0.5, 0.6, 0.7, 0.8]}}
 JSONL
 laurus train pq-codebook --field embedding --input train.jsonl --update-schema
 # Training PQ codebook for field 'embedding' on 2 vectors...

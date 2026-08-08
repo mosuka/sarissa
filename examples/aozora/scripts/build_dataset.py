@@ -244,22 +244,20 @@ def build_document(work: dict, body: str) -> dict:
     excerpt = body[:200].replace("\n", "")
     return {
         "id": work["work_id"],
-        "document": {
-            "fields": {
-                "title": {"Text": work["title"]},
-                "author": {"Text": work["author"]},
-                "author_exact": {"Text": work["author_exact"]},
-                "body": {"Text": body},
-                "excerpt": {"Text": excerpt},
-                "ndc": {"Text": work["ndc"]},
-                "chars": {"Int64": len(body)},
-                "card_url": {"Text": work["card_url"]},
-                # Same text as `title`/`body`, copied into the Hnsw vector
-                # fields — the engine embeds it automatically via the
-                # schema's `ja_text_embedder` (see schema.toml).
-                "title_vec": {"Text": work["title"]},
-                "body_vec": {"Text": body},
-            }
+        "fields": {
+            "title": work["title"],
+            "author": work["author"],
+            "author_exact": work["author_exact"],
+            "body": body,
+            "excerpt": excerpt,
+            "ndc": work["ndc"],
+            "chars": len(body),
+            "card_url": work["card_url"],
+            # Same text as `title`/`body`, copied into the Hnsw vector
+            # fields — the engine embeds it automatically via the
+            # schema's `ja_text_embedder` (see schema.toml).
+            "title_vec": work["title"],
+            "body_vec": body,
         },
     }
 

@@ -31,7 +31,7 @@ laurus create index [--schema <FILE>] [--train-pq-codebook <JSONL>]
 | Flag | Required | Description |
 | :--- | :--- | :--- |
 | `--schema <FILE>` | No | Path to a TOML file defining the index schema. When omitted, the command checks if a `schema.toml` already exists in the index directory and uses it; otherwise the interactive wizard is launched. |
-| `--train-pq-codebook <JSONL>` | No | Train shared PQ codebooks as part of creation (Issue #920). Every HNSW field configuring `ProductQuantization` (or, with the `pq-fastscan` feature, `ProductQuantizationFastScan`) + `pq_codebook_path` is trained from this JSONL file (the `put docs` / `add docs` shape with pre-computed `Vector` values) immediately after the index is created, so the very first commit can already encode against the codebook — removing the create → `train pq-codebook` → ingest ordering the failure policy otherwise requires you to manage manually. Errors before creating anything if the file is missing or no field is eligible. |
+| `--train-pq-codebook <JSONL>` | No | Train shared PQ codebooks as part of creation (Issue #920). Every HNSW field configuring `ProductQuantization` (or, with the `pq-fastscan` feature, `ProductQuantizationFastScan`) + `pq_codebook_path` is trained from this JSONL file (the `put docs` / `add docs` shape; each field value a plain numeric array) immediately after the index is created, so the very first commit can already encode against the codebook — removing the create → `train pq-codebook` → ingest ordering the failure policy otherwise requires you to manage manually. Errors before creating anything if the file is missing or no field is eligible. |
 
 **Schema file format:**
 
@@ -245,14 +245,16 @@ laurus add doc --id <ID> --data <JSON>
 | `--id <ID>` | Yes | External document ID (string) |
 | `--data <JSON>` | Yes | Document fields as a JSON string |
 
-The JSON is the document's serde shape: a `fields` object mapping each field name to an externally-tagged value (`Text`, `Int64`, `Float64`, `Bool`, `VectorValue`, ...):
+The JSON is `{"fields": {...}}`: an object mapping each field name to its
+plain value. There are no type tags — the value's declared schema type (or,
+for an undeclared field, its inferred type) resolves any ambiguity:
 
 ```json
 {
   "fields": {
-    "title": {"Text": "Introduction to Rust"},
-    "body": {"Text": "Rust is a systems programming language."},
-    "year": {"Int64": 2024}
+    "title": "Introduction to Rust",
+    "body": "Rust is a systems programming language.",
+    "year": 2024
   }
 }
 ```
@@ -260,7 +262,7 @@ The JSON is the document's serde shape: a `fields` object mapping each field nam
 **Example:**
 
 ```bash
-laurus add doc --id doc1 --data '{"fields":{"title":{"Text":"Hello World"},"body":{"Text":"This is a test document."}}}'
+laurus add doc --id doc1 --data '{"fields":{"title":"Hello World","body":"This is a test document."}}'
 # Document 'doc1' added. Run 'commit' to persist changes.
 ```
 
@@ -268,7 +270,7 @@ laurus add doc --id doc1 --data '{"fields":{"title":{"Text":"Hello World"},"body
 
 ### `add docs`
 
-Bulk-add document chunks from a JSONL file — one `{"id": "...", "document": {"fields": {...}}}` entry per line, where `document` uses the same JSON shape as `add doc --data`. Entries are applied through the engine's batch API (one WAL fsync per batch) and, unlike `add doc`, the command **commits automatically**: every `--commit-every` applied documents and once at the end.
+Bulk-add document chunks from a JSONL file — one `{"id": "...", "fields": {...}}` entry per line, with the external ID as a sibling top-level key alongside the same `fields` shape as `add doc --data`. Entries are applied through the engine's batch API (one WAL fsync per batch) and, unlike `add doc`, the command **commits automatically**: every `--commit-every` applied documents and once at the end.
 
 ```bash
 laurus add docs --file <JSONL> [--batch-size 1000] [--commit-every 0]
@@ -306,7 +308,7 @@ laurus put doc --id <ID> --data <JSON>
 **Example:**
 
 ```bash
-laurus put doc --id doc1 --data '{"fields":{"title":{"Text":"Updated Title"},"body":{"Text":"This replaces the existing document."}}}'
+laurus put doc --id doc1 --data '{"fields":{"title":"Updated Title","body":"This replaces the existing document."}}'
 # Document 'doc1' put (upserted). Run 'commit' to persist changes.
 ```
 
@@ -314,7 +316,7 @@ laurus put doc --id doc1 --data '{"fields":{"title":{"Text":"Updated Title"},"bo
 
 ### `put docs`
 
-Bulk-upsert documents from a JSONL file — one `{"id": "...", "document": {"fields": {...}}}` entry per line, applied through the engine's batch API (one WAL fsync per batch). Duplicate IDs dedup in order (the last occurrence wins). Like `add docs`, the command **commits automatically**.
+Bulk-upsert documents from a JSONL file — one `{"id": "...", "fields": {...}}` entry per line, applied through the engine's batch API (one WAL fsync per batch). Duplicate IDs dedup in order (the last occurrence wins). Like `add docs`, the command **commits automatically**.
 
 ```bash
 laurus put docs --file <JSONL> [--batch-size 1000] [--commit-every 0]
@@ -326,8 +328,8 @@ Arguments are the same as `add docs`. On a mid-file failure the error names the 
 
 ```bash
 cat > docs.jsonl <<'JSONL'
-{"id": "doc1", "document": {"fields": {"title": {"Text": "Hello"}}}}
-{"id": "doc2", "document": {"fields": {"title": {"Text": "World"}}}}
+{"id": "doc1", "fields": {"title": "Hello"}}
+{"id": "doc2", "fields": {"title": "World"}}
 JSONL
 laurus put docs --file docs.jsonl
 # 2 documents put (upserted) and committed.
@@ -423,7 +425,7 @@ laurus train pq-codebook --field <FIELD> (--input <JSONL> | --from-index) \
 | Argument | Description |
 | :--- | :--- |
 | `--field` | The HNSW vector field to train for. Must be configured with a `ProductQuantization` quantizer (or `ProductQuantizationFastScan` when the `pq-fastscan` feature is enabled — the codebook is then trained with k=16, Issue #920). |
-| `--input` | JSONL training file — the same `{"id": "...", "document": {"fields": {...}}}` shape as `put docs` / `add docs`. The field value must be a pre-computed `Vector` (embedder-generated input is not supported). Exactly one of `--input` and `--from-index` must be given. |
+| `--input` | JSONL training file — the same `{"id": "...", "fields": {...}}` shape as `put docs` / `add docs`. The field value must be a plain numeric array, e.g. `"embedding": [0.1, 0.2, ...]` (embedder-generated input is not supported). Exactly one of `--input` and `--from-index` must be given. |
 | `--from-index` | Sample the vectors already committed to this index instead of reading a file (Issue #920) — no JSONL export needed. Exactly one of `--input` and `--from-index` must be given. Note: on a field that is already PQ-encoded, the sampled vectors are lossy reconstructions; the intended flow is to train from vectors committed **before** enabling PQ on the field. |
 | `--sample-size` | Use only the first N vectors (deterministic: file order for `--input`, ascending doc_id for `--from-index`). Omit to use all of them; thousands of representative vectors are enough. |
 | `--output` | Storage-relative codebook file name. Defaults to the field's configured `pq_codebook_path`, else `{field}.pqcb`. Use to train a v2 codebook alongside a live one. |
@@ -443,8 +445,8 @@ subsequent command sees it).
 
 ```bash
 cat > train.jsonl <<'JSONL'
-{"id": "t1", "document": {"fields": {"embedding": {"Vector": [0.1, 0.2, 0.3, 0.4]}}}}
-{"id": "t2", "document": {"fields": {"embedding": {"Vector": [0.5, 0.6, 0.7, 0.8]}}}}
+{"id": "t1", "fields": {"embedding": [0.1, 0.2, 0.3, 0.4]}}
+{"id": "t2", "fields": {"embedding": [0.5, 0.6, 0.7, 0.8]}}
 JSONL
 laurus train pq-codebook --field embedding --input train.jsonl --update-schema
 # Training PQ codebook for field 'embedding' on 2 vectors...
