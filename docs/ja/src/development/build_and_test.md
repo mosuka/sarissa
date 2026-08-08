@@ -5,6 +5,9 @@
 - **Rust** 1.85 以降（edition 2024）
 - **Cargo**（Rust に付属）
 - **protobuf コンパイラ**（`protoc`）-- `laurus-server` のビルドに必要
+- **[cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild)** --
+  任意。静的リンクの musl バイナリをローカルでクロスビルドする場合のみ必要
+  （[静的リンクの musl バイナリをクロスビルドする](#静的リンクの-musl-バイナリをクロスビルドする)を参照）
 
 ## ビルド
 
@@ -18,6 +21,53 @@ cargo build --features embeddings-candle
 # リリースモードでビルド
 cargo build --release
 ```
+
+## 静的リンクの musl バイナリをクロスビルドする
+
+`laurus-cli` のリリースワークフローは、動的リンクの glibc バイナリに加えて、
+完全に静的リンクされた `x86_64-unknown-linux-musl` /
+`aarch64-unknown-linux-musl` バイナリもビルドします
+（[ビルド済みバイナリ](../laurus-cli/installation.md#ビルド済みバイナリ)を参照）。
+
+前提条件:
+
+```bash
+rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+pip install cargo-zigbuild
+```
+
+`cargo build` の代わりに `cargo zigbuild` でビルドします:
+
+```bash
+cargo zigbuild --release --target x86_64-unknown-linux-musl \
+  -p laurus-cli --features embeddings-all
+```
+
+（`x86_64` ターゲットについては `make build-laurus-cli-musl` と同等です）
+
+**なぜ `apt install musl-tools` ではなく `cargo-zigbuild` を使うのか？**
+Ubuntu の `musl-tools` パッケージは `musl-gcc`（C）を提供しますが
+`musl-g++`（C++）は提供しません。laurus の `--features embeddings-all` の
+依存関係の大部分は C のみか純 Rust です（`aws-lc-sys`、`onig_sys`）が、
+`musl-tools` だけの構成は依存 Feature を 1 つ切り替えるだけで再び C++ を
+要求しかねません（`tokenizers` の `esaxx_fast`。laurus では意図的に無効化
+しています。[Feature Flags](feature_flags.md) を参照）。`cargo-zigbuild` は
+クロス C/C++ ツールチェーンとして [Zig](https://ziglang.org/) を使用し、
+各ターゲット向けの musl ヘッダとライブラリを同梱しているため、Docker が
+不要です。
+
+ビルド結果が本当に静的であることを確認する:
+
+```bash
+file target/x86_64-unknown-linux-musl/release/laurus
+# -> ELF 64-bit LSB executable, ..., statically linked
+readelf -d target/x86_64-unknown-linux-musl/release/laurus | grep NEEDED
+# -> (出力なし)
+```
+
+この手順が対応する CI 設定については
+[`.github/workflows/release.yml`](../../../.github/workflows/release.yml)
+の `build-binary` を参照してください。
 
 ## テスト
 

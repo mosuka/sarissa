@@ -210,6 +210,12 @@ Pull requests automatically run:
    `test-laurus-wasm`, `test-laurus-ruby`, `test-laurus-php`) run when their
    respective crate or shared sources change.
 
+   Release tags additionally build binaries for macOS (x86_64, aarch64) and
+   static Linux musl (`x86_64-unknown-linux-musl`,
+   `aarch64-unknown-linux-musl`) in `build-binary` -- these are build-only
+   and not part of the PR test matrix above; see
+   [Prebuilt binaries](https://mosuka.github.io/laurus/laurus-cli/installation.html#prebuilt-binaries).
+
 All checks must pass before a PR can be merged.
 
 ## License

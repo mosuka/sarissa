@@ -16,6 +16,11 @@ Command-line interface for the [Laurus](https://github.com/mosuka/laurus) search
 
 ## Installation
 
+Prebuilt binaries (including fully static musl builds for Alpine/scratch)
+are attached to each [GitHub release](https://github.com/mosuka/laurus/releases);
+see [Installation](https://mosuka.github.io/laurus/laurus-cli/installation.html)
+for the full target list and a download example.
+
 ```bash
 cargo install laurus-cli
 ```
