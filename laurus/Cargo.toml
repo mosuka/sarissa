@@ -64,8 +64,34 @@ tempfile = { workspace = true, optional = true }
 candle-core = { version = "0.10.2", optional = true }
 candle-nn = { version = "0.10.2", optional = true }
 candle-transformers = { version = "0.10.2", optional = true }
-hf-hub = { version = "0.5.0", optional = true }
-tokenizers = { version = "0.23.1", optional = true }
+# hf-hub's default features are ["default-tls", "tokio", "ureq"], and
+# `default-tls = ["native-tls"]` pulls reqwest 0.12 + native-tls + openssl-sys
+# -- the only openssl-sys entry point in the laurus-cli dependency graph
+# (laurus's own reqwest 0.13 already defaults to rustls). openssl-sys cannot
+# cross-compile to *-unknown-linux-musl, which is what this pins away.
+#
+# `ureq` is mandatory, not optional: laurus uses `hf_hub::api::sync::ApiBuilder`
+# (candle_bert_embedder.rs, candle_clip_embedder.rs) and hf-hub gates the whole
+# `api::sync` module behind `#[cfg(feature = "ureq")]`. `ureq` itself defaults
+# to a rustls TLS backend, so `rustls-tls` here only guards the (currently
+# unused) `tokio`/reqwest path in case some future dependency turns it on via
+# feature unification.
+hf-hub = { version = "0.5.0", default-features = false, features = [
+    "ureq",
+    "rustls-tls",
+], optional = true }
+# Default features include `esaxx_fast` (-> esaxx-rs/cpp), which compiles a
+# C++ source file (esaxx.cpp) purely to accelerate Unigram tokenizer
+# *training* (tokenizers::models::unigram::trainer). laurus only loads
+# pretrained tokenizers via `Tokenizer::from_file` + `encode` and never
+# trains one, so this buys nothing here while forcing every build (not just
+# musl) to carry a C++ toolchain. Disabling it falls back to the pure-Rust
+# `suffix_rs` implementation with no functional change. `candle-core`
+# already builds tokenizers this way (`default-features = false,
+# features = ["onig"]`).
+tokenizers = { version = "0.23.1", default-features = false, features = [
+    "onig",
+], optional = true }
 reqwest = { version = "0.13.3", features = ["json"], optional = true }
 image = { version = "0.25.10", optional = true }
 

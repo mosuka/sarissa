@@ -49,6 +49,30 @@ laurus = { version = "0.9", features = ["embeddings-multimodal"] }
 laurus = { version = "0.9", features = ["embeddings-all"] }
 ```
 
+## TLS とネットワークの挙動
+
+Embedding Feature は、信頼するルート証明書のソースが異なる 2 系統の TLS
+スタックを使用します。
+
+| Feature | HTTP クライアント | TLS backend | 信頼するルート証明書のソース |
+| :--- | :--- | :--- | :--- |
+| `embeddings-candle`, `embeddings-multimodal` | `hf-hub`（`ureq`） | rustls | バイナリに埋め込まれた Mozilla ルート証明書（`webpki-roots`） |
+| `embeddings-openai` | `reqwest` | rustls | OS の信頼ストア（`rustls-platform-verifier` 経由） |
+
+Hugging Face Hub からのモデルダウンロード（`embeddings-candle` /
+`embeddings-multimodal`）は、OS の信頼ストアではなくバイナリに埋め込まれた
+証明書を使用します。これは意図的な設計です。`ca-certificates` パッケージが
+入っていない `scratch` や distroless コンテナ内でも、完全静的リンクの musl
+バイナリがモデルをダウンロードできるようにするためです。トレードオフとして、
+このパスでは `SSL_CERT_FILE` / `SSL_CERT_DIR` は尊重されず、OS の信頼ストア
+にのみ導入された独自 CA（例: 社内の TLS インスペクションプロキシ配下）は
+信頼されません。そのようなプロキシ経由で Hugging Face へのダウンロードを
+行う必要がある場合は、キャッシュを事前に用意して `HF_HOME` でそれを指すか、
+信頼された内部ミラーを `HF_ENDPOINT` で指定してください。
+
+`embeddings-openai` は OS の信頼ストアを参照するため、これを使用する
+コンテナには引き続き `ca-certificates` のインストールが必要です。
+
 ## Feature Flag がバイナリサイズに与える影響
 
 Embedding Feature を有効にすると、コンパイル時間とバイナリサイズが増加する依存クレートが追加されます。

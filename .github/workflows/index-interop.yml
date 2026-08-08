@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.HF_HOME }}
-          key: hf-cache-${{ runner.os }}-sentence-transformers-all-MiniLM-L6-v2
+          key: hf-cache-${{ runner.os }}-sentence-transformers-all-MiniLM-L6-v2-rustls
 
       - name: Build laurus CLI
         run: |
@@ -109,7 +109,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.HF_HOME }}
-          key: hf-cache-${{ runner.os }}-sentence-transformers-all-MiniLM-L6-v2
+          key: hf-cache-${{ runner.os }}-sentence-transformers-all-MiniLM-L6-v2-rustls
 
       - name: Build laurus CLI
         run: |
