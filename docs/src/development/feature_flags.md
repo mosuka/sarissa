@@ -49,6 +49,30 @@ Convenience flag that enables all embedding features.
 laurus = { version = "0.9", features = ["embeddings-all"] }
 ```
 
+## TLS and Network Behavior
+
+The embedding features use two independent TLS stacks with different trust
+sources:
+
+| Feature | HTTP client | TLS backend | Trust source |
+| :--- | :--- | :--- | :--- |
+| `embeddings-candle`, `embeddings-multimodal` | `hf-hub` (`ureq`) | rustls | Bundled Mozilla root certificates (`webpki-roots`) |
+| `embeddings-openai` | `reqwest` | rustls | OS trust store (via `rustls-platform-verifier`) |
+
+Model downloads from Hugging Face Hub (`embeddings-candle` /
+`embeddings-multimodal`) use certificates bundled into the binary rather than
+the operating system's trust store. This is deliberate: it lets a fully
+static musl binary download models inside a `scratch` or distroless
+container with no `ca-certificates` package installed. The tradeoff is that
+`SSL_CERT_FILE` / `SSL_CERT_DIR` are not honored on this path, and a custom
+CA installed only in the OS trust store (for example behind a corporate
+TLS-inspecting proxy) will not be trusted. If you need to route Hugging Face
+downloads through such a proxy, pre-populate the cache and point `HF_HOME` at
+it, or set `HF_ENDPOINT` to an internally trusted mirror.
+
+`embeddings-openai` reads the OS trust store, so containers using it still
+need `ca-certificates` installed.
+
 ## Feature Flag Impact on Binary Size
 
 Enabling embedding features adds dependencies that increase compile time and binary size:

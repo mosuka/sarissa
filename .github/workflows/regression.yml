@@ -216,6 +216,24 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --features embeddings-all -- -D warnings
 
+      - name: Assert laurus-cli links no OpenSSL
+        run: |
+          set -euo pipefail
+          # Guards the musl release binaries: openssl-sys cannot cross-compile
+          # to *-unknown-linux-musl. Historically it entered the graph via
+          # hf-hub's default features (default-tls -> native-tls -> openssl-sys).
+          #
+          # NOTE: grepping Cargo.lock is NOT a valid guard here -- the
+          # workspace lock legitimately contains openssl-sys via
+          # laurus-php -> ext-php-rs. Only the laurus-cli sub-graph matters.
+          if cargo tree -p laurus-cli --features embeddings-all \
+               --target x86_64-unknown-linux-musl -i openssl-sys >/dev/null 2>&1; then
+            echo "ERROR: openssl-sys reappeared in the laurus-cli dependency graph:" >&2
+            cargo tree -p laurus-cli --features embeddings-all \
+              --target x86_64-unknown-linux-musl -i openssl-sys >&2
+            exit 1
+          fi
+
   # ============================================================
   # Test laurus (core library)
   # ============================================================
