@@ -1,3 +1,4 @@
+pub mod json_document;
 pub mod query;
 pub mod schema;
 pub mod search;

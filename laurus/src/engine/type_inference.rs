@@ -23,17 +23,27 @@
 //! - `object` with `lat|latitude` and `lon|lng|longitude` keys (values in
 //!   range) → [`FieldOption::Geo`]
 //! - `object` with all three numeric keys `x`, `y`, `z` → [`FieldOption::Geo3d`]
+//! - `object` with a `data` key (base64-encoded string, optional `mime`
+//!   string) → [`DataValue::Bytes`]
 //!
-//! Vector and bytes fields are never inferred; they must always be declared
-//! explicitly in the schema. Mixing 2D (`lat`/`lon`) and 3D (`x`/`y`/`z`)
-//! markers in the same object is rejected as ambiguous.
+//! Vector fields are never inferred; a numeric array always maps to a
+//! multi-valued Integer/Float field, never to [`DataValue::Vector`]. This is
+//! about **value parsing** only, not schema auto-registration: even though
+//! this module can now parse the `{data, mime}` bytes shape, an *undeclared*
+//! field carrying a [`DataValue::Bytes`] value is still rejected by
+//! [`infer_option_from_data_value`] — bytes fields must be declared
+//! explicitly in the schema (dimension-free, but still explicit, unlike
+//! Text/Integer/etc. which can be auto-registered). Mixing geographic keys
+//! (`lat`/`lon`, `x`/`y`/`z`) with the bytes `data` key in the same object is
+//! rejected as ambiguous.
 
+use base64::Engine as _;
 use serde_json::Value as JsonValue;
 
 use crate::data::DataValue;
 use crate::error::{LaurusError, Result};
 use crate::lexical::core::field::{
-    BooleanOption, FloatOption, GeoOption, IntegerOption, TextOption,
+    BooleanOption, BytesOption, FloatOption, GeoOption, IntegerOption, TextOption,
 };
 
 use super::schema::FieldOption;
@@ -127,6 +137,7 @@ pub fn infer_option_from_data_value(value: &DataValue) -> Result<Option<FieldOpt
 /// | `bool` | [`DataValue::Bool`] | [`FieldOption::Boolean`] |
 /// | `object` with `lat|latitude` + `lon|lng|longitude` | [`DataValue::Geo`] | [`FieldOption::Geo`] |
 /// | `object` with `x` + `y` + `z` (all numeric) | [`DataValue::GeoEcef`] | [`FieldOption::Geo3d`] |
+/// | `object` with `data` (base64 string) + optional `mime` | [`DataValue::Bytes`] | [`FieldOption::Bytes`] |
 /// | `null` | (none) | (none) — returns [`InferredValue::Skip`] |
 /// | `array` of integers | [`DataValue::Int64Array`] | [`FieldOption::Integer`] with `multi_valued = true` |
 /// | `array` containing any non-i64 number | [`DataValue::Float64Array`] | [`FieldOption::Float`] with `multi_valued = true` |
@@ -250,7 +261,7 @@ fn infer_from_array(arr: &[JsonValue]) -> Result<InferredValue> {
 
 /// Infer a value from a JSON object.
 ///
-/// Two object shapes are accepted:
+/// Three object shapes are accepted:
 ///
 /// - **2D geographic point** ([`DataValue::Geo`]): an object with a latitude
 ///   key (`lat` or `latitude`) and a longitude key (`lon`, `lng`, or
@@ -260,11 +271,19 @@ fn infer_from_array(arr: &[JsonValue]) -> Result<InferredValue> {
 ///   numeric keys `x`, `y`, `z` (meters from the Earth's centre, in the
 ///   ECEF Cartesian frame). Coordinates must be finite (no `NaN` / `inf`);
 ///   no range check is applied because ECEF values are unbounded.
+/// - **Bytes** ([`DataValue::Bytes`]): an object with a `data` key holding a
+///   base64-encoded string, and an optional `mime` string key. This is the
+///   disambiguating shape for multimodal vector fields (e.g. an `Hnsw` field
+///   backed by an image embedder), where a bare base64 string would be
+///   ambiguous between "text to embed" and "image bytes to decode" — see
+///   [`crate::engine::type_coercion::coerce_value`] for the field-level
+///   Bytes/Vector coercion rules that consume this shape.
 ///
-/// Mixing 2D and 3D markers in the same object (e.g. supplying both `lat`
-/// and `x`) is rejected as ambiguous. Other object shapes — including
-/// partial key sets like `{lat}` alone or `{x, y}` without `z` — are
-/// rejected with the generic "geographic points" error.
+/// Mixing markers from more than one of these shapes in the same object
+/// (e.g. supplying both `lat` and `x`, or `lat` and `data`) is rejected as
+/// ambiguous. Other object shapes — including partial key sets like `{lat}`
+/// alone or `{x, y}` without `z` — are rejected with the generic
+/// "geographic points" error.
 ///
 /// # Arguments
 ///
@@ -273,9 +292,10 @@ fn infer_from_array(arr: &[JsonValue]) -> Result<InferredValue> {
 /// # Errors
 ///
 /// Returns [`LaurusError::invalid_argument`] when the object is not a
-/// valid 2D or 3D geographic point, when 2D and 3D markers are mixed,
-/// when a coordinate is non-numeric or out of range, or when an ECEF
-/// coordinate is not finite.
+/// valid 2D/3D geographic point or bytes value, when markers from more than
+/// one shape are mixed, when a coordinate is non-numeric or out of range,
+/// when an ECEF coordinate is not finite, or when `data` is not a valid
+/// base64 string.
 fn infer_from_object(map: &serde_json::Map<String, JsonValue>) -> Result<InferredValue> {
     const LAT_KEYS: &[&str] = &["lat", "latitude"];
     const LON_KEYS: &[&str] = &["lon", "lng", "longitude"];
@@ -285,16 +305,43 @@ fn infer_from_object(map: &serde_json::Map<String, JsonValue>) -> Result<Inferre
     let x_val = map.get("x");
     let y_val = map.get("y");
     let z_val = map.get("z");
+    let data_val = map.get("data");
 
     let has_2d_keys = lat_val.is_some() || lon_val.is_some();
     let has_3d_keys = x_val.is_some() || y_val.is_some() || z_val.is_some();
+    let has_bytes_key = data_val.is_some();
 
-    // Reject ambiguous mixing of 2D and 3D markers.
-    if has_2d_keys && has_3d_keys {
+    // Reject ambiguous mixing of markers from more than one shape.
+    if (has_2d_keys as u8 + has_3d_keys as u8 + has_bytes_key as u8) > 1 {
         return Err(LaurusError::invalid_argument(
-            "object cannot mix 2D geographic keys (lat/lon) with 3D ECEF keys (x/y/z); \
-             use either {lat, lon} or {x, y, z}",
+            "object cannot mix geographic keys (lat/lon, x/y/z) with a bytes \"data\" key; \
+             use exactly one of {lat, lon}, {x, y, z}, or {data, mime?}",
         ));
+    }
+
+    // Bytes path.
+    if let Some(data_val) = data_val {
+        let encoded = data_val.as_str().ok_or_else(|| {
+            LaurusError::invalid_argument("bytes \"data\" must be a base64-encoded string")
+        })?;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| {
+                LaurusError::invalid_argument(format!("bytes \"data\" is not valid base64: {e}"))
+            })?;
+        let mime = match map.get("mime") {
+            None | Some(JsonValue::Null) => None,
+            Some(JsonValue::String(s)) => Some(s.clone()),
+            Some(_) => {
+                return Err(LaurusError::invalid_argument(
+                    "bytes \"mime\" must be a string",
+                ));
+            }
+        };
+        return Ok(InferredValue::Inferred {
+            value: DataValue::Bytes(decoded, mime),
+            option: FieldOption::Bytes(BytesOption::default()),
+        });
     }
 
     // 2D Geo path.
@@ -345,8 +392,9 @@ fn infer_from_object(map: &serde_json::Map<String, JsonValue>) -> Result<Inferre
 
     // Partial keys (e.g. only `lat`, or `x`+`y` without `z`) or unrelated object.
     Err(LaurusError::invalid_argument(
-        "object values are only supported as geographic points \
-         (expected keys: lat|latitude, lon|lng|longitude for 2D, or x+y+z for 3D ECEF)",
+        "object values are only supported as geographic points or bytes \
+         (expected keys: lat|latitude, lon|lng|longitude for 2D geo; \
+         x+y+z for 3D ECEF geo; or data (+ optional mime) for bytes)",
     ))
 }
 
@@ -580,5 +628,63 @@ mod tests {
         // because the user's intent is ambiguous.
         let err = infer_from_json(&json!({"lat": 35.0, "x": 1.0})).unwrap_err();
         assert!(err.to_string().contains("mix"));
+    }
+
+    #[test]
+    fn infer_bytes_data_only() {
+        // base64("hi") == "aGk="
+        let (v, o) = inferred(infer_from_json(&json!({"data": "aGk="})).unwrap());
+        assert_eq!(v, DataValue::Bytes(b"hi".to_vec(), None));
+        assert!(matches!(o, FieldOption::Bytes(_)));
+    }
+
+    #[test]
+    fn infer_bytes_data_with_mime() {
+        let (v, _) =
+            inferred(infer_from_json(&json!({"data": "aGk=", "mime": "image/jpeg"})).unwrap());
+        assert_eq!(
+            v,
+            DataValue::Bytes(b"hi".to_vec(), Some("image/jpeg".to_string()))
+        );
+    }
+
+    #[test]
+    fn infer_bytes_invalid_base64_rejected() {
+        let err = infer_from_json(&json!({"data": "not valid base64!!"})).unwrap_err();
+        assert!(err.to_string().contains("base64"));
+    }
+
+    #[test]
+    fn infer_bytes_non_string_data_rejected() {
+        let err = infer_from_json(&json!({"data": 42})).unwrap_err();
+        assert!(err.to_string().contains("base64-encoded string"));
+    }
+
+    #[test]
+    fn infer_bytes_non_string_mime_rejected() {
+        let err = infer_from_json(&json!({"data": "aGk=", "mime": 42})).unwrap_err();
+        assert!(err.to_string().contains("mime"));
+    }
+
+    #[test]
+    fn infer_bytes_geo_mix_rejected() {
+        let err = infer_from_json(&json!({"data": "aGk=", "lat": 35.0, "lon": 139.0})).unwrap_err();
+        assert!(err.to_string().contains("mix"));
+    }
+
+    #[test]
+    fn infer_bytes_geo3d_mix_rejected() {
+        let err =
+            infer_from_json(&json!({"data": "aGk=", "x": 1.0, "y": 2.0, "z": 3.0})).unwrap_err();
+        assert!(err.to_string().contains("mix"));
+    }
+
+    #[test]
+    fn infer_unknown_object_still_rejects_with_geographic_hint() {
+        // Regression guard: an old tagged-format document value like
+        // `{"Text": "hello"}` must still be rejected outright, not silently
+        // misinterpreted as some other shape.
+        let err = infer_from_json(&json!({"Text": "hello"})).unwrap_err();
+        assert!(err.to_string().contains("geographic"));
     }
 }
