@@ -15,11 +15,12 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use laurus::{Document, Engine, FieldOption, Schema, SearchRequestBuilder};
+use laurus::{Engine, FieldOption, Schema, SearchRequestBuilder};
 use rustyline::DefaultEditor;
 
 use crate::commands::create;
 use crate::context;
+use crate::json_doc::parse_document_json;
 use crate::output::{self, OutputFormat};
 
 /// Error message shown when a command requires an open index but none is loaded.
@@ -339,8 +340,7 @@ async fn handle_add(
         "doc" => {
             let rest = rest.context("Usage: add doc <id> <json>")?;
             let (id, json_str) = rest.split_once(' ').context("Usage: add doc <id> <json>")?;
-            let doc: Document =
-                serde_json::from_str(json_str).context("Failed to parse document JSON")?;
+            let doc = parse_document_json(json_str).context("Failed to parse document JSON")?;
             engine.add_document(id, doc).await?;
             println!("Document '{id}' added.");
             Ok(())
@@ -368,8 +368,7 @@ async fn handle_put(engine: &Engine, resource: &str, rest: Option<&str>) -> Resu
         "doc" => {
             let rest = rest.context("Usage: put doc <id> <json>")?;
             let (id, json_str) = rest.split_once(' ').context("Usage: put doc <id> <json>")?;
-            let doc: Document =
-                serde_json::from_str(json_str).context("Failed to parse document JSON")?;
+            let doc = parse_document_json(json_str).context("Failed to parse document JSON")?;
             engine.put_document(id, doc).await?;
             println!("Document '{id}' put (upserted).");
             Ok(())
@@ -448,6 +447,8 @@ async fn handle_delete(
 
 #[cfg(test)]
 mod tests {
+    use laurus::Document;
+
     use super::*;
 
     /// Same dictionary-free bigram fixture as `commands::search::tests` —

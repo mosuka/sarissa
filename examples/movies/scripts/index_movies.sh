@@ -11,7 +11,7 @@
 #
 #   --limit N   Index only the first N movies (default: all)
 #
-# Requires: jq, curl, python3 (for binary-to-JSON-array conversion)
+# Requires: jq, curl, python3 (for binary-to-base64 conversion)
 # Build feature: embeddings-multimodal (for CLIP-based poster embedding)
 set -euo pipefail
 
@@ -96,21 +96,22 @@ echo "==> Downloaded $DOWNLOADED poster images."
 # --- Phase 2: Index documents ---
 echo "==> Indexing $TOTAL movies into $INDEX_DIR"
 
-# Helper: convert a binary file to a JSON integer array and write to a temp file.
-# Usage: file_to_json_array <image_path> <output_path>
+# Helper: convert a binary file to a base64-encoded string and write it to
+# a temp file.
+# Usage: file_to_base64 <image_path> <output_path>
 # Returns 0 on success, 1 on failure.
-file_to_json_array() {
+file_to_base64() {
   python3 -c "
-import sys, json
+import sys, base64
 with open(sys.argv[1], 'rb') as f:
     data = f.read()
 with open(sys.argv[2], 'w') as out:
-    json.dump(list(data), out)
+    out.write(base64.b64encode(data).decode('ascii'))
 " "$1" "$2" 2>/dev/null
 }
 
-BYTES_TMPFILE=$(mktemp)
-trap 'rm -f "$BYTES_TMPFILE"' EXIT
+BASE64_TMPFILE=$(mktemp)
+trap 'rm -f "$BASE64_TMPFILE"' EXIT
 
 # Generate REPL commands from the dataset and pipe them into a single laurus process.
 generate_commands() {
@@ -118,22 +119,29 @@ generate_commands() {
   jq -c "${JQ_SLICE}" "$DATASET" | while IFS= read -r movie; do
     ID=$(echo "$movie" | jq -r '.id')
 
-    # Build the base document with lexical fields.
+    # Build the base document with lexical fields as plain values — the
+    # engine's type inference resolves them against the declared schema.
     BASE_DOC=$(echo "$movie" | jq -c '{
-      title: {Text: .title},
-      overview: {Text: .overview},
-      genres: {Text: (.genres | join(", "))},
-      poster: {Text: .poster},
-      release_date: {Int64: .release_date}
+      title: .title,
+      overview: .overview,
+      genres: (.genres | join(", ")),
+      poster: .poster,
+      release_date: .release_date
     }')
 
-    # If the poster image was downloaded, add poster_vec as Bytes field.
-    # Use --slurpfile to read the byte array from a temp file instead of
-    # --argjson, which would hit the shell argument length limit for large images.
+    # If the poster image was downloaded, add poster_vec as a base64
+    # {data, mime} object. poster_vec is an Hnsw field backed by a CLIP
+    # (multimodal) embedder, which accepts both text-to-embed and
+    # image-bytes-to-decode — a bare base64 string would be ambiguous
+    # between the two, so the explicit object shape is required here
+    # (a plain base64 string is only unambiguous for a declared Bytes
+    # field, not a multimodal vector field).
+    # Use --rawfile to read the base64 text from a temp file instead of
+    # --arg, which would hit the shell argument length limit for large images.
     IMAGE_FILE="$IMAGES_DIR/${ID}.jpg"
-    if [ -f "$IMAGE_FILE" ] && file_to_json_array "$IMAGE_FILE" "$BYTES_TMPFILE"; then
-      DOC=$(echo "$BASE_DOC" | jq -c --slurpfile bytes "$BYTES_TMPFILE" \
-        '. + {poster_vec: {Bytes: [$bytes[0], "image/jpeg"]}} | {fields: .}')
+    if [ -f "$IMAGE_FILE" ] && file_to_base64 "$IMAGE_FILE" "$BASE64_TMPFILE"; then
+      DOC=$(echo "$BASE_DOC" | jq -c --rawfile b64 "$BASE64_TMPFILE" \
+        '. + {poster_vec: {data: $b64, mime: "image/jpeg"}} | {fields: .}')
     else
       DOC=$(echo "$BASE_DOC" | jq -c '{fields: .}')
     fi

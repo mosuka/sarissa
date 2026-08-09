@@ -14,6 +14,8 @@
 //!   representations when they are unambiguous (`"42"`, `"true"`).
 //! - Text fields accept any scalar value by stringifying it.
 //! - Geographic and (future) multi-valued numeric fields have strict typing.
+//! - Bytes fields accept a plain string as base64-encoded data, in addition
+//!   to a pass-through `Bytes` value.
 //!
 //! Values that cannot be coerced produce an error. The caller (see
 //! [`Engine`](crate::Engine)) decides what to do with the error based on the
@@ -24,6 +26,8 @@
 //!   rule is already embedded in this module; truly incompatible values are
 //!   reported back.
 //! - `Ignore` → drops the field and continues.
+
+use base64::Engine as _;
 
 use crate::data::DataValue;
 use crate::error::{LaurusError, Result};
@@ -256,6 +260,22 @@ fn coerce_to_geo3d(field_name: &str, value: DataValue) -> Result<DataValue> {
 fn coerce_to_bytes(field_name: &str, value: DataValue) -> Result<DataValue> {
     match value {
         DataValue::Bytes(data, mime) => Ok(DataValue::Bytes(data, mime)),
+        // A plain string on a declared `Bytes` field is unambiguous — the
+        // schema already says "this is bytes" — so treat it as base64,
+        // matching the `{"data": "<base64>"}` object shape that
+        // `type_inference::infer_from_object` produces for undeclared
+        // fields. Unlike a bytes-typed `Hnsw`/`Flat`/`Ivf` field (see
+        // `coerce_to_vector`), there is no text-vs-bytes ambiguity here to
+        // preserve, since a declared `Bytes` field never accepts a
+        // to-be-embedded string.
+        DataValue::Text(s) => base64::engine::general_purpose::STANDARD
+            .decode(s.trim())
+            .map(|data| DataValue::Bytes(data, None))
+            .map_err(|e| {
+                LaurusError::invalid_argument(format!(
+                    "field '{field_name}': cannot decode '{s}' as base64: {e}"
+                ))
+            }),
         other => Err(LaurusError::invalid_argument(format!(
             "field '{field_name}': cannot coerce {} to bytes",
             describe(&other)
@@ -338,6 +358,10 @@ mod tests {
 
     fn geo3d() -> FieldOption {
         FieldOption::Geo3d(Geo3dOption::default())
+    }
+
+    fn bytes() -> FieldOption {
+        FieldOption::Bytes(crate::lexical::core::field::BytesOption::default())
     }
 
     #[test]
@@ -479,5 +503,49 @@ mod tests {
         let p2d = crate::data::GeoPoint::new(35.1, 139.0);
         assert!(coerce_value("g3", &geo3d(), DataValue::Geo(p2d)).is_err());
         assert!(coerce_value("g3", &geo3d(), DataValue::Int64(35)).is_err());
+    }
+
+    #[test]
+    fn bytes_passthrough() {
+        assert_eq!(
+            coerce_value("f", &bytes(), DataValue::Bytes(b"hi".to_vec(), None)).unwrap(),
+            DataValue::Bytes(b"hi".to_vec(), None)
+        );
+        assert_eq!(
+            coerce_value(
+                "f",
+                &bytes(),
+                DataValue::Bytes(b"hi".to_vec(), Some("image/jpeg".to_string()))
+            )
+            .unwrap(),
+            DataValue::Bytes(b"hi".to_vec(), Some("image/jpeg".to_string()))
+        );
+    }
+
+    #[test]
+    fn bytes_decodes_base64_text() {
+        // base64("hi") == "aGk="
+        assert_eq!(
+            coerce_value("f", &bytes(), DataValue::Text("aGk=".to_string())).unwrap(),
+            DataValue::Bytes(b"hi".to_vec(), None)
+        );
+    }
+
+    #[test]
+    fn bytes_rejects_invalid_base64_text() {
+        assert!(
+            coerce_value(
+                "f",
+                &bytes(),
+                DataValue::Text("not valid base64!!".to_string())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn bytes_rejects_other_types() {
+        assert!(coerce_value("f", &bytes(), DataValue::Int64(42)).is_err());
+        assert!(coerce_value("f", &bytes(), DataValue::Bool(true)).is_err());
     }
 }

@@ -86,6 +86,7 @@ pub use engine::Engine;
 pub use engine::EngineBuilder;
 pub use engine::EngineStats;
 pub use engine::PqCodebookInfo;
+pub use engine::json_document::json_to_document;
 pub use engine::query::UnifiedQueryParser;
 pub use engine::schema::analyzer::{
     AnalyzerDefinition, AnalyzerSpec, BuiltinAnalyzerSpec, CharFilterConfig, TokenFilterConfig,

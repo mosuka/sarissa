@@ -53,7 +53,7 @@ laurus>
 ```text
 laurus> create index ./schema.toml
 Index created at ./my_index.
-laurus> add doc doc1 {"title":"Hello","body":"World"}
+laurus> add doc doc1 {"fields":{"title":"Hello","body":"World"}}
 Document 'doc1' added.
 ```
 
@@ -82,7 +82,7 @@ Field 'category' deleted.
 ### ドキュメントの追加とコミット
 
 ```text
-laurus> add doc doc4 {"title":"New Document","body":"Some content here."}
+laurus> add doc doc4 {"fields":{"title":"New Document","body":"Some content here."}}
 Document 'doc4' added.
 laurus> commit
 Changes committed.

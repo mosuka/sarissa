@@ -305,11 +305,17 @@ let schema = Schema::builder()
 | array of floats / mixed numeric (e.g. `[1.5, 2.0, 3]`) | `Float` with `multi_valued = true` |
 | object with a latitude key (`lat` or `latitude`) and a longitude key (`lon`, `lng`, or `longitude`), values in range | `Geo` |
 | object with all three numeric keys `x`, `y`, `z` (finite values, ECEF meters) | `Geo3d` |
+| object with a `data` key (base64-encoded string) and an optional `mime` string key | `Bytes` value |
 
-Vector fields (`Hnsw`, `Flat`, `Ivf`) and `Bytes` are **never** inferred:
-they must be declared in the schema explicitly. Mixing 2D (`lat`/`lon`)
-and 3D (`x`/`y`/`z`) markers in a single object is rejected as ambiguous;
-use either shape, not both.
+Vector fields (`Hnsw`, `Flat`, `Ivf`) are **never** inferred: they must be
+declared in the schema explicitly, since dimension, distance metric, and
+embedder configuration cannot be recovered from a value alone. `Bytes`
+values can be *parsed* from the `{data, mime}` object shape above, but an
+**undeclared** field carrying a `Bytes` value is still rejected rather than
+auto-registered — bytes fields must always be declared explicitly, same as
+vector fields. Mixing markers from more than one shape (2D `lat`/`lon`, 3D
+`x`/`y`/`z`, or bytes `data`) in a single object is rejected as ambiguous;
+use exactly one shape per object.
 
 ### Multi-valued numeric fields
 
@@ -338,7 +344,10 @@ to coerce the value to the declared type. The coercion rules are:
 | `Boolean` | `Int64(0)` / `Int64(1)` | `false` / `true` |
 | `Boolean` | `Text("true"/"false")` | parsed (case-insensitive) |
 | `Text` | any scalar | stringified |
-| `Geo` / `Geo3d` / `Bytes` / vector | anything other than matching variant | error |
+| `Bytes` | `Text(s)` | decoded as base64 (error if `s` is not valid base64) |
+| `Geo` / `Geo3d` | anything other than matching variant | error |
+| vector (`Hnsw`/`Flat`/`Ivf`) | `Text` or `Bytes` | passed through unchanged for the field's embedder |
+| vector (`Hnsw`/`Flat`/`Ivf`) | numeric array | cast element-wise to `f32` |
 
 Coercion errors interact with the policy:
 

@@ -141,7 +141,7 @@ jobs:
 
           "$BIN" --index-dir "$INDEX_DIR" --format json add doc \
             --id "doc-linux-write-check" \
-            --data '{"fields": {"title": {"Text": "Linux Write Compatibility Check Document"}, "title_ja": {"Text": "リナックスから追加した文書"}, "year": {"Int64": 2025}, "summary": {"Text": "Verifying that a document added by a Linux binary can be committed into a macOS-built index."}}}'
+            --data '{"fields": {"title": "Linux Write Compatibility Check Document", "title_ja": "リナックスから追加した文書", "year": 2025, "summary": "Verifying that a document added by a Linux binary can be committed into a macOS-built index."}}'
           "$BIN" --index-dir "$INDEX_DIR" commit
 
           RESULT=$("$BIN" --index-dir "$INDEX_DIR" --format json search "title:compatibility" --limit 5)

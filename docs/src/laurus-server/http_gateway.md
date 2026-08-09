@@ -120,11 +120,9 @@ Replaces the document if it already exists:
 curl -X PUT http://localhost:8080/v1/documents/doc1 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Hello World",
-        "body": "This is a test document."
-      }
+    "fields": {
+      "title": "Hello World",
+      "body": "This is a test document."
     }
   }'
 ```
@@ -137,11 +135,9 @@ Adds a new chunk without replacing existing documents with the same ID:
 curl -X POST http://localhost:8080/v1/documents/doc1 \
   -H 'Content-Type: application/json' \
   -d '{
-    "document": {
-      "fields": {
-        "title": "Hello World",
-        "body": "This is a test document."
-      }
+    "fields": {
+      "title": "Hello World",
+      "body": "This is a test document."
     }
   }'
 ```
@@ -158,8 +154,8 @@ curl -X POST 'http://localhost:8080/v1/documents:bulk?mode=put' \
   -H 'Content-Type: application/json' \
   -d '{
     "documents": [
-      {"id": "doc1", "document": {"fields": {"title": "Hello"}}},
-      {"id": "doc2", "document": {"fields": {"title": "World"}}}
+      {"id": "doc1", "fields": {"title": "Hello"}},
+      {"id": "doc2", "fields": {"title": "World"}}
     ]
   }'
 # => {"applied": 2}
@@ -242,22 +238,24 @@ curl -N -X POST http://localhost:8080/v1/search/stream \
 The response is a stream of SSE events:
 
 ```text
-data: {"id":"doc1","score":0.8532,"document":{...}}
+data: {"id":"doc1","score":0.8532,"fields":{...}}
 
-data: {"id":"doc2","score":0.4210,"document":{...}}
+data: {"id":"doc2","score":0.4210,"fields":{...}}
 ```
 
 ## JSON Field Value Inference
 
 When the gateway accepts a document body (`PUT /v1/documents/{id}` or
-`POST /v1/documents/{id}`), each value inside `document.fields` is converted
-to the engine's [`DataValue`](../concepts/schema_and_fields.md) type using
-the same inference rules as schema-less ingestion. This keeps the HTTP and
-gRPC paths in sync.
+`POST /v1/documents/{id}`), each value inside `fields` is converted to the
+engine's [`DataValue`](../concepts/schema_and_fields.md) type using the same
+canonical `json_to_document` converter laurus-cli and laurus-mcp use, so all
+three JSON-accepting transports agree on one document shape and the same
+inference rules as schema-less ingestion. This keeps the HTTP and gRPC
+paths in sync.
 
 | JSON value | Resulting field type | Notes |
 | :--- | :--- | :--- |
-| `null` | (skipped) | The field is emitted as a `NullValue` and dropped during ingest. |
+| `null` | (skipped) | The field is omitted entirely — it is not sent to the engine at all, not even as an explicit null. |
 | `true` / `false` | `boolean` | |
 | integer (fits in `i64`) | `integer` | |
 | float / large integer | `float` | |
@@ -268,15 +266,19 @@ gRPC paths in sync.
 | `{"latitude": ..., "longitude": ...}` | `geo` | |
 | `{"lat": ..., "lon": ...}` / `{"lat": ..., "lng": ...}` | `geo` | Short aliases for latitude / longitude are accepted. |
 | `{"x": ..., "y": ..., "z": ...}` | `geo3d` | All three keys required, finite numbers, ECEF meters. Mixing with `lat`/`lon` keys is rejected. |
+| `{"data": "<base64>", "mime": "..."}` | `bytes` | `mime` is optional. Disambiguates a bytes payload from a plain string on a multimodal vector field's `Text`-or-`Bytes` embedder input — see [Schema and Fields](../concepts/schema_and_fields.md). |
 
 The gateway returns an HTTP 400 (`Bad Request`) when:
 
 - An array contains mixed types or non-numeric elements
   (e.g. `[1, "x"]`).
-- An object is not a valid geographic point (missing latitude / longitude
-  keys for 2D, or missing any of `x` / `y` / `z` for 3D).
+- An object does not match any of the supported shapes above (e.g. missing
+  latitude / longitude keys for 2D geo, missing any of `x` / `y` / `z` for
+  3D geo, or a non-string `data` key).
 - A geographic latitude is outside `[-90, 90]` or a longitude is outside
   `[-180, 180]`.
+- An object mixes markers from more than one supported shape (e.g. `lat`
+  together with `x`, or `data` together with `lat`).
 - A 3D ECEF coordinate is non-finite (`NaN` / `Inf`).
 - An object mixes 2D (`lat` / `lon`) and 3D (`x` / `y` / `z`) keys.
 

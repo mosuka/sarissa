@@ -41,19 +41,23 @@ single `laurus repl` process (see [scripts/index_movies.sh](scripts/index_movies
 ```json
 {
   "fields": {
-    "title": {"Text": "The Matrix"},
-    "overview": {"Text": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth."},
-    "genres": {"Text": "Action, Science Fiction"},
-    "poster": {"Text": "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"},
-    "release_date": {"Int64": 922752000},
-    "poster_vec": {"Bytes": [[255, 216, 255, 224, "…"], "image/jpeg"]}
+    "title": "The Matrix",
+    "overview": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth.",
+    "genres": "Action, Science Fiction",
+    "poster": "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",
+    "release_date": 922752000,
+    "poster_vec": {"data": "/9j/4AAQSkZJRg…", "mime": "image/jpeg"}
   }
 }
 ```
 
-`poster_vec.Bytes` is `[<raw JPEG byte array>, <MIME type>]`; the byte array above is truncated
-after its JPEG magic number (`FF D8 FF E0`) for readability — the real array holds every byte of
-the downloaded file. `poster_vec` is only added once the poster image has been downloaded to
+`poster_vec` is an `Hnsw` field backed by a CLIP (multimodal) embedder, which accepts both
+text-to-embed and image-bytes-to-decode — a bare base64 string would be ambiguous between the
+two, so the explicit `{"data", "mime"}` object is required here (a plain base64 string is only
+unambiguous for a declared `Bytes` field, not a multimodal vector field). `poster_vec.data` is
+the poster image's raw bytes, base64-encoded; the value above is truncated after its JPEG magic
+number (`FF D8 FF E0`) for readability — the real string encodes every byte of the downloaded
+file. `poster_vec` is only added once the poster image has been downloaded to
 `examples/movies/images/<id>.jpg`; a movie with no poster is indexed without it.
 
 ## Usage

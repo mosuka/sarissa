@@ -40,21 +40,25 @@
 ```json
 {
   "fields": {
-    "title": {"Text": "The Matrix"},
-    "overview": {"Text": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth."},
-    "genres": {"Text": "Action, Science Fiction"},
-    "poster": {"Text": "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"},
-    "release_date": {"Int64": 922752000},
-    "poster_vec": {"Bytes": [[255, 216, 255, 224, "…"], "image/jpeg"]}
+    "title": "The Matrix",
+    "overview": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth.",
+    "genres": "Action, Science Fiction",
+    "poster": "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",
+    "release_date": 922752000,
+    "poster_vec": {"data": "/9j/4AAQSkZJRg…", "mime": "image/jpeg"}
   }
 }
 ```
 
-`poster_vec.Bytes` は `[<生JPEGバイト配列>, <MIMEタイプ>]` という形です。上記のバイト配列は
-読みやすさのため JPEG のマジックナンバー（`FF D8 FF E0`）の後で省略していますが、実際の配列には
-ダウンロードしたファイルの全バイトが入ります。`poster_vec` は `examples/movies/images/<id>.jpg`
-へのポスター画像ダウンロードが成功した場合のみ追加されます。ポスターが無い映画はこのフィールド無しで
-インデックスされます。
+`poster_vec` は CLIP（マルチモーダル）embedder を使う `Hnsw` フィールドで、埋め込むテキストと
+デコードすべき画像バイト列の両方を受け付けます。素の base64 文字列だけではどちらか区別できないため、
+ここでは明示的な `{"data", "mime"}` オブジェクト形式が必要です（素の base64 文字列で曖昧さがないのは
+宣言済みの `Bytes` フィールドのみで、マルチモーダルなベクトルフィールドには使えません）。
+`poster_vec.data` はポスター画像の生バイト列を base64 エンコードしたものです。上記の値は
+読みやすさのため JPEG のマジックナンバー（`FF D8 FF E0`）の後で省略していますが、実際の文字列には
+ダウンロードしたファイルの全バイトがエンコードされています。`poster_vec` は
+`examples/movies/images/<id>.jpg` へのポスター画像ダウンロードが成功した場合のみ追加されます。
+ポスターが無い映画はこのフィールド無しでインデックスされます。
 
 ## 使い方
 

@@ -57,24 +57,24 @@ laurus --index-dir ./tutorial_data get stats
 
 ## Step 3: ドキュメントの登録
 
-ドキュメントをインデックスに追加します。各ドキュメントには ID と JSON 形式のフィールド値が必要です:
+ドキュメントをインデックスに追加します。各ドキュメントには ID と `{"fields": {...}}` 形式の JSON オブジェクトが必要です:
 
 ```bash
 laurus --index-dir ./tutorial_data add doc \
   --id doc001 \
-  --data '{"title":"Introduction to Rust Programming","body":"Rust is a modern systems programming language that focuses on safety, speed, and concurrency.","category":"programming"}'
+  --data '{"fields":{"title":"Introduction to Rust Programming","body":"Rust is a modern systems programming language that focuses on safety, speed, and concurrency.","category":"programming"}}'
 ```
 
 ```bash
 laurus --index-dir ./tutorial_data add doc \
   --id doc002 \
-  --data '{"title":"Web Development with Rust","body":"Building web applications with Rust has become increasingly popular. Frameworks like Actix and Rocket make it easy to create fast and secure web services.","category":"web-development"}'
+  --data '{"fields":{"title":"Web Development with Rust","body":"Building web applications with Rust has become increasingly popular. Frameworks like Actix and Rocket make it easy to create fast and secure web services.","category":"web-development"}}'
 ```
 
 ```bash
 laurus --index-dir ./tutorial_data add doc \
   --id doc003 \
-  --data '{"title":"Python for Data Science","body":"Python is the most popular language for data science and machine learning. Libraries like NumPy and Pandas provide powerful tools for data analysis.","category":"data-science"}'
+  --data '{"fields":{"title":"Python for Data Science","body":"Python is the most popular language for data science and machine learning. Libraries like NumPy and Pandas provide powerful tools for data analysis.","category":"data-science"}}'
 ```
 
 ## Step 4: 変更のコミット
@@ -191,7 +191,7 @@ REPL で以下のコマンドを試してみてください:
 ```text
 > get stats
 > search rust
-> add doc doc004 {"title":"Go Programming","body":"Go is a statically typed language designed for simplicity and efficiency.","category":"programming"}
+> add doc doc004 {"fields":{"title":"Go Programming","body":"Go is a statically typed language designed for simplicity and efficiency.","category":"programming"}}
 > commit
 > search programming
 > get docs doc004

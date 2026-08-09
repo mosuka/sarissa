@@ -22,6 +22,7 @@ ahash = { version = "0.8.12", features = [
 aho-corasick = "1.1.4"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+base64 = "0.22.1"
 bit-vec = "0.9.1"
 bitpacking = "0.9.3"
 bytecheck = "0.8.2"
