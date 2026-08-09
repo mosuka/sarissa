@@ -1,0 +1,76 @@
+version: 2
+updates:
+  # Rust workspace. The root Cargo.toml manages every member crate,
+  # including all 5 language bindings (laurus-python, laurus-nodejs,
+  # laurus-wasm, laurus-ruby, laurus-php), so this single entry covers
+  # the whole workspace's Cargo.lock.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      # Minor/patch bumps are low-risk and numerous in a workspace this
+      # size — batch them into one PR. Major bumps (potential breaking
+      # changes) stay as individual PRs so each can be reviewed on its own.
+      cargo-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Python binding build dependency (maturin).
+  - package-ecosystem: "pip"
+    directory: "/laurus-python"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Node.js binding build/test tooling (@napi-rs/cli, vitest).
+  - package-ecosystem: "npm"
+    directory: "/laurus-nodejs"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # WASM binding package metadata. No dependencies today, but keeping this
+  # entry means Dependabot picks them up automatically if any are added.
+  - package-ecosystem: "npm"
+    directory: "/laurus-wasm"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Ruby binding build/test dependencies (rb_sys, minitest, rake, ...).
+  - package-ecosystem: "bundler"
+    directory: "/laurus-ruby"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # PHP binding test dependency (phpunit).
+  - package-ecosystem: "composer"
+    directory: "/laurus-php"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # GitHub Actions used across .github/workflows/*.yml.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+      include: "scope"

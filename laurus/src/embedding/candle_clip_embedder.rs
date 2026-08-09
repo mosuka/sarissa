@@ -16,7 +16,7 @@ use candle_nn::{Linear, VarBuilder};
 #[cfg(feature = "embeddings-multimodal")]
 use candle_transformers::models::clip;
 #[cfg(feature = "embeddings-multimodal")]
-use hf_hub::api::sync::ApiBuilder;
+use hf_hub::{HFClientBuilder, split_id};
 #[cfg(feature = "embeddings-multimodal")]
 use tokenizers::Tokenizer;
 
@@ -187,13 +187,14 @@ impl CandleClipEmbedder {
             .or_else(|_| std::env::var("HOME").map(|home| format!("{}/.cache/huggingface", home)))
             .unwrap_or_else(|_| "/tmp/huggingface".to_string());
 
-        let api = ApiBuilder::new()
-            .with_cache_dir(cache_dir.into())
-            .build()
+        let client = HFClientBuilder::new()
+            .cache_dir(cache_dir)
+            .build_sync()
             .map_err(|e| {
                 LaurusError::InvalidOperation(format!("HF API initialization failed: {}", e))
             })?;
-        let repo = api.model(model_name.to_string());
+        let (owner, name) = split_id(model_name);
+        let repo = client.model(owner, name);
 
         // Load config
         // Currently defaults to ViT-B/32 configuration. To support other CLIP variants
@@ -202,8 +203,10 @@ impl CandleClipEmbedder {
 
         // Load weights - try safetensors first, fall back to pytorch
         let weights_filename = repo
-            .get("model.safetensors")
-            .or_else(|_| repo.get("pytorch_model.bin"))
+            .download_file()
+            .filename("model.safetensors")
+            .send()
+            .or_else(|_| repo.download_file().filename("pytorch_model.bin").send())
             .map_err(|e| {
                 LaurusError::InvalidOperation(format!("Weights download failed: {}", e))
             })?;
@@ -258,9 +261,13 @@ impl CandleClipEmbedder {
         })?;
 
         // Load tokenizer
-        let tokenizer_filename = repo.get("tokenizer.json").map_err(|e| {
-            LaurusError::InvalidOperation(format!("Tokenizer download failed: {}", e))
-        })?;
+        let tokenizer_filename = repo
+            .download_file()
+            .filename("tokenizer.json")
+            .send()
+            .map_err(|e| {
+                LaurusError::InvalidOperation(format!("Tokenizer download failed: {}", e))
+            })?;
         let tokenizer = Tokenizer::from_file(tokenizer_filename)
             .map_err(|e| LaurusError::InvalidOperation(format!("Tokenizer load failed: {}", e)))?;
 

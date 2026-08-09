@@ -25,6 +25,10 @@ pub fn hashtable_to_document(ht: &ZendHashTable) -> PhpResult<Document> {
         let field = match key {
             ArrayKey::String(s) => s,
             ArrayKey::Str(s) => s.to_string(),
+            ArrayKey::ZendString(s) => s
+                .as_str()
+                .map_err(|_| "array key must be valid UTF-8")?
+                .to_string(),
             ArrayKey::Long(_) => {
                 return Err("array key must be a string, not an integer".into());
             }

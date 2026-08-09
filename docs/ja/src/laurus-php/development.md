@@ -90,54 +90,31 @@ cargo clean
 rm -rf vendor/
 ```
 
-## Workspace 統合と clang-sys パッチ
+## Workspace 統合と clang-sys
 
 `laurus-php` は [ext-php-rs](https://github.com/extphprs/ext-php-rs) を使用しており、
-ext-php-rs は `ext-php-rs-clang-sys`（`clang-sys` のフォーク）に依存しています。
-一方、`laurus-ruby` は `magnus` → `rb-sys` → `bindgen` → `clang-sys`（オリジナル）に依存しています。
-両方のクレートが `links = "clang"` を宣言しており、Cargo は同一 workspace 内で同じ `links` 値を持つ
-パッケージを 2 つ許可しません。
+そのバインディング生成（`ext-php-rs-bindgen`）は `bindgen` で PHP ヘッダーを解析し、
+`clang-sys` 経由で `libclang` をロードします。一方、`laurus-ruby` は
+`magnus` → `rb-sys` のビルドで同じく `bindgen` + `clang-sys` を使用します。
+Cargo は同一 workspace 内で同じ `links` 値を持つパッケージを 2 つ許可しないため、
+PHP と Ruby のバインディングが workspace メンバーとして共存できるのは、両者が
+**同一の** `clang-sys` パッケージに解決される場合のみです。
 
-`laurus-php` と `laurus-ruby` を workspace メンバーとして共存させるため、ルートの `Cargo.toml` で
-`ext-php-rs-clang-sys` を `links` 宣言を除去したローカルコピーに patch しています：
+かつての `ext-php-rs` は `ext-php-rs-clang-sys`（`links = "clang"` を宣言する
+`clang-sys` のフォーク）に依存しており、`laurus-ruby` 側のオリジナル `clang-sys` と
+衝突していました。当時は `links` 宣言を除去したローカルコピー（`patches/` 配下）への
+`[patch.crates-io]` オーバーライドが必要でした。`ext-php-rs-bindgen
+0.72.1-extphprs.2`（`ext-php-rs` 0.15.15 が使用）以降はフォークが廃止され、
+`ext-php-rs` は通常の `clang-sys` に戻ったため、両バインディングは 1 つの
+`clang-sys` パッケージを共有し、パッチは削除済みです。
 
-```toml
-# Cargo.toml（workspace ルート）
-[patch.crates-io]
-ext-php-rs-clang-sys = { path = "patches/ext-php-rs-clang-sys" }
-```
-
-パッチは `patches/ext-php-rs-clang-sys/` にあります。上流クレートからの唯一の変更点は
-`Cargo.toml` の `links = "clang"` の除去です。`clang-sys` と `ext-php-rs-clang-sys` は
-どちらも `libclang` をビルド時のみ使用し（`bindgen` によるヘッダー解析）、最終バイナリにはリンク
-されないため、この変更は安全です。
-
-### パッチが必要な条件
-
-このパッチは `laurus-php` と `laurus-ruby` が同一の Cargo workspace のメンバーである場合にのみ
-必要です。`laurus-ruby` を workspace から除外するか、`laurus-php` を `[workspace] exclude` で
-除外すれば、`links = "clang"` の競合は発生しないため、パッチとルート `Cargo.toml` の
-`[patch.crates-io]` セクションを削除できます。
-
-### パッチの更新
-
-`ext-php-rs` をアップグレードして新しいバージョンの `ext-php-rs-clang-sys` が
-使われるようになった場合、パッチを更新してください：
-
-```bash
-# 1. laurus-php/Cargo.toml で ext-php-rs を更新した後：
-cargo update -p ext-php-rs
-
-# 2. 新しい ext-php-rs-clang-sys ソースをコピー
-cp -r ~/.cargo/registry/src/index.crates.io-*/ext-php-rs-clang-sys-<NEW_VERSION>/* \
-      patches/ext-php-rs-clang-sys/
-
-# 3. links 宣言を除去
-sed -i 's/^links = "clang"/# links = "clang"/' patches/ext-php-rs-clang-sys/Cargo.toml
-
-# 4. ビルドを確認
-cargo build -p laurus-php -p laurus-ruby
-```
+将来の `ext-php-rs` アップグレードでフォーク版 clang-sys が再導入された場合
+（`cargo build -p laurus-php -p laurus-ruby` で `links = "clang"` の衝突エラーが
+出たら要注意）、vendored パッチを復活させてください: フォーククレートのソースを
+`patches/` にコピーし、その `links = "clang"` 行をコメントアウトし、ルート
+`Cargo.toml` の `[patch.crates-io]` からそこを指します。`clang-sys` は
+`libclang` をビルド時のみ使用し（`bindgen` によるヘッダー解析）、最終バイナリには
+リンクされないため、この変更は安全です。
 
 ## macOS リンカーフラグ (`-undefined dynamic_lookup`)
 
