@@ -37,6 +37,13 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    ignore:
+      # The napi-rs per-platform binary packages in optionalDependencies
+      # (laurus-nodejs-darwin-x64 etc.) are placeholders pinned at "0.0.0";
+      # release.yml's publish-npm job overwrites them with the real version
+      # at publish time. Dependabot must not "update" them to whatever is
+      # currently published on npm.
+      - dependency-name: "laurus-nodejs-*"
 
   # WASM binding package metadata. No dependencies today, but keeping this
   # entry means Dependabot picks them up automatically if any are added.
