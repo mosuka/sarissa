@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -85,7 +85,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -132,7 +132,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -184,7 +184,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -236,7 +236,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -288,7 +288,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -345,7 +345,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -392,7 +392,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -441,7 +441,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
