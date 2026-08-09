@@ -23,15 +23,15 @@
 ```toml
 # Lexical 検索のみ（エンベディングなし）
 [dependencies]
-laurus = "0.9"
+laurus = "0.11"
 
 # ローカル BERT エンベディング付き
 [dependencies]
-laurus = { version = "0.9", features = ["embeddings-candle"] }
+laurus = { version = "0.11", features = ["embeddings-candle"] }
 
 # 全エンベディングバックエンド
 [dependencies]
-laurus = { version = "0.9", features = ["embeddings-all"] }
+laurus = { version = "0.11", features = ["embeddings-all"] }
 ```
 
 ## フィーチャーフラグ

@@ -48,15 +48,15 @@ The `laurus` crate has no default features enabled. Enable embedding support as 
 ```toml
 # Lexical search only (no embedding)
 [dependencies]
-laurus = "0.9"
+laurus = "0.11"
 
 # With local BERT embeddings
 [dependencies]
-laurus = { version = "0.9", features = ["embeddings-candle"] }
+laurus = { version = "0.11", features = ["embeddings-candle"] }
 
 # All features
 [dependencies]
-laurus = { version = "0.9", features = ["embeddings-all"] }
+laurus = { version = "0.11", features = ["embeddings-all"] }
 ```
 
 ## Sections

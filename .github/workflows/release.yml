@@ -600,7 +600,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          # github.ref_name is the tag name on a tag push (e.g. "v0.10.0",
+          # github.ref_name is the tag name on a tag push (e.g. "v0.11.0",
           # never contains '/') but is the branch name on a workflow_dispatch
           # run (e.g. "ci/musl-release-binaries"). A literal '/' breaks the
           # tar/zip filenames below, since tar/Compress-Archive interpret it
