@@ -48,15 +48,15 @@ graph TB
 ```toml
 # Lexical検索のみ（Embeddingなし）
 [dependencies]
-laurus = "0.9"
+laurus = "0.11"
 
 # ローカルBERT Embeddingを使用
 [dependencies]
-laurus = { version = "0.9", features = ["embeddings-candle"] }
+laurus = { version = "0.11", features = ["embeddings-candle"] }
 
 # すべてのFeatureを有効化
 [dependencies]
-laurus = { version = "0.9", features = ["embeddings-all"] }
+laurus = { version = "0.11", features = ["embeddings-all"] }
 ```
 
 ## セクション
