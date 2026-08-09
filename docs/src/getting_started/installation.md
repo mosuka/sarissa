@@ -6,7 +6,7 @@ Add `laurus` and `tokio` (async runtime) to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-laurus = "0.11"
+laurus = "0.12"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -28,28 +28,28 @@ Laurus ships with a minimal default feature set. Enable additional features as n
 
 ```toml
 [dependencies]
-laurus = "0.11"
+laurus = "0.12"
 ```
 
 **Vector search with local model** (no API key required):
 
 ```toml
 [dependencies]
-laurus = { version = "0.11", features = ["embeddings-candle"] }
+laurus = { version = "0.12", features = ["embeddings-candle"] }
 ```
 
 **Vector search with OpenAI**:
 
 ```toml
 [dependencies]
-laurus = { version = "0.11", features = ["embeddings-openai"] }
+laurus = { version = "0.12", features = ["embeddings-openai"] }
 ```
 
 **Everything**:
 
 ```toml
 [dependencies]
-laurus = { version = "0.11", features = ["embeddings-all"] }
+laurus = { version = "0.12", features = ["embeddings-all"] }
 ```
 
 ## Verify Installation
