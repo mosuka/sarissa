@@ -22,63 +22,68 @@ ahash = { version = "0.8.12", features = [
 aho-corasick = "1.1.4"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-base64 = "0.22.1"
-bit-vec = "0.9.1"
+base64 = "0.23.1"
+bit-vec = "0.10.1"
 bitpacking = "0.9.3"
-bytecheck = "0.8.2"
+bytecheck = "0.8.3"
 byteorder = "1.5.0"
 chrono = { workspace = true }
 crc32fast = "1.5.0"
 csv = "1.4.0"
 fst = "0.4.7"
-futures = "0.3.32"
+futures = "0.3.33"
 lazy_static = "1.5.0"
-lindera = { version = "3.0.7" }
-lindera-dictionary = { version = "3.0.7", default-features = false }
-log = "0.4.29"
-lru = "0.18.0"
+lindera = { version = "5.0.2" }
+lindera-dictionary = { version = "5.0.2", default-features = false }
+log = "0.4.33"
+lru = "0.18.2"
 parking_lot = "0.12.5"
-pest = "2.8.6"
-pest_derive = "2.8.6"
-rand = "0.10.1"
-regex = "1.12.3"
-rkyv = { version = "0.8.16", features = ["std"] }
+pest = "2.8.8"
+pest_derive = "2.8.8"
+rand = "0.10.2"
+regex = "1.13.1"
+rkyv = { version = "0.8.18", features = ["std"] }
 roaring = "0.11.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { version = "1.52.3", features = ["sync", "macros"] }
+tokio = { version = "1.53.1", features = ["sync", "macros"] }
 unicode-normalization = "0.1.25"
-unicode-segmentation = "1.13.2"
-uuid = { version = "1.23.1", features = ["v4", "js"] }
-wide = "1.4.0"
+unicode-segmentation = "1.13.3"
+uuid = { version = "1.24.0", features = ["v4", "js"] }
+wide = "1.6.1"
 
 # Native-only dependencies (file I/O, threading, mmap)
-crossbeam-channel = { version = "0.5.15", optional = true }
-crossbeam-deque = { version = "0.8.6", optional = true }
-memmap2 = { version = "0.9.10", optional = true }
+crossbeam-channel = { version = "0.5.16", optional = true }
+crossbeam-deque = { version = "0.8.7", optional = true }
+memmap2 = { version = "0.9.11", optional = true }
 num_cpus = { version = "1.17.0", optional = true }
 rayon = { version = "1.12.0", optional = true }
 tempfile = { workspace = true, optional = true }
 
 # Optional embedding dependencies
-candle-core = { version = "0.10.2", optional = true }
-candle-nn = { version = "0.10.2", optional = true }
-candle-transformers = { version = "0.10.2", optional = true }
-# hf-hub's default features are ["default-tls", "tokio", "ureq"], and
-# `default-tls = ["native-tls"]` pulls reqwest 0.12 + native-tls + openssl-sys
-# -- the only openssl-sys entry point in the laurus-cli dependency graph
-# (laurus's own reqwest 0.13 already defaults to rustls). openssl-sys cannot
-# cross-compile to *-unknown-linux-musl, which is what this pins away.
+candle-core = { version = "0.11.0", optional = true }
+candle-nn = { version = "0.11.0", optional = true }
+candle-transformers = { version = "0.11.0", optional = true }
+# As of 1.0.0, hf-hub dropped the `ureq`-backed sync client entirely (the
+# `api::sync` module and `ureq` feature are both gone) in favor of a
+# `blocking` feature that wraps its async client in a dedicated
+# single-threaded tokio runtime on a background thread (see
+# `hf_hub::blocking::HFClientSync`). hf-hub now depends on reqwest 0.13
+# unconditionally, without `default-features = false` on its own Cargo.toml
+# entry -- so whether openssl-sys/native-tls (reqwest's default TLS backend)
+# ends up in the dependency graph depends entirely on *this* crate's feature
+# selection unifying with it elsewhere. Verified via `cargo tree -i
+# openssl-sys` / `-i native-tls` with only `["blocking", "rustls-tls"]`
+# enabled here: neither appears. openssl-sys cannot cross-compile to
+# *-unknown-linux-musl, which is what this pins away.
 #
-# `ureq` is mandatory, not optional: laurus uses `hf_hub::api::sync::ApiBuilder`
-# (candle_bert_embedder.rs, candle_clip_embedder.rs) and hf-hub gates the whole
-# `api::sync` module behind `#[cfg(feature = "ureq")]`. `ureq` itself defaults
-# to a rustls TLS backend, so `rustls-tls` here only guards the (currently
-# unused) `tokio`/reqwest path in case some future dependency turns it on via
-# feature unification.
-hf-hub = { version = "0.5.0", default-features = false, features = [
-    "ureq",
+# `blocking` is mandatory, not optional: laurus uses
+# `hf_hub::blocking::HFClientSync` (candle_bert_embedder.rs,
+# candle_clip_embedder.rs) via `HFClientBuilder::build_sync()`, and hf-hub
+# gates the whole `blocking` module behind `#[cfg(feature = "blocking")]`.
+hf-hub = { version = "1.0.0", default-features = false, features = [
+    "blocking",
     "rustls-tls",
 ], optional = true }
 # Default features include `esaxx_fast` (-> esaxx-rs/cpp), which compiles a
@@ -93,11 +98,11 @@ hf-hub = { version = "0.5.0", default-features = false, features = [
 tokenizers = { version = "0.23.1", default-features = false, features = [
     "onig",
 ], optional = true }
-reqwest = { version = "0.13.3", features = ["json"], optional = true }
+reqwest = { version = "0.13.4", features = ["json"], optional = true }
 image = { version = "0.25.10", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.4.2", features = ["wasm_js"] }
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
 
 [features]
 default = ["native"]
@@ -281,7 +286,7 @@ criterion = { version = "0.8.2", features = ["async_tokio"] }
 # unification activates these features only for test/example/bench builds, so
 # the release library (and downstream bindings) ship without the embedded
 # dictionaries.
-lindera = { version = "3.0.7", features = [
+lindera = { version = "5.0.2", features = [
     "embed-ipadic",
     "embed-ko-dic",
     "embed-cc-cedict",
@@ -293,4 +298,4 @@ tokio-test = "0.4.5"
 # transitive runtime dep through other crates, so listing it explicitly
 # here adds no compile cost.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-libc = "0.2.186"
+libc = "0.2.189"

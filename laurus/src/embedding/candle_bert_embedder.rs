@@ -15,7 +15,7 @@ use candle_nn::VarBuilder;
 #[cfg(feature = "embeddings-candle")]
 use candle_transformers::models::bert::{BertModel, Config};
 #[cfg(feature = "embeddings-candle")]
-use hf_hub::api::sync::ApiBuilder;
+use hf_hub::{HFClientBuilder, split_id};
 #[cfg(feature = "embeddings-candle")]
 use tokenizers::Tokenizer;
 
@@ -132,17 +132,20 @@ impl CandleBertEmbedder {
             .or_else(|_| std::env::var("HOME").map(|home| format!("{}/.cache/huggingface", home)))
             .unwrap_or_else(|_| "/tmp/huggingface".to_string());
 
-        let api = ApiBuilder::new()
-            .with_cache_dir(cache_dir.into())
-            .build()
+        let client = HFClientBuilder::new()
+            .cache_dir(cache_dir)
+            .build_sync()
             .map_err(|e| {
                 LaurusError::InvalidOperation(format!("HF API initialization failed: {}", e))
             })?;
-        let repo = api.model(model_name.to_string());
+        let (owner, name) = split_id(model_name);
+        let repo = client.model(owner, name);
 
         // Load config
         let config_filename = repo
-            .get("config.json")
+            .download_file()
+            .filename("config.json")
+            .send()
             .map_err(|e| LaurusError::InvalidOperation(format!("Config download failed: {}", e)))?;
         let config_str = std::fs::read_to_string(config_filename)
             .map_err(|e| LaurusError::InvalidOperation(format!("Config read failed: {}", e)))?;
@@ -150,9 +153,13 @@ impl CandleBertEmbedder {
             .map_err(|e| LaurusError::InvalidOperation(format!("Config parse failed: {}", e)))?;
 
         // Load weights
-        let weights_filename = repo.get("model.safetensors").map_err(|e| {
-            LaurusError::InvalidOperation(format!("Weights download failed: {}", e))
-        })?;
+        let weights_filename = repo
+            .download_file()
+            .filename("model.safetensors")
+            .send()
+            .map_err(|e| {
+                LaurusError::InvalidOperation(format!("Weights download failed: {}", e))
+            })?;
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[weights_filename], DType::F32, &device).map_err(
                 |e| LaurusError::InvalidOperation(format!("VarBuilder creation failed: {}", e)),
@@ -164,9 +171,13 @@ impl CandleBertEmbedder {
             .map_err(|e| LaurusError::InvalidOperation(format!("Model load failed: {}", e)))?;
 
         // Load tokenizer
-        let tokenizer_filename = repo.get("tokenizer.json").map_err(|e| {
-            LaurusError::InvalidOperation(format!("Tokenizer download failed: {}", e))
-        })?;
+        let tokenizer_filename = repo
+            .download_file()
+            .filename("tokenizer.json")
+            .send()
+            .map_err(|e| {
+                LaurusError::InvalidOperation(format!("Tokenizer download failed: {}", e))
+            })?;
         let tokenizer = Tokenizer::from_file(tokenizer_filename)
             .map_err(|e| LaurusError::InvalidOperation(format!("Tokenizer load failed: {}", e)))?;
 

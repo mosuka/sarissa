@@ -179,23 +179,30 @@ impl LinderaTokenizer {
         char_def: &[u8],
         unk: &[u8],
     ) -> Result<Self> {
+        use std::sync::Arc;
+
         use lindera::dictionary::Dictionary;
         use lindera_dictionary::dictionary::character_definition::CharacterDefinition;
         use lindera_dictionary::dictionary::connection_cost_matrix::ConnectionCostMatrix;
         use lindera_dictionary::dictionary::metadata::Metadata;
-        use lindera_dictionary::dictionary::prefix_dictionary::PrefixDictionary;
+        use lindera_dictionary::dictionary::prefix_dictionary::{DaTrust, PrefixDictionary};
         use lindera_dictionary::dictionary::unknown_dictionary::UnknownDictionary;
 
         let mode = Mode::from_str(mode_str)
             .map_err(|e| LaurusError::analysis(format!("Invalid mode '{}': {}", mode_str, e)))?;
         let meta = Metadata::load(metadata)
             .map_err(|e| LaurusError::analysis(format!("Failed to load metadata: {}", e)))?;
+        // `DaTrust::Trusted` is reserved for byte-exact `include_bytes!` output
+        // of lindera's own build pipeline; these bytes come from the caller
+        // (e.g. a user-supplied dictionary read from disk or the wasm embed),
+        // so they must go through the validating deserialization path.
         let prefix_dictionary = PrefixDictionary::load(
             dict_da.to_vec(),
             dict_vals.to_vec(),
             dict_words_idx.to_vec(),
             dict_words.to_vec(),
             true,
+            DaTrust::Untrusted,
         )
         .map_err(|e| LaurusError::analysis(format!("Failed to load prefix dictionary: {}", e)))?;
         let connection_cost_matrix = ConnectionCostMatrix::load(matrix_mtx.to_vec())
@@ -208,8 +215,8 @@ impl LinderaTokenizer {
         })?;
 
         let dict = Dictionary {
-            prefix_dictionary,
-            connection_cost_matrix,
+            prefix_dictionary: Arc::new(prefix_dictionary),
+            connection_cost_matrix: Arc::new(connection_cost_matrix),
             character_definition,
             unknown_dictionary,
             metadata: meta,

@@ -235,7 +235,7 @@ impl LaurusMcpServer {
 
     /// Return a tool-level error result (not a protocol error).
     fn tool_error(msg: impl Into<String>) -> CallToolResult {
-        CallToolResult::error(vec![Content::text(msg.into())])
+        CallToolResult::error(vec![ContentBlock::text(msg.into())])
     }
 
     // ── Connection tool ───────────────────────────────────────────────────────
@@ -259,7 +259,7 @@ impl LaurusMcpServer {
             Ok(ch) => {
                 *self.channel.write().await = Some(ch);
                 info!("Connected to laurus-server at {}", params.endpoint);
-                Ok(CallToolResult::success(vec![Content::text(format!(
+                Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                     "Connected to laurus-server at {}.",
                     params.endpoint
                 ))]))
@@ -304,7 +304,7 @@ impl LaurusMcpServer {
         };
 
         match IndexServiceClient::new(channel).create_index(request).await {
-            Ok(_) => Ok(CallToolResult::success(vec![Content::text(
+            Ok(_) => Ok(CallToolResult::success(vec![ContentBlock::text(
                 "Index created successfully.",
             )])),
             Err(e) => Ok(Self::tool_error(format!("Failed to create index: {e}"))),
@@ -335,7 +335,7 @@ impl LaurusMcpServer {
                     "document_count": r.document_count,
                     "vector_fields": r.vector_fields.keys().collect::<Vec<_>>(),
                 });
-                Ok(CallToolResult::success(vec![Content::text(
+                Ok(CallToolResult::success(vec![ContentBlock::text(
                     output.to_string(),
                 )]))
             }
@@ -368,7 +368,7 @@ impl LaurusMcpServer {
                         match laurus_server::convert::schema::from_proto(&proto_schema) {
                             Ok(schema) => {
                                 let json = serde_json::to_value(&schema).unwrap_or_default();
-                                Ok(CallToolResult::success(vec![Content::text(
+                                Ok(CallToolResult::success(vec![ContentBlock::text(
                                     json.to_string(),
                                 )]))
                             }
@@ -432,7 +432,7 @@ impl LaurusMcpServer {
                         "message": format!("Field '{}' added successfully.", params.name),
                     })
                 };
-                Ok(CallToolResult::success(vec![Content::text(
+                Ok(CallToolResult::success(vec![ContentBlock::text(
                     output.to_string(),
                 )]))
             }
@@ -475,7 +475,7 @@ impl LaurusMcpServer {
                         "message": format!("Field '{}' deleted successfully.", params.name),
                     })
                 };
-                Ok(CallToolResult::success(vec![Content::text(
+                Ok(CallToolResult::success(vec![ContentBlock::text(
                     output.to_string(),
                 )]))
             }
@@ -519,7 +519,7 @@ impl LaurusMcpServer {
             })
             .await
         {
-            Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
+            Ok(_) => Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                 "Document '{}' put (upserted). Call commit to persist changes.",
                 params.id
             ))])),
@@ -561,7 +561,7 @@ impl LaurusMcpServer {
             })
             .await
         {
-            Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
+            Ok(_) => Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                 "Document '{}' added as chunk. Call commit to persist changes.",
                 params.id
             ))])),
@@ -622,7 +622,7 @@ impl LaurusMcpServer {
             .put_documents(PutDocumentsRequest { documents })
             .await
         {
-            Ok(resp) => Ok(CallToolResult::success(vec![Content::text(format!(
+            Ok(resp) => Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                 "{} documents put (upserted). Call commit to persist changes.",
                 resp.into_inner().applied
             ))])),
@@ -659,7 +659,7 @@ impl LaurusMcpServer {
             .add_documents(AddDocumentsRequest { documents })
             .await
         {
-            Ok(resp) => Ok(CallToolResult::success(vec![Content::text(format!(
+            Ok(resp) => Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                 "{} documents added as chunks. Call commit to persist changes.",
                 resp.into_inner().applied
             ))])),
@@ -701,7 +701,7 @@ impl LaurusMcpServer {
                     "id": params.id,
                     "documents": json_docs,
                 });
-                Ok(CallToolResult::success(vec![Content::text(
+                Ok(CallToolResult::success(vec![ContentBlock::text(
                     output.to_string(),
                 )]))
             }
@@ -732,7 +732,7 @@ impl LaurusMcpServer {
             })
             .await
         {
-            Ok(_) => Ok(CallToolResult::success(vec![Content::text(format!(
+            Ok(_) => Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                 "Documents '{}' deleted. Call commit to persist changes.",
                 params.id
             ))])),
@@ -758,7 +758,7 @@ impl LaurusMcpServer {
             .commit(CommitRequest {})
             .await
         {
-            Ok(_) => Ok(CallToolResult::success(vec![Content::text(
+            Ok(_) => Ok(CallToolResult::success(vec![ContentBlock::text(
                 "Changes committed successfully.",
             )])),
             Err(e) => Ok(Self::tool_error(format!("Failed to commit: {e}"))),
@@ -832,7 +832,7 @@ impl LaurusMcpServer {
                     "total": r.total_hits,
                     "results": json_results,
                 });
-                Ok(CallToolResult::success(vec![Content::text(
+                Ok(CallToolResult::success(vec![ContentBlock::text(
                     output.to_string(),
                 )]))
             }
@@ -858,7 +858,7 @@ impl LaurusMcpServer {
 
         if params.queries.is_empty() {
             let output = json!({ "batch": [] });
-            return Ok(CallToolResult::success(vec![Content::text(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
                 output.to_string(),
             )]));
         }
@@ -907,7 +907,7 @@ impl LaurusMcpServer {
                     .collect();
 
                 let output = json!({ "batch": batch });
-                Ok(CallToolResult::success(vec![Content::text(
+                Ok(CallToolResult::success(vec![ContentBlock::text(
                     output.to_string(),
                 )]))
             }

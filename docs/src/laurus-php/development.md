@@ -93,57 +93,32 @@ cargo clean
 rm -rf vendor/
 ```
 
-## Workspace integration and the clang-sys patch
+## Workspace integration and clang-sys
 
-`laurus-php` uses [ext-php-rs](https://github.com/extphprs/ext-php-rs), which
-depends on `ext-php-rs-clang-sys` (a fork of `clang-sys`). The `laurus-ruby`
-crate depends on `magnus`, which in turn depends on the original `clang-sys`.
-Both crates declare `links = "clang"`, and Cargo forbids two packages with the
-same `links` value in a single workspace.
+`laurus-php` uses [ext-php-rs](https://github.com/extphprs/ext-php-rs), whose
+bindings generator (`ext-php-rs-bindgen`) parses PHP headers with `bindgen`,
+which loads `libclang` through `clang-sys`. The `laurus-ruby` crate depends on
+`magnus`, whose `rb-sys` build also uses `bindgen` + `clang-sys`. Cargo
+forbids two packages with the same `links` value in a single workspace, so
+both PHP and Ruby bindings can only coexist as workspace members while they
+resolve to the *same* `clang-sys` package.
 
-To allow `laurus-php` and `laurus-ruby` to coexist as workspace members, the
-root `Cargo.toml` patches `ext-php-rs-clang-sys` with a local copy that has the
-`links` declaration removed:
+Older `ext-php-rs` releases depended on `ext-php-rs-clang-sys` (a fork of
+`clang-sys` that also declared `links = "clang"`), which conflicted with the
+original `clang-sys` pulled in by `laurus-ruby`. That era required a local
+`[patch.crates-io]` override (a vendored copy under `patches/` with the
+`links` declaration removed). Since `ext-php-rs-bindgen 0.72.1-extphprs.2`
+(pulled in by `ext-php-rs` 0.15.15), the fork is gone — `ext-php-rs` depends
+on the regular `clang-sys` again, both bindings share one `clang-sys`
+package, and the patch has been removed.
 
-```toml
-# Cargo.toml (workspace root)
-[patch.crates-io]
-ext-php-rs-clang-sys = { path = "patches/ext-php-rs-clang-sys" }
-```
-
-The patch lives in `patches/ext-php-rs-clang-sys/`. The only change from the
-upstream crate is the removal of `links = "clang"` in its `Cargo.toml`. This is
-safe because both `clang-sys` and `ext-php-rs-clang-sys` use `libclang` only at
-build time (for `bindgen` header parsing) and do not link it into the final
-binary.
-
-### When is the patch needed?
-
-This patch is only required because `laurus-php` and `laurus-ruby` are both
-members of the same Cargo workspace. If `laurus-ruby` were removed from the
-workspace (or if `laurus-php` were excluded via `[workspace] exclude`), the
-`links = "clang"` conflict would not occur and the patch could be removed along
-with the `[patch.crates-io]` section in the root `Cargo.toml`.
-
-### Updating the patch
-
-When `ext-php-rs` is upgraded and pulls in a new version of
-`ext-php-rs-clang-sys`, update the patch:
-
-```bash
-# 1. Update ext-php-rs in laurus-php/Cargo.toml, then:
-cargo update -p ext-php-rs
-
-# 2. Copy the new ext-php-rs-clang-sys source
-cp -r ~/.cargo/registry/src/index.crates.io-*/ext-php-rs-clang-sys-<NEW_VERSION>/* \
-      patches/ext-php-rs-clang-sys/
-
-# 3. Remove the links declaration
-sed -i 's/^links = "clang"/# links = "clang"/' patches/ext-php-rs-clang-sys/Cargo.toml
-
-# 4. Verify the build
-cargo build -p laurus-php -p laurus-ruby
-```
+If a future `ext-php-rs` upgrade reintroduces a forked `clang-sys` (watch for
+a `links = "clang"` conflict error from `cargo build -p laurus-php -p
+laurus-ruby`), reintroduce the vendored patch: copy the forked crate's source
+into `patches/`, comment out its `links = "clang"` line, and point
+`[patch.crates-io]` in the root `Cargo.toml` at it. This is safe because
+`clang-sys` uses `libclang` only at build time (for `bindgen` header parsing)
+and does not link it into the final binary.
 
 ## macOS linker flag (`-undefined dynamic_lookup`)
 

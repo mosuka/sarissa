@@ -26,34 +26,32 @@ categories = ["text-processing"]
 license = "MIT"
 
 [workspace.dependencies]
-anyhow = "1.0.102"
-async-trait = "0.1.89"
+anyhow = "1.0.104"
+async-trait = "0.1.92"
 axum = "0.8.9"
-chrono = { version = "0.4.44", features = ["serde"] }
+base64 = "0.23.1"
+chrono = { version = "0.4.45", features = ["serde"] }
 dialoguer = "0.12.0"
 laurus = { version = "0.11.0", path = "laurus", default-features = false }
 laurus-mcp = { version = "0.11.0", path = "laurus-mcp" }
 laurus-server = { version = "0.11.0", path = "laurus-server" }
-prost = "0.14.3"
-rmcp = { version = "1.6.0", features = ["server", "transport-io"] }
-rustyline = "18.0.0"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-tabled = "0.20.0"
+prost = "0.14.4"
+rmcp = { version = "3.1.2", features = ["server", "transport-io"] }
+rustyline = "18.0.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tabled = "0.21.0"
 tempfile = "3.27.0"
-thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["full"] }
-tokio-stream = "0.1.18"
-toml = "1.1.2"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-stream = "0.1.19"
+toml = "1.1.4"
 tonic = "0.14.6"
 tonic-build = "0.14.6"
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-
-[patch.crates-io]
-ext-php-rs-clang-sys = { path = "patches/ext-php-rs-clang-sys" }
 
 [profile.release]
 lto = true
