@@ -6,7 +6,7 @@
 
 ```toml
 [dependencies]
-laurus = "0.11"
+laurus = "0.12"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -28,28 +28,28 @@ Laurus はデフォルトで最小限の機能セットで提供されます。�
 
 ```toml
 [dependencies]
-laurus = "0.11"
+laurus = "0.12"
 ```
 
 **ローカルモデルによる Vector 検索**（API キー不要）:
 
 ```toml
 [dependencies]
-laurus = { version = "0.11", features = ["embeddings-candle"] }
+laurus = { version = "0.12", features = ["embeddings-candle"] }
 ```
 
 **OpenAI による Vector 検索**:
 
 ```toml
 [dependencies]
-laurus = { version = "0.11", features = ["embeddings-openai"] }
+laurus = { version = "0.12", features = ["embeddings-openai"] }
 ```
 
 **すべての機能**:
 
 ```toml
 [dependencies]
-laurus = { version = "0.11", features = ["embeddings-all"] }
+laurus = { version = "0.12", features = ["embeddings-all"] }
 ```
 
 ## インストールの確認
