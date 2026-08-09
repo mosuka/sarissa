@@ -41,7 +41,7 @@
     "index.d.ts"
   ],
   "optionalDependencies": {
-    "laurus-nodejs-darwin-x64": "0.0.0",
+    "laurus-nodejs-darwin-x64": "0.9.0",
     "laurus-nodejs-darwin-arm64": "0.0.0",
     "laurus-nodejs-linux-x64-gnu": "0.0.0",
     "laurus-nodejs-linux-arm64-gnu": "0.0.0",
