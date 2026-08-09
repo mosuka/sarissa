@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -86,7 +86,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -133,7 +133,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -185,7 +185,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -237,7 +237,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -289,7 +289,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -346,7 +346,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -393,7 +393,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -443,7 +443,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -492,7 +492,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -594,7 +594,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Compute release version string
         id: version
@@ -693,7 +693,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1
@@ -732,7 +732,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -772,7 +772,7 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -818,7 +818,7 @@ jobs:
         wasm-target: [web, bundler]
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -866,7 +866,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -937,7 +937,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -1040,7 +1040,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install protoc
         uses: ./.github/actions/install-protoc
@@ -1119,7 +1119,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -1210,7 +1210,7 @@ jobs:
         wasm-target: [web, bundler]
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -1272,7 +1272,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
