@@ -113,7 +113,7 @@ schema.addEmbedder("transformers", {
     return Array.from(output.data);
   },
 });
-schema.addHnswField("embedding", 384, "cosine", undefined, undefined, "transformers");
+schema.addHnswField("embedding", 384, "cosine", undefined, undefined, undefined, "transformers");
 const index = await Index.create(schema);
 
 await index.putDocument("doc1", { title: "Rust 入門" });

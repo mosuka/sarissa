@@ -120,7 +120,7 @@ schema.addEmbedder("minilm", {
 
 schema.addHnswField(
   "embedding", 384, "cosine",
-  undefined, undefined, "minilm",
+  undefined, undefined, undefined, "minilm",
 );
 ```
 

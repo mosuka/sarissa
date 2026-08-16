@@ -118,7 +118,7 @@ schema.addBooleanField("active");
 schema.addDatetimeField("created_at");
 schema.addGeoField("location");
 schema.addBytesField("thumbnail");
-schema.addHnswField("embedding", 384, "cosine", 16, 200, "minilm");
+schema.addHnswField("embedding", 384, "cosine", 16, 200, undefined, "minilm");
 schema.addFlatField("embedding", 384);
 schema.addIvfField("embedding", 384, "cosine", 100, 1);
 schema.addEmbedder("minilm", {

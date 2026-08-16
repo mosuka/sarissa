@@ -108,7 +108,7 @@ $index = new Index("./myindex", $schema);
 | `addDatetimeField(name, stored, indexed)` | 日時フィールド |
 | `addGeoField(name, stored, indexed)` | 地理座標フィールド（緯度/経度） |
 | `addBytesField(name, stored)` | バイナリデータフィールド |
-| `addHnswField(name, dimension, distance, m, efConstruction)` | HNSW ベクトルインデックスフィールド |
+| `addHnswField(name, dimension, distance, m, efConstruction, defaultEfSearch, embedder, ...)` | HNSW ベクトルインデックスフィールド |
 | `addFlatField(name, dimension, distance)` | Flat（総当たり）ベクトルインデックスフィールド |
 | `addIvfField(name, dimension, distance, nClusters, nProbe)` | IVF ベクトルインデックスフィールド |
 | `addEmbedder(name, config)` | 名前付きエンベダーの登録 |

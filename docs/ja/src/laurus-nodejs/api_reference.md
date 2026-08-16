@@ -202,7 +202,7 @@ class Schema {
 | `addGeoField(name, stored?, indexed?)` | 地理座標フィールド。 |
 | `addGeo3dField(name, stored?, indexed?)` | 3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は [Geo3d の概念](../concepts/geo3d.md)。 |
 | `addDatetimeField(name, stored?, indexed?)` | UTC 日時フィールド。 |
-| `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?, pqCodebookPath?)` | HNSW ベクトルフィールド。 |
+| `addHnswField(name, dimension, distance?, m?, efConstruction?, defaultEfSearch?, embedder?, quantizer?, subvectorCount?, rerankStorage?, pqCodebookPath?)` | HNSW ベクトルフィールド。 |
 | `addFlatField(name, dimension, distance?, embedder?)` | Flat（全探索）ベクトルフィールド。 |
 | `addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)` | IVF ベクトルフィールド。 |
 | `addEmbedder(name, config)` | 名前付き Embedder を登録。 |
