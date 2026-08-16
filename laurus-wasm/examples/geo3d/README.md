@@ -123,12 +123,14 @@ so the ~52 MB UniDic zip is downloaded only once across samples.
   locally.
 - Orbital element sets are fetched from
   `https://celestrak.org/NORAD/elements/gp.php?GROUP=...&FORMAT=json`
-  with CORS enabled (`Access-Control-Allow-Origin: *`). Element sets
-  change only a few times a day and CelesTrak temporarily blocks
-  clients that re-download them repeatedly, so the demo fetches each
-  group **once per session** and refreshes by re-propagating locally.
-  If the initial fetch fails with a timeout, wait a couple of hours
-  before retrying — the block is temporary.
+  with CORS enabled (`Access-Control-Allow-Origin: *`). CelesTrak
+  answers **HTTP 403 per IP per group** until the element set next
+  updates (~every 2 hours), so the demo persists each downloaded
+  group with the Cache API: reloads inside the window are served
+  entirely from cache, and a 403 with a cached copy present simply
+  means the copy is still current. A 403 with no cached copy (fresh
+  browser behind an IP that already consumed the window) suggests
+  switching to another group or retrying after the next update.
 - Positions come from SGP4 propagation of the published mean
   elements; expect kilometre-scale differences from precision
   ephemerides. Decayed or malformed element sets are skipped (the
