@@ -767,10 +767,10 @@ mod tests {
     #[wasm_bindgen_test]
     fn unreferenced_embedder_is_reported() {
         let schema = schema_with_embedder(None);
-        let registered = vec!["minilm".to_string()];
+        let registered = ["minilm".to_string()];
         assert_eq!(
             unused_embedder_names(&schema, registered.iter()),
-            vec!["minilm".to_string()],
+            ["minilm".to_string()],
         );
     }
 
@@ -778,7 +778,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn referenced_embedder_is_not_reported() {
         let schema = schema_with_embedder(Some("minilm"));
-        let registered = vec!["minilm".to_string()];
+        let registered = ["minilm".to_string()];
         assert!(unused_embedder_names(&schema, registered.iter()).is_empty());
     }
 
@@ -786,14 +786,14 @@ mod tests {
     #[wasm_bindgen_test]
     fn only_unreferenced_names_are_reported_sorted() {
         let schema = schema_with_embedder(Some("minilm"));
-        let registered = vec![
+        let registered = [
             "zeta".to_string(),
             "minilm".to_string(),
             "alpha".to_string(),
         ];
         assert_eq!(
             unused_embedder_names(&schema, registered.iter()),
-            vec!["alpha".to_string(), "zeta".to_string()],
+            ["alpha".to_string(), "zeta".to_string()],
         );
     }
 }
