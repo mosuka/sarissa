@@ -18,7 +18,7 @@
 | `aarch64-pc-windows-msvc` | Windows arm64 | MSVC | 動的 | `.zip` |
 
 ```bash
-VERSION=v0.12.0
+VERSION=v0.12.1
 TARGET=x86_64-unknown-linux-musl
 curl -fsSL -O "https://github.com/mosuka/laurus/releases/download/${VERSION}/laurus-${VERSION}-${TARGET}.tar.gz"
 tar -xzf "laurus-${VERSION}-${TARGET}.tar.gz"
