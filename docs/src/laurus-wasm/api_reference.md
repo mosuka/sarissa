@@ -384,7 +384,7 @@ above.
 
 Add a binary data field.
 
-#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?, pqCodebookPath?)`
+#### `addHnswField(name, dimension, distance?, m?, efConstruction?, defaultEfSearch?, embedder?, quantizer?, subvectorCount?, rerankStorage?, pqCodebookPath?)`
 
 Add an HNSW vector index field.
 
@@ -392,6 +392,8 @@ Add an HNSW vector index field.
   `"manhattan"`, `"angular"`
 - `m`: Branching factor (default 16)
 - `efConstruction`: Build-time expansion (default 200)
+- `defaultEfSearch`: Schema-level default for the query-time `ef_search`
+  candidate-list size; omit to use the internal fallback of 50
 - `quantizer`: `"scalar_8bit"` (default) or `"product_quantization"`
   (requires `subvectorCount`)
 - `subvectorCount`: number of PQ sub-vectors; must divide `dimension`

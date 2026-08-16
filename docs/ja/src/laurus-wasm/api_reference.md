@@ -385,13 +385,14 @@ WASM バインディングは `Geo3dDistanceQuery` / `Geo3dBoundingBoxQuery` /
 
 バイナリデータフィールドを追加します。
 
-#### `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?, quantizer?, subvectorCount?, rerankStorage?, pqCodebookPath?)`
+#### `addHnswField(name, dimension, distance?, m?, efConstruction?, defaultEfSearch?, embedder?, quantizer?, subvectorCount?, rerankStorage?, pqCodebookPath?)`
 
 HNSW ベクトルインデックスフィールドを追加します。
 
 - `distance`: `"cosine"`（デフォルト）、`"euclidean"`、`"dot_product"`、`"manhattan"`、`"angular"`
 - `m`: 分岐係数（デフォルト 16）
 - `efConstruction`: 構築時の探索幅（デフォルト 200）
+- `defaultEfSearch`: クエリ時の `ef_search`（候補リストサイズ）のスキーマレベルデフォルト。省略時は内部フォールバックの 50 を使用します
 - `quantizer`: `"scalar_8bit"`（デフォルト）または `"product_quantization"`（`subvectorCount` が必須）
 - `subvectorCount`: PQ サブベクトル数。`dimension` を割り切れる値を指定します
 - `rerankStorage`: 省略（デフォルト）するか、`"f32"` を指定して完全精度のリランクサイドカーを保存します

@@ -108,7 +108,7 @@ The `Schema` class defines the structure of your index. Use the following method
 | `addDatetimeField(name, stored, indexed)` | Date/time field |
 | `addGeoField(name, stored, indexed)` | Geographic coordinate field (lat/lon) |
 | `addBytesField(name, stored)` | Binary data field |
-| `addHnswField(name, dimension, distance, m, efConstruction)` | HNSW vector index field |
+| `addHnswField(name, dimension, distance, m, efConstruction, defaultEfSearch, embedder, ...)` | HNSW vector index field |
 | `addFlatField(name, dimension, distance)` | Flat (brute-force) vector index field |
 | `addIvfField(name, dimension, distance, nClusters, nProbe)` | IVF vector index field |
 | `addEmbedder(name, config)` | Register a named embedder |

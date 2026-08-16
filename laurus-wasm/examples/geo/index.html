@@ -624,9 +624,10 @@
         schema.addHnswField(
           EMBED_FIELD,
           EMBED_DIM,
-          undefined,
-          undefined,
-          undefined,
+          undefined, // distance (default: cosine)
+          undefined, // m
+          undefined, // efConstruction
+          undefined, // defaultEfSearch
           EMBEDDER_NAME,
         );
         schema.setDefaultFields(['title', 'description', 'category']);
