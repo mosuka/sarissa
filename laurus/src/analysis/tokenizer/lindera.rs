@@ -217,9 +217,9 @@ impl LinderaTokenizer {
         let dict = Dictionary {
             prefix_dictionary: Arc::new(prefix_dictionary),
             connection_cost_matrix: Arc::new(connection_cost_matrix),
-            character_definition,
-            unknown_dictionary,
-            metadata: meta,
+            character_definition: Arc::new(character_definition),
+            unknown_dictionary: Arc::new(unknown_dictionary),
+            metadata: Arc::new(meta),
         };
         let inner = Segmenter::new(mode, dict, None);
         Ok(Self { inner })
