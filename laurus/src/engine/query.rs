@@ -396,13 +396,29 @@ impl UnifiedQueryParser {
 ///
 /// Handles:
 /// 1. Collapse multiple whitespace into single space
-/// 2. Remove leading/trailing boolean operators (AND, OR)
-/// 3. Collapse consecutive boolean operators (AND AND → AND)
+/// 2. Remove empty groups (`( )`, optionally `+`/`-` prefixed) left behind
+///    when a vector clause is extracted from inside a boolean group, e.g.
+///    `+(embedding:"...")` → `+( )` (GitHub issue #983)
+/// 3. Remove leading/trailing boolean operators (AND, OR)
+/// 4. Collapse consecutive boolean operators (AND AND → AND)
 fn clean_lexical_string(s: &str) -> String {
     static WHITESPACE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+    static EMPTY_GROUP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[+-]?\(\s*\)").unwrap());
 
     // Collapse multiple whitespace
-    let s = WHITESPACE_RE.replace_all(s, " ");
+    let mut s = WHITESPACE_RE.replace_all(s, " ").into_owned();
+
+    // Strip empty groups, looping so nested leftovers like `+( ( ) )`
+    // collapse completely. Non-empty parentheses (boolean groups,
+    // `geo_bbox(...)` arguments) never match.
+    loop {
+        let stripped = EMPTY_GROUP_RE.replace_all(&s, " ");
+        if stripped == s {
+            break;
+        }
+        s = stripped.into_owned();
+    }
+
     let s = s.trim();
 
     if s.is_empty() {
@@ -528,6 +544,33 @@ mod tests {
 
         assert_lexical_only(&request);
         assert!(request.fusion_algorithm.is_none());
+    }
+
+    /// A vector clause extracted from inside a boolean group must not
+    /// leave an unparsable empty group (`+( )`) behind in the lexical
+    /// portion (GitHub issue #983).
+    #[tokio::test]
+    async fn test_vector_clause_inside_group_leaves_valid_lexical() {
+        let parser = make_parser();
+        let request = parser
+            .parse(r#"+(content:"cats") +title:hello"#)
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(request.query, SearchQuery::Hybrid { .. }),
+            "group-wrapped vector clause plus lexical clause must parse as hybrid"
+        );
+    }
+
+    /// A query that is nothing but a group-wrapped vector clause reduces
+    /// to a pure vector query once the empty group is stripped.
+    #[tokio::test]
+    async fn test_vector_clause_alone_inside_group_is_pure_vector() {
+        let parser = make_parser();
+        let request = parser.parse(r#"+(content:"cats")"#).await.unwrap();
+
+        assert_vector_only(&request);
     }
 
     #[tokio::test]
@@ -869,6 +912,33 @@ mod tests {
         assert_eq!(clean_lexical_string("   "), "");
         assert_eq!(clean_lexical_string("AND"), "");
         assert_eq!(clean_lexical_string("AND OR"), "");
+    }
+
+    /// Empty groups left behind by vector-clause extraction must be
+    /// stripped so the remaining lexical string still parses
+    /// (GitHub issue #983).
+    #[test]
+    fn test_clean_empty_group() {
+        assert_eq!(
+            clean_lexical_string("+( ) +location:geo_bbox(35.6, 139.5, 35.8, 140.0)"),
+            "+location:geo_bbox(35.6, 139.5, 35.8, 140.0)"
+        );
+        assert_eq!(clean_lexical_string("( )"), "");
+        assert_eq!(clean_lexical_string("-( ) foo"), "foo");
+    }
+
+    /// Nested leftovers like `+( ( ) )` must collapse completely.
+    #[test]
+    fn test_clean_nested_empty_group() {
+        assert_eq!(clean_lexical_string("foo +( ( ) )"), "foo");
+        assert_eq!(clean_lexical_string("+( ( ) )"), "");
+    }
+
+    /// Removing an empty group can expose a dangling trailing operator,
+    /// which must also be dropped.
+    #[test]
+    fn test_clean_empty_group_exposes_trailing_operator() {
+        assert_eq!(clean_lexical_string("foo AND ( )"), "foo");
     }
 
     // -- Field-reference validation (parse-tree walking) --
