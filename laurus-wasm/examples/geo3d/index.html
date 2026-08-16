@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Laurus WASM — Geo3d Search Sample (Aircraft)</title>
+  <title>Laurus WASM — Geo3d Search Sample (Satellite)</title>
   <link rel="stylesheet"
         href="https://unpkg.com/cesium@1.121.0/Build/Cesium/Widgets/widgets.css"
         integrity="sha384-ghEeMdcWWzRv/BPeUcX835vcKDGrxvROXisl/Btpv3GeekBUXTSPVcFJpI1Tcrgp"
@@ -201,11 +201,11 @@
   <div class="container container-wide">
     <p class="subtitle"><a href="../">&larr; All samples</a></p>
 
-    <h1>Geo3d Search Sample (Aircraft)</h1>
+    <h1>Geo3d Search Sample (Satellite)</h1>
     <p class="subtitle">
-      Live aircraft positions on a 3D globe (CesiumJS). Click anywhere
+      Live satellite positions on a 3D globe (CesiumJS). Click anywhere
       on the globe to set a search centre — the demo shows the
-      aircraft 3D-closest to that point and re-ranks them as you
+      satellite 3D-closest to that point and re-ranks them as you
       move. True 3D: altitude is part of the distance.
     </p>
 
@@ -213,9 +213,9 @@
     <div class="card">
       <h2>Engine <span id="status" class="badge badge-loading">loading…</span></h2>
       <div class="stats">
-        <div>Aircraft tracked: <span id="doc-count">0</span></div>
-        <div>Source: <span id="source">api.airplanes.live</span></div>
-        <div>Last fetch: <span id="last-fetch">never</span></div>
+        <div>Satellites tracked: <span id="doc-count">0</span></div>
+        <div>Source: <span id="source">celestrak.org + SGP4 (client-side)</span></div>
+        <div>Last update: <span id="last-fetch">never</span></div>
       </div>
     </div>
 
@@ -223,12 +223,23 @@
     <div class="card">
       <h2>Maintenance</h2>
       <p class="dsl-hint">
-        Refresh re-fetches positions from airplanes.live and rebuilds
-        the index. Reset clears OPFS state including the cached
-        UniDic dictionary.
+        Refresh re-propagates every satellite to the current time with
+        SGP4 (pure client-side math, no network) and rebuilds the
+        index. Orbital element sets are downloaded from CelesTrak once
+        per group per session. Reset clears OPFS state including the
+        cached UniDic dictionary.
       </p>
       <div class="row">
-        <button id="refresh-btn" type="button" disabled>Refresh data</button>
+        <button id="refresh-btn" type="button" disabled>Refresh positions</button>
+        <label class="auto-refresh-label">
+          Group:
+          <select id="sat-group" disabled>
+            <option value="starlink" selected>Starlink (~8000)</option>
+            <option value="stations">Stations (ISS…)</option>
+            <option value="gnss">GNSS (GPS…)</option>
+            <option value="weather">Weather</option>
+          </select>
+        </label>
         <label class="auto-refresh-label">
           Auto:
           <select id="auto-refresh" disabled>
@@ -242,9 +253,11 @@
         <button id="reset-all-btn" class="secondary" type="button" disabled>Reset everything (index + dictionary)</button>
       </div>
       <p class="dsl-hint">
-        Auto-refresh pauses while the tab is hidden so airplanes.live
-        is not hammered while you are not looking. The manual
-        Refresh button is rate-limited to one request every 3 seconds.
+        Auto-refresh pauses while the tab is hidden to save CPU —
+        positions are recomputed locally, so refreshing never contacts
+        CelesTrak again. Element sets change only a few times a day and
+        CelesTrak temporarily blocks clients that re-download them
+        repeatedly, hence the once-per-session fetch.
       </p>
     </div>
 
@@ -253,14 +266,14 @@
       <h2>Search</h2>
       <div class="search-box">
         <input type="text" id="query"
-               placeholder="e.g. JAL, Boeing, category:heavy" disabled>
+               placeholder="e.g. STARLINK, category:LEO, category:GEO" disabled>
         <button id="search-btn" type="button" disabled>Search</button>
       </div>
       <div class="quick-filters" id="quick-filters">
-        <button type="button" data-q="category:heavy" disabled>Heavies</button>
-        <button type="button" data-q="category:rotorcraft" disabled>Helicopters</button>
-        <button type="button" data-q="callsign:JAL*" disabled>JAL flights</button>
-        <button type="button" data-q="callsign:ANA*" disabled>ANA flights</button>
+        <button type="button" data-q="category:LEO" disabled>LEO</button>
+        <button type="button" data-q="category:GEO" disabled>GEO</button>
+        <button type="button" data-q="callsign:STARLINK*" disabled>Starlink</button>
+        <button type="button" data-q="callsign:ISS*" disabled>ISS</button>
         <button type="button" data-q="" disabled>Clear</button>
       </div>
       <div class="row">
@@ -273,7 +286,7 @@
             <option value="100">100</option>
             <option value="200">200</option>
           </select>
-          aircraft, sorted by 3D distance from the pin 📌
+          satellite, sorted by 3D distance from the pin 📌
         </label>
       </div>
       <p class="dsl-hint">
@@ -301,7 +314,7 @@
       <div class="card results-card">
         <h2>Results</h2>
         <ul class="results" id="results">
-          <li class="empty">Loading aircraft data…</li>
+          <li class="empty">Loading satellite data…</li>
         </ul>
       </div>
     </div>
@@ -341,6 +354,10 @@
   <script src="https://unpkg.com/cesium@1.121.0/Build/Cesium/Cesium.js"
           integrity="sha384-q9nNk8suPYjCO59e/4iaSYbUEDnj0FxTd2QoWXfFeF0+L5FSerVuCAjKXM/EYiD9"
           crossorigin="anonymous"></script>
+  <!-- SGP4 propagation (CelesTrak GP element sets → live positions). -->
+  <script src="https://unpkg.com/satellite.js@6.0.1/dist/satellite.min.js"
+          integrity="sha384-ks/q8WwP74/nmNCaw/3Kj9Iv2xK5DsfHUJx18wEND2nHyRN7wjPfXjJF1Ejyj1lH"
+          crossorigin="anonymous"></script>
 
   <script type="module">
     import init, { Index, Schema } from '../../pkg/laurus_wasm.js';
@@ -355,67 +372,32 @@
 
     /** OPFS directory holding the (volatile) flights index.
      *  This sample wipes and recreates the directory on every load
-     *  so stale aircraft positions never leak across sessions. */
+     *  so stale satellite positions never leak across sessions. */
     const INDEX_NAME = 'flights3d-demo-index';
     const POSITION_FIELD = 'position';
 
-    /** Radius in nautical miles passed to airplanes.live. Each
-     *  fetch is centred on the current pin position, so clicking
-     *  the globe re-centres both the pin and the snapshot. The
-     *  `/v2/point/{lat}/{lon}/{radius}` endpoint caps the radius at
-     *  250 nm — larger values are rejected with HTTP 403 (which
-     *  surfaces as a CORS error in the browser because the error
-     *  response carries no `Access-Control-Allow-Origin` header). */
-    const FETCH_RADIUS_NM = 250;
-
-    /** Click-to-pin re-fetch threshold. A click that lands within this
-     *  many nautical miles of the last fetched centre reuses the
-     *  existing snapshot — the previous fetch's 250 nm circle still
-     *  covers the new pin's neighbourhood, so no upstream call is
-     *  needed. Beyond this threshold the click triggers a fresh
-     *  re-centred fetch. Half of `FETCH_RADIUS_NM` keeps a 125 nm
-     *  buffer around the new pin even at the threshold. */
-    const FETCH_REFRESH_NM = 125;
-
-    /** Build the airplanes.live readsb-format endpoint URL for a
-     *  given centre. The pin defaults to Tokyo, so the initial
-     *  snapshot covers the Kanto region and surrounding airspace
-     *  within ~463 km (`FETCH_RADIUS_NM`). */
-    function buildFetchUrl(latDeg, lonDeg) {
-      return `https://api.airplanes.live/v2/point/${latDeg.toFixed(4)}/${lonDeg.toFixed(4)}/${FETCH_RADIUS_NM}`;
+    /** Build the CelesTrak GP endpoint URL for a satellite group.
+     *  `FORMAT=json` serves OMM records with
+     *  `Access-Control-Allow-Origin: *`, so a static page can fetch
+     *  them directly. Positions are then propagated locally with
+     *  SGP4 (satellite.js), so the snapshot is global — moving the
+     *  pin never requires another fetch. */
+    function buildGpUrl(group) {
+      return `https://celestrak.org/NORAD/elements/gp.php?GROUP=${encodeURIComponent(group)}&FORMAT=json`;
     }
 
-    /** Soft cap on aircraft count for snappy UI. */
-    const MAX_AIRCRAFT = 500;
+    /** Soft cap on satellite count for snappy UI (Cesium entity and
+     *  indexing cost). Large groups (Starlink ~8000) are truncated
+     *  to the first `MAX_SATELLITES` element sets. */
+    const MAX_SATELLITES = 500;
 
 
-    /** Search result limit. Above MAX_AIRCRAFT so we always see
+    /** Search result limit. Above MAX_SATELLITE so we always see
      *  every match in the index when the spatial constraint is off. */
     const SEARCH_LIMIT = 500;
 
-    const FEET_TO_M = 0.3048;
     const WGS84_A = 6_378_137.0;
     const WGS84_E2 = 6.69437999014e-3;
-
-    /** Earth's mean radius in nautical miles, used by `greatCircleNm`
-     *  for the click-to-pin distance check (FETCH_REFRESH_NM). */
-    const EARTH_RADIUS_NM = 3440.065;
-
-    /**
-     * Great-circle (haversine) distance between two WGS84 lat/lon
-     * pairs, in nautical miles. Sufficient for the "is this click
-     * close enough to the last fetch centre to reuse the snapshot?"
-     * decision; not intended as a precision geodesic distance.
-     */
-    function greatCircleNm(lat1, lon1, lat2, lon2) {
-      const phi1 = (lat1 * Math.PI) / 180;
-      const phi2 = (lat2 * Math.PI) / 180;
-      const dPhi = ((lat2 - lat1) * Math.PI) / 180;
-      const dLambda = ((lon2 - lon1) * Math.PI) / 180;
-      const a = Math.sin(dPhi / 2) ** 2
-        + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) ** 2;
-      return 2 * EARTH_RADIUS_NM * Math.asin(Math.sqrt(a));
-    }
 
     /** Default pin at Tokyo (near the city centre), used until the
      *  user clicks somewhere else on the globe. */
@@ -473,18 +455,10 @@
       return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    /** Map ADS-B emitter category codes to short human labels. */
+    /** Category facet label: the orbit band computed at propagation
+     *  time (LEO / MEO / GEO / HEO), with a defensive fallback. */
     function categoryLabel(code) {
-      const map = {
-        A0: 'no info', A1: 'light',
-        A2: 'small', A3: 'large', A4: 'high-vortex',
-        A5: 'heavy', A6: 'high-perf', A7: 'rotorcraft',
-        B0: 'no info', B1: 'glider', B2: 'lighter-than-air',
-        B3: 'parachutist', B4: 'ultralight', B6: 'uav', B7: 'space',
-        C0: 'no info', C1: 'emergency-vehicle',
-        C2: 'service-vehicle', C3: 'fixed-obstacle',
-      };
-      return map[code] ?? (code || 'unknown');
+      return code || 'unknown';
     }
 
     const logger = createLogger('log');
@@ -494,6 +468,7 @@
     const resultsEl = document.getElementById('results');
     const limitSelectEl = document.getElementById('result-limit');
     const refreshBtn = document.getElementById('refresh-btn');
+    const satGroupEl = document.getElementById('sat-group');
     const dbgPinEl = document.getElementById('dbg-pin');
     const dbgPinEcefEl = document.getElementById('dbg-pin-ecef');
     const dbgQueryEl = document.getElementById('dbg-query');
@@ -503,12 +478,12 @@
     /** @type {Cesium.Viewer | null} */
     let viewer = null;
 
-    /** Background dot per aircraft id, present for every record in
+    /** Background dot per satellite id, present for every record in
      *  the current snapshot. Drawn as a small dim dot so the user
      *  sees the full snapshot in context — the search hits then
      *  stand out as the prominent overlay. */
     const bgEntities = new Map();
-    /** Highlight entity per aircraft id, present only while in the
+    /** Highlight entity per satellite id, present only while in the
      *  current result set. Drawn on top of the background dot with
      *  a label and a vertical altitude line so the search hits
      *  stand out clearly. */
@@ -516,10 +491,10 @@
     /** Pin entity (search centre marker). */
     let pinEntity = null;
 
-    /** id -> raw aircraft record (lat, lon, altMeters, ecef, ...).
+    /** id -> raw satellite record (lat, lon, altMeters, ecef, ...).
      *  Source of truth for the UI; the laurus index is the source
      *  of truth for SEARCH only. */
-    const aircraftMap = new Map();
+    const satelliteMap = new Map();
 
     /** Currently picked search centre. Defaults to Tokyo until the
      *  user clicks somewhere else on the globe. */
@@ -531,11 +506,6 @@
      *  refreshing. */
     const ingestedIds = new Set();
     let refreshLockUntil = 0;
-    /** Pin position at the last successful airplanes.live fetch.
-     *  `null` until the first fetch completes — until then every
-     *  click triggers a fetch unconditionally. */
-    let lastFetchLat = null;
-    let lastFetchLon = null;
     /** Auto-refresh interval handle. Cleared when the user picks
      *  a different cadence (or "Off") from the select. */
     let autoRefreshTimer = null;
@@ -615,14 +585,10 @@
       // fire LEFT_CLICK in Cesium, so this never collides with
       // rotation / panning.
       //
-      // Re-fetch policy: a click only triggers `refreshData()` when
-      // the new pin is more than `FETCH_REFRESH_NM` (125 nm) away
-      // from the last fetched centre. Inside that radius the prior
-      // 250 nm snapshot still covers the new pin's neighbourhood,
-      // so the existing in-memory index is reused — instant search,
-      // no upstream call, no rate-limit pressure on airplanes.live.
-      // The pin still moves immediately (`setPin` always runs) so
-      // visual feedback is unaffected.
+      // The satellite snapshot is global (SGP4 propagation covers
+      // the whole catalogue), so moving the pin never needs new
+      // data — the click just re-centres the spatial constraint and
+      // re-runs the search against the in-memory index.
       const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
       handler.setInputAction((event) => {
         const ray = viewer.camera.getPickRay(event.position);
@@ -633,24 +599,7 @@
         const newLat = Cesium.Math.toDegrees(carto.latitude);
         const newLon = Cesium.Math.toDegrees(carto.longitude);
         setPin(newLat, newLon);
-        if (lastFetchLat == null || lastFetchLon == null) {
-          // First click before any fetch has completed — let
-          // refreshData decide what to do (it has its own guards).
-          refreshData();
-          return;
-        }
-        const dist = greatCircleNm(lastFetchLat, lastFetchLon, newLat, newLon);
-        if (dist > FETCH_REFRESH_NM) {
-          logger.log(
-            `Pin moved ${dist.toFixed(0)} nm from last fetch — re-centring.`,
-          );
-          refreshData();
-        } else {
-          logger.log(
-            `Pin within ${dist.toFixed(0)} nm of last fetch — `
-            + `reusing snapshot.`,
-          );
-        }
+        doSearch();
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     }
 
@@ -707,13 +656,13 @@
      * Build the unified DSL query string. The pin always exists.
      *
      * - If the user has not typed anything, ask laurus directly for
-     *   the top-N nearest aircraft via `geo3d_nearest` so we get the
+     *   the top-N nearest satellite via `geo3d_nearest` so we get the
      *   distance-ordered set in a single round trip.
      * - If the user has typed text, run the text query alone and let
      *   `doSearch()` rank the matches by distance and keep the top N
      *   in JavaScript. This lets text behave purely as a filter:
-     *   "the N closest aircraft that match the text", rather than
-     *   "the aircraft that are both in the top-N AND match" — the
+     *   "the N closest satellite that match the text", rather than
+     *   "the satellite that are both in the top-N AND match" — the
      *   latter would silently drop matches that ranked just outside
      *   the spatial top-N.
      */
@@ -726,56 +675,107 @@
         + `${n})`;
     }
 
+    /** In-memory GP cache: group → array of `{rec, satrec}`. One
+     *  fetch per group per session — CelesTrak temporarily blocks
+     *  clients that re-download the same element set repeatedly
+     *  (elements change only a few times a day), so refreshes
+     *  re-propagate the cached satrecs instead of re-fetching. */
+    const gpCache = new Map();
+
+    /** Rough orbit-regime label from geodetic altitude, reused as the
+     *  demo's `category` facet (LEO / MEO / GEO / HEO). */
+    function orbitBand(altMeters) {
+      const km = altMeters / 1000;
+      if (km < 2_000) return 'LEO';
+      if (km < 35_000) return 'MEO';
+      if (km < 36_500) return 'GEO';
+      return 'HEO';
+    }
+
     /**
-     * Pull the current aircraft snapshot from airplanes.live and
-     * filter it down to the ones with usable position + altitude.
-     * Throws on network or HTTP error.
+     * Produce the current satellite snapshot: download the selected
+     * group's OMM element sets from CelesTrak on first use (per
+     * session), then propagate every satellite to "now" with SGP4 —
+     * pure client-side math, no recurring network traffic. Records
+     * mirror the shape the ingest pipeline expects (lat / lon /
+     * altMeters plus display metadata). Decayed or malformed element
+     * sets are counted and skipped. Throws on network or HTTP error.
      */
-    async function fetchAircraft() {
-      const url = buildFetchUrl(pinLat, pinLon);
-      logger.log(`Fetching aircraft from ${url}…`);
-      const t0 = performance.now();
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) {
-        throw new Error(`airplanes.live HTTP ${res.status}`);
+    async function fetchSatellites() {
+      const group = satGroupEl.value;
+      let sats = gpCache.get(group);
+      if (!sats) {
+        const url = buildGpUrl(group);
+        logger.log(`Fetching ${group} element sets from ${url}…`);
+        const t0 = performance.now();
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error(`CelesTrak HTTP ${res.status}`);
+        }
+        const gp = await res.json();
+        sats = [];
+        for (const rec of gp) {
+          try {
+            sats.push({ rec, satrec: satellite.json2satrec(rec) });
+          } catch {
+            // Malformed element set — skip.
+          }
+        }
+        gpCache.set(group, sats);
+        const elapsed = (performance.now() - t0).toFixed(0);
+        logger.ok(`Fetched ${gp.length} element set(s) in ${elapsed} ms.`);
       }
-      const json = await res.json();
-      const all = Array.isArray(json.ac) ? json.ac : [];
+
+      const now = new Date();
+      const gmst = satellite.gstime(now);
       const usable = [];
-      for (const ac of all) {
-        if (typeof ac.lat !== 'number' || typeof ac.lon !== 'number') continue;
-        let altMeters = null;
-        if (typeof ac.alt_geom === 'number') {
-          altMeters = ac.alt_geom * FEET_TO_M;
-        } else if (typeof ac.alt_baro === 'number') {
-          altMeters = ac.alt_baro * FEET_TO_M;
-        } else if (ac.alt_baro === 'ground') {
-          altMeters = 0;
-        } else {
+      let skipped = 0;
+      for (const { rec, satrec } of sats) {
+        const pv = satellite.propagate(satrec, now);
+        if (!pv || !pv.position) {
+          skipped++;
           continue;
         }
-        usable.push({ ...ac, altMeters });
-        if (usable.length >= MAX_AIRCRAFT) break;
+        const geo = satellite.eciToGeodetic(pv.position, gmst);
+        const lat = satellite.degreesLat(geo.latitude);
+        const lon = satellite.degreesLong(geo.longitude);
+        const altMeters = geo.height * 1000;
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)
+            || !Number.isFinite(altMeters)) {
+          skipped++;
+          continue;
+        }
+        usable.push({
+          hex: String(rec.NORAD_CAT_ID),
+          flight: rec.OBJECT_NAME ?? '',
+          r: rec.OBJECT_ID ?? '',
+          t: group,
+          desc: `CelesTrak ${group} element set`,
+          category: orbitBand(altMeters),
+          lat,
+          lon,
+          altMeters,
+        });
+        if (usable.length >= MAX_SATELLITES) break;
       }
-      const elapsed = (performance.now() - t0).toFixed(0);
       logger.ok(
-        `Fetched ${all.length} record(s); using ${usable.length} `
-        + `with valid 3D position in ${elapsed} ms.`,
+        `Propagated ${usable.length} satellite position(s)`
+        + (skipped ? ` (${skipped} skipped)` : '') + '.',
       );
       return usable;
     }
 
     /**
      * Apply the new snapshot incrementally:
-     *   - Aircraft no longer present       → delete from the index,
+     *   - Satellite no longer present       → delete from the index,
      *                                        drop the cached record,
      *                                        and remove the highlight
      *                                        entity if currently shown.
-     *   - Aircraft still present (unchanged
+     *   - Satellite still present (unchanged
      *     id) or newly arriving            → `putDocument` overwrites
      *                                        the doc by id; the cached
      *                                        record is updated; if the
-     *                                        aircraft is currently
+     *                                        satellite is currently
      *                                        highlighted, its marker
      *                                        and altitude line move
      *                                        in place — no flicker.
@@ -784,7 +784,7 @@
      * OPFS flush. Volatile-by-design: only the most recent snapshot
      * survives a refresh.
      */
-    async function ingestAircraft(records) {
+    async function ingestSatellite(records) {
       // Build the new id set first so we can compute the diff
       // without scanning records twice for every old id.
       const incoming = [];
@@ -804,7 +804,7 @@
       for (const id of departed) {
         await index.deleteDocuments(id);
         ingestedIds.delete(id);
-        aircraftMap.delete(id);
+        satelliteMap.delete(id);
         const bg = bgEntities.get(id);
         if (bg) {
           viewer.entities.remove(bg);
@@ -818,7 +818,7 @@
       }
 
       // Arrivals + updates: putDocument overwrites by id, so we do
-      // not need a delete-first pass for unchanged aircraft.
+      // not need a delete-first pass for unchanged satellite.
       let added = 0;
       let updated = 0;
       for (const { id, ac } of incoming) {
@@ -826,10 +826,9 @@
         await index.putDocument(id, {
           callsign: (ac.flight ?? '').trim(),
           registration: ac.r ?? '',
-          aircraft_type: ac.t ?? '',
+          satellite_type: ac.t ?? '',
           description: ac.desc ?? '',
           category: categoryLabel(ac.category),
-          on_ground: ac.alt_baro === 'ground',
           altitude_m: ac.altMeters,
           [POSITION_FIELD]: ecef,
         });
@@ -841,10 +840,10 @@
           ingestedIds.add(id);
         }
 
-        aircraftMap.set(id, {
+        satelliteMap.set(id, {
           callsign: (ac.flight ?? '').trim() || id,
           registration: ac.r ?? '',
-          aircraft_type: ac.t ?? '',
+          satellite_type: ac.t ?? '',
           description: ac.desc ?? '',
           category: categoryLabel(ac.category),
           altMeters: ac.altMeters,
@@ -862,7 +861,7 @@
           addBackgroundEntity(id, ecef);
         }
 
-        // If this aircraft is currently highlighted, slide its
+        // If this satellite is currently highlighted, slide its
         // marker and altitude line to the new position rather than
         // recreating the entity (avoids a flicker on auto-refresh).
         const fg = fgEntities.get(id);
@@ -881,15 +880,10 @@
       );
       docCountEl.textContent = ingestedIds.size;
       lastFetchEl.textContent = new Date().toLocaleTimeString();
-      // Remember the pin position used for THIS fetch so the click
-      // handler can decide whether the next click is close enough to
-      // reuse this snapshot.
-      lastFetchLat = pinLat;
-      lastFetchLon = pinLon;
     }
 
     /** Draw a small dim dot for `id` at `ecef`. These dots cover
-     *  the entire snapshot so the user can see how many aircraft
+     *  the entire snapshot so the user can see how many satellite
      *  are in range; the overlay highlight (`addHighlightEntity`)
      *  layers on top for the search hits. */
     function addBackgroundEntity(id, ecef) {
@@ -907,9 +901,9 @@
       bgEntities.set(id, e);
     }
 
-    /** Draw the prominent overlay marker for a result aircraft: a
+    /** Draw the prominent overlay marker for a result satellite: a
      *  bright dot, a callsign label, and a vertical line from the
-     *  aircraft straight down to the ellipsoid surface so altitude
+     *  satellite straight down to the ellipsoid surface so altitude
      *  is unambiguous. */
     function addHighlightEntity(id, ac) {
       const top = new Cesium.Cartesian3(ac.ecef.x, ac.ecef.y, ac.ecef.z);
@@ -955,7 +949,7 @@
       }
       for (const id of resultIds) {
         if (fgEntities.has(id)) continue;
-        const ac = aircraftMap.get(id);
+        const ac = satelliteMap.get(id);
         if (!ac) continue;
         addHighlightEntity(id, ac);
       }
@@ -981,7 +975,7 @@
         if (results.length === 0) {
           applyHighlight(new Set());
           resultsEl.innerHTML =
-            '<li class="empty">No matching aircraft.</li>';
+            '<li class="empty">No matching satellite.</li>';
           return;
         }
 
@@ -991,7 +985,7 @@
         const stale = [];
         const enriched = results
           .map((r) => {
-            const ac = aircraftMap.get(r.id);
+            const ac = satelliteMap.get(r.id);
             if (!ac) {
               stale.push(r.id);
               return null;
@@ -1014,10 +1008,10 @@
         );
         if (stale.length > 0) {
           logger.err(
-            `Stale: ${stale.length} index entries not in aircraftMap. `
+            `Stale: ${stale.length} index entries not in satelliteMap. `
             + `IDs: [${stale.slice(0, 5).map((s) => JSON.stringify(s)).join(', ')}`
             + `${stale.length > 5 ? ', …' : ''}]. `
-            + `index=${ingestedIds.size}, aircraftMap=${aircraftMap.size}`,
+            + `index=${ingestedIds.size}, satelliteMap=${satelliteMap.size}`,
           );
         }
 
@@ -1032,7 +1026,7 @@
               <li class="clickable" data-id="${escapeHtml(r.id)}">
                 <div class="meta">
                   <span class="score">${r.score.toFixed(3)}</span>
-                  <span class="extra">${escapeHtml(r.ac.aircraft_type || '?')} · ${escapeHtml(r.ac.category)} · alt ${altKm} · ${distKm} from pin</span>
+                  <span class="extra">${escapeHtml(r.ac.satellite_type || '?')} · ${escapeHtml(r.ac.category)} · alt ${altKm} · ${distKm} from pin</span>
                 </div>
                 <div class="title">${escapeHtml(r.ac.callsign)}</div>
                 <div class="body">${escapeHtml(r.ac.description || '')}${reg}</div>
@@ -1062,11 +1056,11 @@
       refreshLockUntil = Date.now() + 3_000;
       refreshBtn.disabled = true;
       try {
-        const records = await fetchAircraft();
+        const records = await fetchSatellites();
         if (records.length === 0) {
-          logger.err('airplanes.live returned 0 usable records.');
+          logger.err('Propagation produced 0 usable satellite positions.');
         }
-        await ingestAircraft(records);
+        await ingestSatellite(records);
         await doSearch();
       } catch (e) {
         logger.err(`Refresh failed: ${e}`);
@@ -1079,8 +1073,8 @@
     /**
      * Reconfigure the auto-refresh schedule. Passing 0 disables the
      * timer entirely. The Page Visibility API is consulted on every
-     * tick so we never poll airplanes.live while the user is in
-     * another tab.
+     * tick so we never burn CPU re-propagating positions while the
+     * user is in another tab.
      */
     function setAutoRefresh(intervalMs) {
       if (autoRefreshTimer) {
@@ -1152,23 +1146,22 @@
         logger.ok('JapaneseAnalyzer built from OPFS-loaded UniDic.');
 
         // Always start from a fresh OPFS state. The previous
-        // session's aircraft positions are useless to a Live demo.
+        // session's satellite positions are useless to a Live demo.
         await deleteIndexDir();
 
         const schema = new Schema();
         schema.addAnalyzer(ANALYZER_NAME, analyzer);
         schema.addTextField('callsign', undefined, undefined, undefined, ANALYZER_NAME);
         schema.addTextField('registration', undefined, undefined, undefined, ANALYZER_NAME);
-        schema.addTextField('aircraft_type', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addTextField('satellite_type', undefined, undefined, undefined, ANALYZER_NAME);
         schema.addTextField('description', undefined, undefined, undefined, ANALYZER_NAME);
         schema.addTextField('category', undefined, undefined, undefined, ANALYZER_NAME);
-        schema.addBooleanField('on_ground', undefined, undefined);
         schema.addFloatField('altitude_m', undefined, undefined);
         schema.addGeo3dField(POSITION_FIELD, true, true);
         schema.setDefaultFields([
           'callsign',
           'registration',
-          'aircraft_type',
+          'satellite_type',
           'description',
           'category',
         ]);
@@ -1208,6 +1201,13 @@
     document.getElementById('reset-all-btn').addEventListener('click', resetAll);
     document.getElementById('auto-refresh').addEventListener('change', (e) => {
       setAutoRefresh(parseInt(e.target.value, 10));
+    });
+    satGroupEl.addEventListener('change', () => {
+      // ingestSatellite's departure diff clears the previous group's
+      // documents, so switching groups is a plain refresh: the new
+      // group's element sets are fetched (cache miss) and the index
+      // converges to the new snapshot.
+      refreshData();
     });
     document.getElementById('reset-view-btn').addEventListener('click', () => {
       viewer.camera.flyTo({ ...buildDefaultView(), duration: 1.0 });

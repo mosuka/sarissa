@@ -269,7 +269,7 @@ to the engine; the MCP server uses the same convention.
 - [Lexical Search](search/lexical_search.md) — programmatic entry points
   for every lexical query type.
 - [`laurus-wasm/examples/geo3d/`](https://github.com/mosuka/laurus/tree/main/laurus-wasm/examples/geo3d) —
-  browser-side demo: live aircraft positions on a CesiumJS 3D globe with
+  browser-side demo: live satellite positions on a CesiumJS 3D globe with
   `geo3d_bbox` and `geo3d_nearest` queries.
 
 [`AABB::min_distance_sq_to_point`]: https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/aabb.rs
