@@ -1,12 +1,14 @@
-# Geo3d Search Sample (Aircraft)
+# Geo3d Search Sample (Satellites)
 
 A single-page application that demonstrates laurus' 3D geographic
 search (`Geo3d` field type, ECEF Cartesian coordinates) on top of a
-[CesiumJS](https://cesium.com/platform/cesiumjs/) globe. Live aircraft
-positions are pulled from the community ADS-B feed at
-[airplanes.live](https://airplanes.live/) on every page load and on
-demand via the Refresh button (or automatically on a configurable
-schedule).
+[CesiumJS](https://cesium.com/platform/cesiumjs/) globe. Orbital
+element sets are downloaded once per session from
+[CelesTrak](https://celestrak.org/) and every satellite position is
+propagated **in the browser** with SGP4
+([satellite.js](https://github.com/shashwatak/satellite-js)), so the
+Refresh button (or the configurable auto-refresh schedule) updates
+positions with pure client-side math — no recurring API calls.
 
 See the [examples README](../README.md) for the full list of samples
 and the shared build instructions. The shortest path:
@@ -25,32 +27,28 @@ python3 -m http.server 8080
 
 ## How to use it
 
-1. The page loads and drops a yellow pin 📌 at Tokyo, fetches the
-   aircraft within 250 nm of the pin from airplanes.live (the
-   upstream `/v2/point` endpoint caps the radius at 250 nm), and
-   shows the 50 aircraft 3D-closest to the pin as orange markers
-   with a vertical altitude line.
-2. **Click anywhere on the globe** to move the pin. The pin moves
-   immediately. The demo only re-fetches when the new pin is more
-   than **125 nautical miles** from the last fetched centre — for
-   closer clicks the previous 250 nm snapshot still fully covers
-   the new pin's neighbourhood, so the existing in-memory index is
-   reused (no upstream call, instant search). Re-fetches that do
-   trigger share a 3-second rate limit with the manual Refresh
-   button.
-3. Type into the search box (e.g. `JAL`, `Boeing`,
-   `category:heavy`) or use the quick-filter chips
-   (`Heavies` / `Helicopters` / `JAL flights` / `ANA flights` /
-   `Clear`) to filter by text. Pick how many results to display
-   in the **Show:** dropdown (10 / 25 / 50 (default) / 100 / 200).
-   Results are always sorted by 3D Euclidean distance from the
-   pin — the dropdown selects the top N closest matches.
-4. Click a result row to fly the camera to that aircraft.
-5. Use **Refresh data** for a manual snapshot, or pick an interval
-   in the **Auto** dropdown (5 s / 10 s / 30 s / 60 s) for
-   hands-off updates. Auto-refresh pauses while the tab is hidden.
-   Manual / scheduled fetches always run regardless of the 125 nm
-   click threshold.
+1. The page loads and drops a yellow pin 📌 at Tokyo, downloads
+   the selected satellite group's element sets from CelesTrak
+   (Starlink by default), propagates every satellite to the current
+   time with SGP4, and shows the 50 satellites 3D-closest to the
+   pin as orange markers with a vertical altitude line.
+2. **Click anywhere on the globe** to move the pin. The snapshot is
+   global, so a click never needs new data — it just re-centres the
+   spatial constraint and re-runs the search instantly.
+3. Type into the search box (e.g. `STARLINK`, `category:LEO`,
+   `category:GEO`) or use the quick-filter chips
+   (`LEO` / `GEO` / `Starlink` / `ISS` / `Clear`) to filter by
+   text. Pick how many results to display in the **Show:** dropdown
+   (10 / 25 / 50 (default) / 100 / 200). Results are always sorted
+   by 3D Euclidean distance from the pin — the dropdown selects the
+   top N closest matches.
+4. Click a result row to fly the camera to that satellite.
+5. Use **Refresh positions** to re-propagate to the current time,
+   or pick an interval in the **Auto** dropdown
+   (5 s / 10 s / 30 s / 60 s) for hands-off updates — satellites
+   visibly move between refreshes. Auto-refresh pauses while the
+   tab is hidden. Switching the **Group** dropdown fetches that
+   group's element sets (once per session) and rebuilds the index.
 6. The **↺ Reset view** button (top-right of the globe) flies the
    camera back to the default oblique view of Japan.
 
@@ -70,10 +68,9 @@ python3 -m http.server 8080
   wiped on every page load — appropriate for Live data where
   yesterday's positions have no value.
 - A schema with five Japanese-tokenised text fields
-  (`callsign`, `registration`, `aircraft_type`, `description`,
-  `category`), a boolean field (`on_ground`), a float field
-  (`altitude_m`), and the headline `position` field of type
-  `geo3d` (indexed in a 3D BKD tree).
+  (`callsign`, `registration`, `satellite_type`, `description`,
+  `category`), a float field (`altitude_m`), and the headline
+  `position` field of type `geo3d` (indexed in a 3D BKD tree).
 - A WGS84 → ECEF helper in JS that mirrors
   `laurus/src/util/ecef.rs`, letting the demo feed `{ x, y, z }`
   objects directly into `index.putDocument` (the WASM converter
@@ -84,8 +81,8 @@ python3 -m http.server 8080
   or unit test verbatim.
 - An incremental refresh: instead of clearing the entire index
   every Refresh tick, the demo computes the diff between the old
-  snapshot and the new, deletes only the aircraft that have left
-  the feed, and overwrites the rest with `putDocument`. Highlight
+  snapshot and the new, deletes only the satellites that have left
+  the snapshot, and overwrites the rest with `putDocument`. Highlight
   markers reposition in place — no flicker.
 - A CesiumJS viewer with no Cesium Ion dependency: imagery is
   served by OpenStreetMap and terrain by the simple ellipsoid
@@ -95,16 +92,16 @@ python3 -m http.server 8080
 
 The pin always exists, so with the spatial constraint enabled the
 demo always sends a `geo3d_nearest` clause. Toggle the checkbox off
-to drop the constraint and see all matching aircraft.
+to drop the constraint and see all matching satellites.
 
 | Spatial limit | Query | What it does |
 | --- | --- | --- |
-| ON | (empty) | The 50 aircraft 3D-closest to the pin. |
-| ON | `callsign:JAL*` | The closest 50 aircraft, restricted to JAL flights. |
-| ON | `category:heavy` | The closest 50 wide-bodies. |
-| OFF | `callsign:JAL*` | Every JAL flight in the snapshot. |
-| OFF | `description:Boeing` | Every Boeing in the snapshot. |
-| OFF | `category:rotorcraft` | Every helicopter in the snapshot. |
+| ON | (empty) | The 50 satellites 3D-closest to the pin. |
+| ON | `callsign:STARLINK*` | The closest 50, restricted to Starlink. |
+| ON | `category:LEO` | The closest 50 low-Earth-orbit satellites. |
+| OFF | `callsign:ISS*` | The ISS modules in the snapshot. |
+| OFF | `category:GEO` | Every geostationary satellite in the snapshot. |
+| OFF | `category:MEO` | Every medium-Earth-orbit satellite (GNSS…). |
 
 ## Layout
 
@@ -124,23 +121,22 @@ so the ~52 MB UniDic zip is downloaded only once across samples.
 - Map imagery is fetched from OpenStreetMap. The browser must be
   online for the globe to render even though laurus itself runs
   locally.
-- Aircraft data is fetched from `https://api.airplanes.live/v2/...`,
-  a community ADS-B feed. CORS is enabled
-  (`Access-Control-Allow-Origin: *`) so browser fetches just work,
-  but the upstream service is best-effort and may briefly return
-  zero records or HTTP errors. The manual Refresh button is
-  rate-limited to one request every 3 seconds; auto-refresh
-  defaults to off and the available cadences (5 / 10 / 30 / 60 s) are
-  designed to keep the load on the upstream feed reasonable.
-- Each fetch is centred on the current pin position with a 250 nm
-  radius (~463 km), the maximum the upstream `/v2/point` endpoint
-  accepts — larger values return HTTP 403 with no CORS headers,
-  which surfaces in the browser as a misleading "Failed to fetch"
-  CORS error. The pin defaults to Tokyo on first load and moves
-  wherever you click; manual Refresh and Auto-refresh both use the
-  current pin position. Edit the `FETCH_RADIUS_NM` constant in
-  `index.html` if you want a smaller radius.
+- Orbital element sets are fetched from
+  `https://celestrak.org/NORAD/elements/gp.php?GROUP=...&FORMAT=json`
+  with CORS enabled (`Access-Control-Allow-Origin: *`). Element sets
+  change only a few times a day and CelesTrak temporarily blocks
+  clients that re-download them repeatedly, so the demo fetches each
+  group **once per session** and refreshes by re-propagating locally.
+  If the initial fetch fails with a timeout, wait a couple of hours
+  before retrying — the block is temporary.
+- Positions come from SGP4 propagation of the published mean
+  elements; expect kilometre-scale differences from precision
+  ephemerides. Decayed or malformed element sets are skipped (the
+  log shows the skip count).
+- Large groups are truncated to the first 500 element sets
+  (`MAX_SATELLITES` in `index.html`) to keep Cesium and indexing
+  snappy.
 - The index is intentionally non-persistent: each page load wipes
-  OPFS and rebuilds from a fresh airplanes.live snapshot. Use the
+  OPFS and rebuilds from a fresh propagation snapshot. Use the
   basic / geo samples if you want to see OPFS persistence in
   action.
