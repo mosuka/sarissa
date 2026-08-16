@@ -682,6 +682,93 @@
      *  re-propagate the cached satrecs instead of re-fetching. */
     const gpCache = new Map();
 
+    /** Cache API storage for GP responses. CelesTrak answers 403 per
+     *  IP per group until the element set next updates (~2 h cadence),
+     *  so a page reload inside that window must be served from this
+     *  cache — the 403 literally means "your copy is current". The
+     *  stored response is stamped with `x-fetched-at` because the
+     *  upstream `Date` header is not CORS-exposed. */
+    const GP_CACHE_NAME = 'celestrak-gp-v1';
+    const GP_FRESH_MS = 2 * 60 * 60 * 1000;
+
+    /**
+     * Load a group's GP JSON, preferring the persisted cache:
+     *   - cached copy younger than `GP_FRESH_MS` → no network at all;
+     *   - otherwise fetch; HTTP 403 with a cached copy → the copy is
+     *     still current (CelesTrak's no-update guard), use it;
+     *   - 403 without a cache → actionable error (switch group or
+     *     wait for the next update window);
+     *   - network failure with a cached copy → stale-but-usable copy.
+     */
+    async function loadGpJson(group) {
+      const url = buildGpUrl(group);
+      let cache = null;
+      let cached = null;
+      try {
+        cache = await caches.open(GP_CACHE_NAME);
+        cached = await cache.match(url);
+      } catch {
+        // Cache API unavailable — degrade to network-only.
+      }
+      if (cached) {
+        const stamp = new Date(cached.headers.get('x-fetched-at') ?? 0).getTime();
+        const ageMin = Math.round((Date.now() - stamp) / 60_000);
+        if (Date.now() - stamp < GP_FRESH_MS) {
+          logger.ok(
+            `Using cached ${group} element sets (${ageMin} min old) — `
+            + 'no network request.',
+          );
+          return cached.json();
+        }
+      }
+      logger.log(`Fetching ${group} element sets from ${url}…`);
+      const t0 = performance.now();
+      let res;
+      try {
+        res = await fetch(url, { cache: 'no-store' });
+      } catch (e) {
+        if (cached) {
+          logger.log('CelesTrak unreachable — using cached element sets.');
+          return cached.json();
+        }
+        throw e;
+      }
+      if (res.status === 403 && cached) {
+        logger.ok(
+          'CelesTrak reports no update since the last download — '
+          + `using cached ${group} element sets.`,
+        );
+        return cached.json();
+      }
+      if (res.status === 403) {
+        throw new Error(
+          'CelesTrak declined the download (HTTP 403): this IP already '
+          + 'fetched the current element sets, but this browser has no '
+          + 'cached copy. Switch to another Group above, or retry after '
+          + 'the next update window (~2 hours).',
+        );
+      }
+      if (!res.ok) {
+        throw new Error(`CelesTrak HTTP ${res.status}`);
+      }
+      const body = await res.blob();
+      if (cache) {
+        try {
+          await cache.put(url, new Response(body, {
+            headers: {
+              'content-type': 'application/json',
+              'x-fetched-at': new Date().toUTCString(),
+            },
+          }));
+        } catch {
+          // Storage quota failure — non-fatal, network copy still used.
+        }
+      }
+      const elapsed = (performance.now() - t0).toFixed(0);
+      logger.ok(`Fetched element sets in ${elapsed} ms.`);
+      return JSON.parse(await body.text());
+    }
+
     /** Rough orbit-regime label from geodetic altitude, reused as the
      *  demo's `category` facet (LEO / MEO / GEO / HEO). */
     function orbitBand(altMeters) {
@@ -705,14 +792,7 @@
       const group = satGroupEl.value;
       let sats = gpCache.get(group);
       if (!sats) {
-        const url = buildGpUrl(group);
-        logger.log(`Fetching ${group} element sets from ${url}…`);
-        const t0 = performance.now();
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) {
-          throw new Error(`CelesTrak HTTP ${res.status}`);
-        }
-        const gp = await res.json();
+        const gp = await loadGpJson(group);
         sats = [];
         for (const rec of gp) {
           try {
@@ -722,8 +802,7 @@
           }
         }
         gpCache.set(group, sats);
-        const elapsed = (performance.now() - t0).toFixed(0);
-        logger.ok(`Fetched ${gp.length} element set(s) in ${elapsed} ms.`);
+        logger.ok(`Prepared ${sats.length} of ${gp.length} element set(s).`);
       }
 
       const now = new Date();
