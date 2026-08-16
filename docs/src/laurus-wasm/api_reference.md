@@ -1,5 +1,14 @@
 # API Reference
 
+## Module Functions
+
+### `version()`
+
+Return the laurus-wasm build version string (e.g. `"0.12.1"`).
+Applications persisting laurus state in OPFS can stamp it with this
+value to detect state written by a different build whose on-disk
+format may have changed (the demo samples do exactly this).
+
 ## Index
 
 The main entry point for creating and querying search indexes.

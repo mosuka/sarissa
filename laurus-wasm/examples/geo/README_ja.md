@@ -24,7 +24,9 @@ python3 -m http.server 8080
 
 ## このサンプルでできること
 
-- OPFS 永続化された geo インデックス（`geo-demo-index`）を作成し、
+- OPFS 永続化された geo インデックス（`geo-demo-index`）を作成し
+  （ロード時に `version()` スタンプを照合し、別ビルド由来なら自動で
+  破棄・再構築）、
   初回アクセス時に東京の観光スポット約 14 件を投入します
 - スキーマは日本語形態素解析対応のテキストフィールド 3 種
   （`title`、`description`、`category`）、geo フィールド 1 種
