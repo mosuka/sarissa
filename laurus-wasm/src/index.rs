@@ -99,10 +99,47 @@ fn js_error_string(e: &JsValue) -> String {
     e.as_string().unwrap_or_else(|| format!("{e:?}"))
 }
 
+/// Return the registered embedder names that no schema field references,
+/// sorted for deterministic output.
+///
+/// A registered-but-unreferenced embedder is almost always a call-site
+/// mistake — most notoriously the embedder name passed at a stale
+/// positional slot of `addHnswField` (GitHub issue #978), which JS
+/// silently coerces into the wrong parameter. Registering an embedder
+/// ahead of a later dynamic field addition is legitimate, so callers
+/// should warn, not fail.
+///
+/// # Arguments
+///
+/// * `schema` - The schema whose vector fields reference embedders by name.
+/// * `registered` - Names of all registered embedders.
+///
+/// # Returns
+///
+/// The subset of `registered` that no field's `embedder_name()` mentions.
+fn unused_embedder_names<'a>(
+    schema: &laurus::Schema,
+    registered: impl Iterator<Item = &'a String>,
+) -> Vec<String> {
+    let referenced: std::collections::HashSet<&str> = schema
+        .fields
+        .values()
+        .filter_map(|option| option.embedder_name())
+        .collect();
+    let mut unused: Vec<String> = registered
+        .filter(|name| !referenced.contains(name.as_str()))
+        .cloned()
+        .collect();
+    unused.sort();
+    unused
+}
+
 /// Build a [`PerFieldEmbedder`] from JS callback embedders and the schema.
 ///
 /// Reads the schema to find which vector fields reference which embedder name,
-/// then maps field names to the corresponding JS callback embedder.
+/// then maps field names to the corresponding JS callback embedder. Registered
+/// embedders that no field references are reported with a console warning
+/// (see [`unused_embedder_names`]).
 fn build_per_field_embedder(
     schema: &laurus::Schema,
     js_embedders: std::collections::HashMap<String, crate::embedder::JsCallbackEmbedder>,
@@ -115,6 +152,18 @@ fn build_per_field_embedder(
         std::collections::HashMap::new();
     for (name, embedder) in js_embedders {
         embedder_map.insert(name, Arc::new(embedder));
+    }
+
+    for name in unused_embedder_names(schema, embedder_map.keys()) {
+        web_sys::console::warn_1(
+            &format!(
+                "laurus-wasm: embedder '{name}' is registered but no schema field references \
+                 it, so it will never run. Check the `embedder` argument position in \
+                 addHnswField / addFlatField / addIvfField \
+                 (https://github.com/mosuka/laurus/issues/978)."
+            )
+            .into(),
+        );
     }
 
     // Map field_name -> embedder based on the schema's field → embedder_name mapping
@@ -685,5 +734,66 @@ impl WasmIndex {
         let json_str = serde_json::to_string(&json)
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))?;
         js_sys::JSON::parse(&json_str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    use laurus::lexical::TextOption;
+    use laurus::{FieldOption, HnswOption, Schema};
+
+    use super::unused_embedder_names;
+
+    /// Build a schema with one text field and one HNSW field referencing
+    /// `embedder_name` (or none).
+    fn schema_with_embedder(embedder_name: Option<&str>) -> Schema {
+        Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .add_field(
+                "embedding",
+                FieldOption::Hnsw(HnswOption {
+                    dimension: 3,
+                    embedder: embedder_name.map(str::to_string),
+                    ..Default::default()
+                }),
+            )
+            .build()
+    }
+
+    /// A registered embedder that no field references must be reported
+    /// (the #978 stale-positional-argument failure class).
+    #[wasm_bindgen_test]
+    fn unreferenced_embedder_is_reported() {
+        let schema = schema_with_embedder(None);
+        let registered = vec!["minilm".to_string()];
+        assert_eq!(
+            unused_embedder_names(&schema, registered.iter()),
+            vec!["minilm".to_string()],
+        );
+    }
+
+    /// An embedder referenced by a field must not be flagged.
+    #[wasm_bindgen_test]
+    fn referenced_embedder_is_not_reported() {
+        let schema = schema_with_embedder(Some("minilm"));
+        let registered = vec!["minilm".to_string()];
+        assert!(unused_embedder_names(&schema, registered.iter()).is_empty());
+    }
+
+    /// Mixed case: only the unreferenced name is reported, sorted.
+    #[wasm_bindgen_test]
+    fn only_unreferenced_names_are_reported_sorted() {
+        let schema = schema_with_embedder(Some("minilm"));
+        let registered = vec![
+            "zeta".to_string(),
+            "minilm".to_string(),
+            "alpha".to_string(),
+        ];
+        assert_eq!(
+            unused_embedder_names(&schema, registered.iter()),
+            vec!["alpha".to_string(), "zeta".to_string()],
+        );
     }
 }
