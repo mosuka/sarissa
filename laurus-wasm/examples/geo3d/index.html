@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Laurus WASM — Geo3d Search Sample (Satellite)</title>
+  <title>Laurus WASM — Geo3d Search Sample (Satellites)</title>
   <link rel="stylesheet"
         href="https://unpkg.com/cesium@1.121.0/Build/Cesium/Widgets/widgets.css"
         integrity="sha384-ghEeMdcWWzRv/BPeUcX835vcKDGrxvROXisl/Btpv3GeekBUXTSPVcFJpI1Tcrgp"
@@ -201,7 +201,7 @@
   <div class="container container-wide">
     <p class="subtitle"><a href="../">&larr; All samples</a></p>
 
-    <h1>Geo3d Search Sample (Satellite)</h1>
+    <h1>Geo3d Search Sample (Satellites)</h1>
     <p class="subtitle">
       Live satellite positions on a 3D globe (CesiumJS). Click anywhere
       on the globe to set a search centre — the demo shows the
@@ -974,7 +974,6 @@
           color: Cesium.Color.fromCssColorString('#7aa2f7').withAlpha(0.55),
           outlineColor: Cesium.Color.BLACK.withAlpha(0.4),
           outlineWidth: 1,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       });
       bgEntities.set(id, e);
@@ -995,7 +994,6 @@
           color: Cesium.Color.fromCssColorString('#7aa2f7'),
           outlineColor: Cesium.Color.WHITE,
           outlineWidth: 2,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
           text: ac.callsign,
@@ -1006,7 +1004,6 @@
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           pixelOffset: new Cesium.Cartesian2(0, -12),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         polyline: {
           positions: [top, ground],
