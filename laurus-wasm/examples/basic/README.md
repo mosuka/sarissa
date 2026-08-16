@@ -21,7 +21,10 @@ python3 -m http.server 8080
 
 ## What this sample demonstrates
 
-- An OPFS-persistent search index with `title` and `body` fields
+- An OPFS-persistent search index, version-gated: on load the sample
+  compares a stored `version()` stamp and wipes the index automatically
+  when it was written by a different laurus-wasm build (whose on-disk
+  format may have changed), with `title` and `body` fields
   (data survives page reloads)
 - Seeding 8 sample documents on first visit; skipping the seed when
   existing data is loaded from OPFS

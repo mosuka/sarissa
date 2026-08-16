@@ -102,6 +102,7 @@
       ensureDictionary,
     } from '../shared/dictionary.js';
     import { EMBED_DIM, EMBEDDER_NAME, loadEmbedder } from '../shared/embedder.js';
+    import { ensureIndexVersion } from '../shared/index-guard.js';
 
     /**
      * OPFS directory holding the persisted index. If a returning
@@ -164,6 +165,7 @@
           + `${EMBED_FIELD} (HNSW, ${EMBED_DIM}-dim, embedder="${EMBEDDER_NAME}").`,
         );
 
+        await ensureIndexVersion(INDEX_NAME, logger);
         index = await Index.open(INDEX_NAME, schema);
         logger.ok(`OPFS index "${INDEX_NAME}" opened.`);
 

@@ -23,7 +23,9 @@ python3 -m http.server 8080
 
 ## What this sample demonstrates
 
-- An OPFS-persistent geo index (`geo-demo-index`) seeded with
+- An OPFS-persistent geo index (`geo-demo-index`), version-gated on
+  load (a stamp mismatch against `version()` wipes and rebuilds it),
+  seeded with
   ~14 Tokyo points-of-interest on first visit
 - A schema with three Japanese-tokenised text fields
   (`title`, `description`, `category`), one geo field
