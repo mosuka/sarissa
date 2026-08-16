@@ -11,6 +11,7 @@
 
 import {
   downloadDictionary,
+  getDictionaryVersion,
   hasDictionary,
   loadDictionaryFiles,
   removeDictionary,
@@ -32,27 +33,91 @@ export const ANALYZER_NAME = 'ja-unidic';
 export const DEFAULT_DICT_URL = '../dict/lindera-unidic.zip';
 
 /**
+ * Default location of the dictionary manifest written by the deploy
+ * workflow next to the zip. Its `lindera_version` field identifies
+ * which Lindera version the zip was built for, letting the loader
+ * invalidate an OPFS cache left over from an older deployment (the
+ * binary dictionary format is not stable across Lindera versions).
+ */
+export const DEFAULT_MANIFEST_URL = '../dict/manifest.json';
+
+/**
+ * Fetch the expected dictionary version from the deploy manifest.
+ * Returns null when the manifest is unavailable or malformed (e.g.,
+ * a local development server without a generated manifest), in which
+ * case the caller falls back to trusting any cached dictionary.
+ *
+ * @param {string} url - URL of the manifest JSON.
+ * @returns {Promise<string | null>} The expected version, or null.
+ */
+async function fetchExpectedVersion(url) {
+  try {
+    // The manifest is tiny; skip stale HTTP caches so a fresh deploy
+    // is picked up promptly.
+    const response = await fetch(url, { cache: 'no-cache' });
+    if (!response.ok) {
+      return null;
+    }
+    const manifest = await response.json();
+    const version = manifest?.lindera_version;
+    return typeof version === 'string' && version.length > 0 ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Make sure the UniDic dictionary is present in OPFS, downloading
  * the bundled zip on first visit. Reports progress through the
  * supplied logger and an optional status DOM hook.
  *
+ * A cached dictionary is reused only if its stored version stamp
+ * matches the `lindera_version` in the deploy manifest; on mismatch
+ * (including caches stored before version stamping existed) the
+ * cache is discarded and the zip is re-downloaded. When no manifest
+ * is available the cache is trusted as-is.
+ *
  * @param {object} options
  * @param {string} [options.url] - URL of the dictionary zip.
+ * @param {string} [options.manifestUrl] - URL of the manifest JSON.
  * @param {{log: Function, ok: Function, err: Function}} options.logger
  * @param {(text: string) => void} [options.setStatus] - Optional status hook.
  */
 export async function ensureDictionary({
   url = DEFAULT_DICT_URL,
+  manifestUrl = DEFAULT_MANIFEST_URL,
   logger,
   setStatus,
 } = {}) {
+  const expected = await fetchExpectedVersion(manifestUrl);
+
   if (await hasDictionary(DICT_NAME)) {
-    logger?.ok?.(`Dictionary "${DICT_NAME}" found in OPFS cache.`);
-    return;
+    if (expected === null) {
+      logger?.ok?.(
+        `Dictionary "${DICT_NAME}" found in OPFS cache `
+        + '(no manifest to verify against).',
+      );
+      return;
+    }
+    const cached = await getDictionaryVersion(DICT_NAME);
+    if (cached === expected) {
+      logger?.ok?.(
+        `Dictionary "${DICT_NAME}" (Lindera ${cached}) found in OPFS cache.`,
+      );
+      return;
+    }
+    logger?.log?.(
+      `Cached dictionary "${DICT_NAME}" is for Lindera `
+      + `${cached ?? 'unknown'} but this build needs ${expected}; `
+      + 're-downloading...',
+    );
+    await removeDictionary(DICT_NAME);
   }
+
   logger?.log?.(`Downloading dictionary "${DICT_NAME}" from ${url}...`);
   const t0 = performance.now();
   await downloadDictionary(url, DICT_NAME, {
+    version: expected ?? undefined,
     onProgress: ({ phase, loaded, total }) => {
       if (phase === 'downloading' && total) {
         const pct = ((loaded / total) * 100).toFixed(0);

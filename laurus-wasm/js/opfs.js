@@ -13,6 +13,13 @@
  * `dict.words`, `matrix.mtx`, `char_def.bin`, `unk.bin`. Files are
  * placed under `laurus/dictionaries/<name>/` within OPFS.
  *
+ * The binary dictionary format is tied to the Lindera (and its
+ * daachorse dependency) version compiled into the WASM binary, so a
+ * cached dictionary can become unreadable after the site updates its
+ * Lindera version. To let callers detect this, `downloadDictionary()`
+ * accepts a `version` string that is stored alongside the dictionary
+ * files and can be read back with `getDictionaryVersion()`.
+ *
  * @module opfs
  */
 
@@ -27,6 +34,12 @@ const DICTIONARY_FILES = [
   "char_def.bin",
   "unk.bin",
 ];
+
+/**
+ * Name of the OPFS stamp file recording which dictionary version the
+ * stored files came from. Not part of the Lindera archive itself.
+ */
+const VERSION_FILE = ".dict_version";
 
 /** Base directory path within OPFS for storing dictionaries. */
 const OPFS_BASE_PATH = ["laurus", "dictionaries"];
@@ -174,11 +187,16 @@ async function extractZip(zipBuffer) {
  * @param {function} [options.onProgress] - Progress callback receiving
  *   `{ phase: string, loaded?: number, total?: number }`.
  * @param {RequestInit} [options.fetchInit] - Additional options passed to `fetch()`.
+ * @param {string} [options.version] - Version string identifying the
+ *   archive contents (e.g., the Lindera version the dictionary was
+ *   built for). Stored alongside the dictionary files and readable
+ *   via `getDictionaryVersion()`. When omitted, any previous version
+ *   stamp is removed.
  * @returns {Promise<void>}
  * @throws {Error} If download fails, archive is invalid, or required files are missing.
  */
 export async function downloadDictionary(url, name, options = {}) {
-  const { onProgress, fetchInit = {} } = options;
+  const { onProgress, fetchInit = {}, version } = options;
 
   if (onProgress) onProgress({ phase: "downloading" });
   const response = await fetch(url, fetchInit);
@@ -234,6 +252,15 @@ export async function downloadDictionary(url, name, options = {}) {
 
   if (onProgress) onProgress({ phase: "storing" });
   const dir = await getDictionaryDir(name);
+
+  // Drop any stale version stamp first so a failure while storing the
+  // files below never leaves an old stamp next to new (or partial) data.
+  try {
+    await dir.removeEntry(VERSION_FILE);
+  } catch {
+    // Missing stamp is the normal case; nothing to remove.
+  }
+
   for (const [fileName, data] of fileMap) {
     const fileHandle = await dir.getFileHandle(fileName, { create: true });
     const writable = await fileHandle.createWritable();
@@ -241,7 +268,45 @@ export async function downloadDictionary(url, name, options = {}) {
     await writable.close();
   }
 
+  if (version !== undefined) {
+    const stampHandle = await dir.getFileHandle(VERSION_FILE, {
+      create: true,
+    });
+    const writable = await stampHandle.createWritable();
+    await writable.write(new TextEncoder().encode(String(version)));
+    await writable.close();
+  }
+
   if (onProgress) onProgress({ phase: "complete" });
+}
+
+/**
+ * Reads the version stamp stored with a dictionary, if any.
+ *
+ * The stamp is written by `downloadDictionary()` when it is called
+ * with a `version` option. Dictionaries stored without a version
+ * (including ones cached before version stamping existed) yield
+ * `null`, which callers should treat as "version unknown" and, when
+ * an expected version is available, as a mismatch.
+ *
+ * @param {string} name - The dictionary name (e.g., "ipadic").
+ * @returns {Promise<string | null>} The stored version string, or
+ *   `null` if the dictionary or its version stamp does not exist.
+ */
+export async function getDictionaryVersion(name) {
+  try {
+    const root = await navigator.storage.getDirectory();
+    let current = root;
+    for (const segment of [...OPFS_BASE_PATH, name]) {
+      current = await current.getDirectoryHandle(segment);
+    }
+    const stampHandle = await current.getFileHandle(VERSION_FILE);
+    const file = await stampHandle.getFile();
+    const text = (await file.text()).trim();
+    return text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

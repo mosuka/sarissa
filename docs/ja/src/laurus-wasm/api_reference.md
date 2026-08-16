@@ -561,6 +561,7 @@ Private File System にダウンロード・保存・読込するヘルパを提
 ```javascript
 import {
   downloadDictionary,
+  getDictionaryVersion,
   loadDictionaryFiles,
   hasDictionary,
   listDictionaries,
@@ -570,11 +571,21 @@ import {
 
 | 関数 | 説明 |
 | ---- | ---- |
-| `downloadDictionary(url, name, options?)` | `.zip` を fetch し、Web の `DecompressionStream` API で展開して、Lindera 8 ファイルを OPFS の `laurus/dictionaries/<name>/` 配下に保存します。`options.onProgress({ phase, loaded?, total? })` で進捗通知を受け取れます。 |
+| `downloadDictionary(url, name, options?)` | `.zip` を fetch し、Web の `DecompressionStream` API で展開して、Lindera 8 ファイルを OPFS の `laurus/dictionaries/<name>/` 配下に保存します。`options.onProgress({ phase, loaded?, total? })` で進捗通知を受け取れます。`options.version` を渡すとファイルと並べてバージョンスタンプを保存します（下記参照）。 |
+| `getDictionaryVersion(name)` | `downloadDictionary` が保存したバージョンスタンプを返します。辞書またはスタンプが存在しない場合は `null` を返します。 |
 | `loadDictionaryFiles(name)` | 8 ファイルを `{ metadata, dictDa, dictVals, dictWordsIdx, dictWords, matrixMtx, charDef, unk }` オブジェクトとして読み出し、`JapaneseAnalyzer.fromBytes` にそのまま渡せる形にします。 |
 | `hasDictionary(name)` | 辞書ディレクトリが OPFS にあれば `true`。 |
 | `listDictionaries()` | 保存済み辞書名の配列を返します。 |
 | `removeDictionary(name)` | 辞書ディレクトリを削除します。 |
+
+辞書のバイナリ形式は WASM バイナリにコンパイルされた Lindera
+（およびその依存 daachorse）のバージョンに紐づいており、アプリが
+Lindera を更新すると OPFS にキャッシュ済みの辞書は読めなくなります
+（`InvalidAutomatonError` でデシリアライズに失敗します）。ダウンロード時に
+zip の対象 Lindera バージョンを `options.version` として渡し、起動時に
+`getDictionaryVersion(name)` を現在のビルドが期待するバージョンと比較して、
+不一致なら再ダウンロードしてください。スタンプが `null` の場合も
+不一致として扱います。
 
 ブラウザ CORS の制約により GitHub Releases から直接 fetch できないため、
 zip はアプリと同一オリジンで配信してください（Laurus デモではデプロイ
