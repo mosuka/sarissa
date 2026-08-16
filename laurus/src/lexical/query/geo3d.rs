@@ -255,10 +255,16 @@ pub struct Geo3dMatcher {
 }
 
 impl Geo3dMatcher {
-    /// Wrap a pre-sorted match list. Callers are expected to pass the
-    /// distance-ascending list produced by
-    /// [`Geo3dDistanceQuery::find_matches`].
-    pub fn new(matches: Vec<Geo3dMatch>) -> Self {
+    /// Wrap a match list, re-sorting it into ascending document-id order.
+    ///
+    /// [`Geo3dDistanceQuery::find_matches`] produces distance-ascending
+    /// lists for ranking, but `Matcher` iteration order is a trait
+    /// contract — boolean conjunction / disjunction drivers interleave
+    /// `skip_to` calls and assume monotonically increasing doc ids.
+    /// Distance ranking stays with [`Geo3dScorer`], which looks scores up
+    /// by doc id.
+    pub fn new(mut matches: Vec<Geo3dMatch>) -> Self {
+        matches.sort_by_key(|m| m.doc_id);
         Self { matches, cursor: 0 }
     }
 }
@@ -283,8 +289,8 @@ impl Matcher for Geo3dMatcher {
     }
 
     fn skip_to(&mut self, target: u64) -> Result<bool> {
-        // Linear scan over the distance-sorted list; matches the
-        // semantics of `GeoMatcher::skip_to` in 2D.
+        // Forward scan for the first doc id >= target; valid because
+        // `Geo3dMatcher::new` sorts matches by ascending doc id.
         while self.cursor < self.matches.len() {
             if self.matches[self.cursor].doc_id >= target {
                 return Ok(true);
@@ -905,6 +911,52 @@ mod tests {
 
     fn cell(min: [f64; 3], max: [f64; 3]) -> AABB {
         AABB::new(min.to_vec(), max.to_vec()).unwrap()
+    }
+
+    /// Build a `Geo3dMatch` whose distance deliberately disagrees with its
+    /// doc-id order, to exercise the matcher's re-sort.
+    fn geo3d_match(doc_id: u64, distance_m: f64) -> Geo3dMatch {
+        Geo3dMatch {
+            doc_id,
+            distance_m,
+            score: 1.0,
+        }
+    }
+
+    /// `Matcher` iteration must be in ascending doc-id order even when the
+    /// input list is distance-ordered (regression for hits dropped from
+    /// boolean conjunctions, GitHub issue #982).
+    #[test]
+    fn geo3d_matcher_iterates_in_doc_id_order() {
+        let mut matcher = Geo3dMatcher::new(vec![
+            geo3d_match(7, 10.0),
+            geo3d_match(1, 20.0),
+            geo3d_match(4, 30.0),
+        ]);
+
+        let mut seen = vec![matcher.doc_id()];
+        while matcher.next().unwrap() {
+            seen.push(matcher.doc_id());
+        }
+        assert_eq!(seen, vec![1, 4, 7]);
+    }
+
+    /// `skip_to` must find every doc id >= target, exactly as a zig-zag
+    /// conjunction driver expects (regression for GitHub issue #982).
+    #[test]
+    fn geo3d_matcher_skip_to_honors_doc_id_order() {
+        let mut matcher = Geo3dMatcher::new(vec![
+            geo3d_match(7, 10.0),
+            geo3d_match(1, 20.0),
+            geo3d_match(4, 30.0),
+        ]);
+
+        assert!(matcher.skip_to(2).unwrap());
+        assert_eq!(matcher.doc_id(), 4);
+        assert!(matcher.skip_to(5).unwrap());
+        assert_eq!(matcher.doc_id(), 7);
+        assert!(!matcher.skip_to(8).unwrap());
+        assert!(matcher.is_exhausted());
     }
 
     fn visitor(cx: f64, cy: f64, cz: f64, radius: f64) -> SphereVisitor {
