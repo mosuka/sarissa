@@ -823,9 +823,14 @@ pub struct GeoMatcher {
 
 impl GeoMatcher {
     /// Create a new geo matcher.
+    ///
+    /// Sorts matches into ascending document-id order: `Matcher` iteration
+    /// order is a trait contract — boolean conjunction / disjunction drivers
+    /// interleave `skip_to` calls and assume monotonically increasing doc
+    /// ids. Distance-based ranking is the scorer's concern ([`GeoScorer`]
+    /// looks scores up by doc id), so standalone geo ranking is unaffected.
     pub fn new(mut matches: Vec<GeoMatch>) -> Self {
-        // Sort matches by distance (closest first)
-        matches.sort_by(|a, b| a.distance_m.total_cmp(&b.distance_m));
+        matches.sort_by_key(|m| m.doc_id);
 
         GeoMatcher {
             matches,
@@ -854,7 +859,8 @@ impl Matcher for GeoMatcher {
     }
 
     fn skip_to(&mut self, target: u64) -> Result<bool> {
-        // Find first document ID >= target in order
+        // Forward scan for the first doc id >= target; valid because
+        // `GeoMatcher::new` sorts matches by ascending doc id.
         while self.current_index < self.matches.len() {
             let doc_id = self.matches[self.current_index].doc_id;
             if doc_id >= target {
@@ -931,6 +937,56 @@ impl Scorer for GeoScorer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a `GeoMatch` whose distance deliberately disagrees with its
+    /// doc-id order, to exercise the matcher's re-sort.
+    fn geo_match(doc_id: u64, distance_m: f64) -> GeoMatch {
+        GeoMatch {
+            doc_id,
+            point: GeoPoint::new(0.0, 0.0),
+            distance_m,
+            relevance_score: 1.0,
+        }
+    }
+
+    /// `Matcher` iteration must be in ascending doc-id order even when the
+    /// input list is distance-ordered (regression for hits dropped from
+    /// boolean conjunctions, GitHub issue #982).
+    #[test]
+    fn test_geo_matcher_iterates_in_doc_id_order() {
+        // Distance order: 7, 1, 4 — doc-id order must win.
+        let mut matcher = GeoMatcher::new(vec![
+            geo_match(7, 10.0),
+            geo_match(1, 20.0),
+            geo_match(4, 30.0),
+        ]);
+
+        let mut seen = vec![matcher.doc_id()];
+        while matcher.next().unwrap() {
+            seen.push(matcher.doc_id());
+        }
+        assert_eq!(seen, vec![1, 4, 7]);
+    }
+
+    /// `skip_to` must find every doc id >= target, exactly as a zig-zag
+    /// conjunction driver expects (regression for GitHub issue #982).
+    #[test]
+    fn test_geo_matcher_skip_to_honors_doc_id_order() {
+        let mut matcher = GeoMatcher::new(vec![
+            geo_match(7, 10.0),
+            geo_match(1, 20.0),
+            geo_match(4, 30.0),
+        ]);
+
+        assert!(matcher.skip_to(2).unwrap());
+        assert_eq!(matcher.doc_id(), 4);
+        assert!(matcher.skip_to(4).unwrap());
+        assert_eq!(matcher.doc_id(), 4);
+        assert!(matcher.skip_to(5).unwrap());
+        assert_eq!(matcher.doc_id(), 7);
+        assert!(!matcher.skip_to(8).unwrap());
+        assert!(matcher.is_exhausted());
+    }
 
     #[test]
     fn test_geo_point_creation() {
@@ -1074,12 +1130,12 @@ mod tests {
 
         let mut matcher = GeoMatcher::new(matches);
 
-        // Should return documents in distance-sorted order (closest first)
-        // After sorting: doc_id: 3 (1 km) comes before doc_id: 1 (2 km)
-        assert_eq!(matcher.doc_id(), 3); // Initial position: closest document
+        // Iterates in ascending doc-id order (the `Matcher` contract used
+        // by boolean drivers) — distance ranking is the scorer's job.
+        assert_eq!(matcher.doc_id(), 1);
 
         assert!(matcher.next().unwrap()); // Move to next
-        assert_eq!(matcher.doc_id(), 1); // Second document (farther)
+        assert_eq!(matcher.doc_id(), 3);
 
         assert!(!matcher.next().unwrap()); // No more documents
     }
