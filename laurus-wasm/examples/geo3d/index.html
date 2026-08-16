@@ -1189,6 +1189,14 @@
         statusEl.textContent = 'error';
         statusEl.className = 'badge badge-error';
         console.error(e);
+        // Keep the recovery path reachable: stale persisted state is a
+        // likely cause of boot failures, so the Reset button must be
+        // usable even though the rest of the UI stays disabled.
+        document.getElementById('reset-all-btn').disabled = false;
+        logger.log(
+          'If this persists, use "Reset everything (index + dictionary)" '
+          + 'below to clear persisted state and reload.',
+        );
       }
     }
 

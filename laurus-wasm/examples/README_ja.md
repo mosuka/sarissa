@@ -31,11 +31,37 @@ UniDic を読み込みます。デプロイワークフローでは自動取得�
 バージョンの合う zip をダウンロードして `examples/dict/` に置いて
 ください。
 
+`<version>` は workspace の `Cargo.lock` に固定されている `lindera`
+のバージョンと一致させる必要があります。辞書のバイナリ形式は
+Lindera のバージョン間で互換性がなく、バージョン違い（過去に
+ダウンロードした古い zip を含む）はロード時に
+`InvalidAutomatonError` で失敗します。workspace の Lindera を
+更新したら zip も再ダウンロードしてください。
+
 ```bash
 # リポジトリのルートから実行
+LINDERA_VERSION=$(cargo metadata --format-version 1 \
+  | python3 -c "import json,sys; m=json.load(sys.stdin); print(next(p['version'] for p in m['packages'] if p['name']=='lindera'))")
 mkdir -p laurus-wasm/examples/dict
 curl -fsSL -o laurus-wasm/examples/dict/lindera-unidic.zip \
-  "https://github.com/lindera/lindera/releases/download/v<version>/lindera-unidic-<version>.zip"
+  "https://github.com/lindera/lindera/releases/download/v${LINDERA_VERSION}/lindera-unidic-${LINDERA_VERSION}.zip"
+```
+
+必要に応じて `examples/dict/manifest.json` も生成してください
+（デプロイワークフローは常に生成します）。manifest があると、
+サンプルの辞書ローダーは OPFS キャッシュにバージョンスタンプを
+付与し、バージョンが変わったときに自動で再ダウンロードします。
+manifest がない場合はキャッシュをそのまま信頼するため、古い
+キャッシュは各サンプルの「Reset everything」ボタンで手動削除する
+必要があります。
+
+```bash
+cat > laurus-wasm/examples/dict/manifest.json <<EOF
+{
+  "unidic": "lindera-unidic.zip",
+  "lindera_version": "${LINDERA_VERSION}"
+}
+EOF
 ```
 
 その後、任意の HTTP サーバーを起動します（WASM は `file://` では

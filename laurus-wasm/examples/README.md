@@ -32,11 +32,35 @@ automatically; for local development, download a matching version
 from the [Lindera releases][lindera-releases] and drop it under
 `examples/dict/`.
 
+`<version>` must be the `lindera` version pinned in the workspace
+`Cargo.lock` — the binary dictionary format is not stable across
+Lindera versions, and a mismatched (or stale, previously downloaded)
+zip fails at load time with an `InvalidAutomatonError`. Re-download
+the zip whenever the workspace updates Lindera.
+
 ```bash
 # from the repository root
+LINDERA_VERSION=$(cargo metadata --format-version 1 \
+  | python3 -c "import json,sys; m=json.load(sys.stdin); print(next(p['version'] for p in m['packages'] if p['name']=='lindera'))")
 mkdir -p laurus-wasm/examples/dict
 curl -fsSL -o laurus-wasm/examples/dict/lindera-unidic.zip \
-  "https://github.com/lindera/lindera/releases/download/v<version>/lindera-unidic-<version>.zip"
+  "https://github.com/lindera/lindera/releases/download/v${LINDERA_VERSION}/lindera-unidic-${LINDERA_VERSION}.zip"
+```
+
+Optionally, also generate `examples/dict/manifest.json` (the deploy
+workflow always does). With a manifest present, the sample dictionary
+loader stamps the OPFS cache with the version and re-downloads it
+automatically when the version changes; without one, it trusts
+whatever is cached and you must clear stale caches by hand via each
+sample's "Reset everything" button.
+
+```bash
+cat > laurus-wasm/examples/dict/manifest.json <<EOF
+{
+  "unidic": "lindera-unidic.zip",
+  "lindera_version": "${LINDERA_VERSION}"
+}
+EOF
 ```
 
 Then start any HTTP server (WASM cannot be loaded over `file://`):

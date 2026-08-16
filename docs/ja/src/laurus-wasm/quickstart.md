@@ -71,6 +71,7 @@ OPFS にロードした IPADIC のバイト列から analyzer を構築します
 import init, { Index, Schema, JapaneseAnalyzer } from 'laurus-wasm';
 import {
   downloadDictionary,
+  getDictionaryVersion,
   loadDictionaryFiles,
   hasDictionary,
 } from 'laurus-wasm/opfs';
@@ -80,8 +81,16 @@ await init();
 // 1. 初回訪問時に IPADIC アーカイブを OPFS にキャッシュする。zip は
 //    アプリと同一オリジンで配信する必要がある（GitHub Releases は CORS
 //    でブロックされる）。圧縮 ~16 MB / 展開後 ~58 MB。
-if (!(await hasDictionary("ipadic"))) {
+//    バイナリ形式は WASM にコンパイルされた Lindera バージョンに紐づく
+//    ため、`version` でキャッシュにスタンプを付け、ビルドが期待する
+//    バージョンと一致しなくなったら再ダウンロードする。
+const LINDERA_VERSION = "5.0.2"; // Cargo.lock の lindera バージョンと揃える
+if (
+  !(await hasDictionary("ipadic"))
+  || (await getDictionaryVersion("ipadic")) !== LINDERA_VERSION
+) {
   await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic", {
+    version: LINDERA_VERSION,
     onProgress: ({ phase, loaded, total }) => console.log(phase, loaded, total),
   });
 }

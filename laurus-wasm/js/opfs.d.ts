@@ -44,6 +44,13 @@ export interface DownloadDictionaryOptions {
   onProgress?: (progress: DownloadProgress) => void;
   /** Additional options forwarded to the underlying `fetch()` call. */
   fetchInit?: RequestInit;
+  /**
+   * Version string identifying the archive contents (e.g., the
+   * Lindera version the dictionary was built for). Stored alongside
+   * the dictionary files and readable via `getDictionaryVersion()`.
+   * When omitted, any previous version stamp is removed.
+   */
+  version?: string;
 }
 
 /**
@@ -69,6 +76,20 @@ export function downloadDictionary(
  * @returns Object containing the dictionary file data.
  */
 export function loadDictionaryFiles(name: string): Promise<DictionaryFiles>;
+
+/**
+ * Reads the version stamp stored with a dictionary, if any.
+ *
+ * The stamp is written by `downloadDictionary()` when it is called
+ * with a `version` option. Dictionaries stored without a version
+ * (including ones cached before version stamping existed) yield
+ * `null`.
+ *
+ * @param name - The dictionary name (e.g., "ipadic").
+ * @returns The stored version string, or `null` if the dictionary or
+ *   its version stamp does not exist.
+ */
+export function getDictionaryVersion(name: string): Promise<string | null>;
 
 /**
  * Removes a dictionary from OPFS.

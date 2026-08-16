@@ -572,6 +572,7 @@ Private File System. Used together with `JapaneseAnalyzer.fromBytes`.
 ```javascript
 import {
   downloadDictionary,
+  getDictionaryVersion,
   loadDictionaryFiles,
   hasDictionary,
   listDictionaries,
@@ -581,11 +582,21 @@ import {
 
 | Function | Description |
 | ---- | ---- |
-| `downloadDictionary(url, name, options?)` | Fetch a `.zip`, decompress with the Web `DecompressionStream` API, and store the eight Lindera files under `laurus/dictionaries/<name>/` in OPFS. `options.onProgress({ phase, loaded?, total? })` reports progress. |
+| `downloadDictionary(url, name, options?)` | Fetch a `.zip`, decompress with the Web `DecompressionStream` API, and store the eight Lindera files under `laurus/dictionaries/<name>/` in OPFS. `options.onProgress({ phase, loaded?, total? })` reports progress. `options.version` stores a version stamp next to the files (see below). |
+| `getDictionaryVersion(name)` | Return the version stamp stored by `downloadDictionary`, or `null` if the dictionary or its stamp does not exist. |
 | `loadDictionaryFiles(name)` | Read the eight files back as a `{ metadata, dictDa, dictVals, dictWordsIdx, dictWords, matrixMtx, charDef, unk }` object suitable for `JapaneseAnalyzer.fromBytes`. |
 | `hasDictionary(name)` | `true` if the dictionary directory exists in OPFS. |
 | `listDictionaries()` | Return an array of stored dictionary names. |
 | `removeDictionary(name)` | Delete the dictionary directory. |
+
+The binary dictionary format is tied to the Lindera (and daachorse)
+version compiled into the WASM binary, so a dictionary cached in OPFS
+becomes unreadable after your app updates its Lindera version
+(deserialization fails with an `InvalidAutomatonError`). Pass the
+Lindera version your zip was built for as `options.version` when
+downloading, then compare `getDictionaryVersion(name)` against the
+version your current build expects on startup and re-download on
+mismatch. A `null` stamp should be treated as a mismatch.
 
 Browser CORS prevents fetching directly from GitHub Releases, so host
 the zip on the same origin as your app (the Laurus demo bundles

@@ -96,7 +96,7 @@ schema.addAnalyzer("ja-ipadic", ja);
 schema.addTextField("body", undefined, undefined, undefined, "ja-ipadic");
 ```
 
-OPFS ヘルパー（`downloadDictionary` / `loadDictionaryFiles` / `hasDictionary` / `listDictionaries` / `removeDictionary`）は [`js/opfs.js`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/js/opfs.js) にあり、`package.json` で `laurus-wasm/opfs` サブパスとして再公開されています。引数表は [API リファレンス → JapaneseAnalyzer](api_reference.md#japaneseanalyzer) を参照してください。
+OPFS ヘルパー（`downloadDictionary` / `getDictionaryVersion` / `loadDictionaryFiles` / `hasDictionary` / `listDictionaries` / `removeDictionary`）は [`js/opfs.js`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/js/opfs.js) にあり、`package.json` で `laurus-wasm/opfs` サブパスとして再公開されています。引数表は [API リファレンス → JapaneseAnalyzer](api_reference.md#japaneseanalyzer) を参照してください。
 
 ### コールバック Embedder
 
