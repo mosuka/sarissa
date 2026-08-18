@@ -163,23 +163,30 @@ let query = NumericRangeQuery::new(
 `indexed = false, stored = true` と設定されたフィールド）では、そのセグメントに
 実際に存在する保存済みドキュメントのみを走査するフォールバックを使用します。
 
-### GeoQuery
+### GeoDistanceQuery / GeoBoundingBoxQuery
 
 2D 地理座標（WGS84 緯度・経度）に基づいてドキュメントをマッチングします。
 
 ```rust
-use laurus::lexical::query::geo::GeoQuery;
+use laurus::lexical::query::geo::{GeoBoundingBoxQuery, GeoDistanceQuery};
 
 // Find documents within 10 km (= 10 000 m) of Tokyo Station (35.6812, 139.7671)
-let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10_000.0)?; // distance in metres
+let query = GeoDistanceQuery::within_radius("location", 35.6812, 139.7671, 10_000.0)?; // distance in metres
 
 // Find documents within a bounding box (min_lat, min_lon, max_lat, max_lon)
-let query = GeoQuery::within_bounding_box(
+let query = GeoBoundingBoxQuery::within_bounding_box(
     "location",
     35.0, 139.0,  // min (lat, lon)
     36.0, 140.0,  // max (lat, lon)
 )?;
 ```
+
+どちらのクエリも距離ベースでスコアリングします（近いドキュメントほど高スコア。
+円の中心、またはボックスの中心からの線形減衰）。マッチングにはセグメントに
+BKD tree があればそれを使用し、対象フィールドの BKD tree を持たないセグメント
+（例: そのフィールドを持つドキュメントが 1 件もないセグメントや、
+`indexed = false, stored = true` と設定されたフィールド）では、そのセグメントに
+実際に存在する保存済みドキュメントのみを走査するフォールバックを使用します。
 
 ### Geo3dDistanceQuery / Geo3dBoundingBoxQuery / Geo3dNearestQuery
 
@@ -215,6 +222,11 @@ let q = Geo3dNearestQuery::new("position", centre, 10)
 | `Geo3dDistanceQuery` | `1 - distance / radius` を `[0, 1]` にクランプ |
 | `Geo3dBoundingBoxQuery` | マッチした全ドキュメントで定数 `1.0` |
 | `Geo3dNearestQuery` | 最も近いヒットが `1.0`、返却された集合内で最も遠いヒットが `0.0` となるよう正規化 |
+
+geo3d クエリはフィールドがインデックスされていること（`indexed = true`、
+デフォルト）を必要とします。これらは完全にフィールドの BKD tree 上で動作し、
+BKD tree を持たないセグメントからはヒットを返しません — 3D クエリには
+保存済みドキュメントへのフォールバックはありません。
 
 ### SpanQuery
 

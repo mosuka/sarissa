@@ -216,11 +216,10 @@ impl InvertedIndexSearcher {
         }
 
         // Default single-threaded execution
-        // Create a matcher for the query
-        let mut matcher = query.matcher(self.reader.as_ref())?;
-
-        // Create a scorer for the query
-        let scorer = query.scorer(self.reader.as_ref())?;
+        // Create the matcher and scorer in one pass (#996: queries with
+        // an expensive shared candidate computation, e.g. geo, build
+        // both from a single run of it).
+        let (mut matcher, scorer) = query.matcher_scorer(self.reader.as_ref())?;
 
         // SIMD-batched default loop (#506). The scalar path collected
         // one doc at a time via `scorer.score`; this version gathers up

@@ -32,7 +32,7 @@ Comprehensive example of all lexical query types, using both the Builder API and
 cargo run --example lexical_search
 ```
 
-Demonstrates: `TermQuery`, `PhraseQuery`, `FuzzyQuery`, `WildcardQuery`, `NumericRangeQuery`, `GeoQuery`, `BooleanQuery`, `SpanQuery`.
+Demonstrates: `TermQuery`, `PhraseQuery`, `FuzzyQuery`, `WildcardQuery`, `NumericRangeQuery`, `GeoDistanceQuery` / `GeoBoundingBoxQuery`, `BooleanQuery`, `SpanQuery`.
 
 ### vector_search
 

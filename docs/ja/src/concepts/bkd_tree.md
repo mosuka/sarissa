@@ -175,4 +175,4 @@ graph TD
 - [Lexical インデクシング](indexing/lexical_indexing.md) — `.bkd`
   セグメントファイルがセグメント全体のレイアウト内のどこに位置するか。
 - [Lexical 検索](search/lexical_search.md) — `NumericRangeQuery`、
-  `GeoQuery`、`Geo3dDistanceQuery` の Rust API エントリポイント。
+  `GeoDistanceQuery` / `GeoBoundingBoxQuery`、`Geo3dDistanceQuery` の Rust API エントリポイント。

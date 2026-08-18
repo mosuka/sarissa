@@ -370,6 +370,20 @@ impl Query for Geo3dDistanceQuery {
         )))
     }
 
+    fn matcher_scorer(
+        &self,
+        reader: &dyn LexicalIndexReader,
+    ) -> Result<(Box<dyn Matcher>, Box<dyn Scorer>)> {
+        // Run the BKD sphere traversal once and share it (#996);
+        // ranking is identical to building matcher and scorer
+        // independently.
+        let matches = self.find_matches(reader)?;
+        Ok((
+            Box::new(Geo3dMatcher::new(matches.clone())),
+            Box::new(Geo3dScorer::new(matches, self.boost)),
+        ))
+    }
+
     fn boost(&self) -> f32 {
         self.boost
     }
@@ -532,6 +546,19 @@ impl Query for Geo3dBoundingBoxQuery {
             self.find_matches(reader)?,
             self.boost,
         )))
+    }
+
+    fn matcher_scorer(
+        &self,
+        reader: &dyn LexicalIndexReader,
+    ) -> Result<(Box<dyn Matcher>, Box<dyn Scorer>)> {
+        // Run the BKD range search once and share it (#996); ranking is
+        // identical to building matcher and scorer independently.
+        let matches = self.find_matches(reader)?;
+        Ok((
+            Box::new(Geo3dMatcher::new(matches.clone())),
+            Box::new(Geo3dScorer::new(matches, self.boost)),
+        ))
     }
 
     fn boost(&self) -> f32 {
@@ -859,6 +886,20 @@ impl Query for Geo3dNearestQuery {
         )))
     }
 
+    fn matcher_scorer(
+        &self,
+        reader: &dyn LexicalIndexReader,
+    ) -> Result<(Box<dyn Matcher>, Box<dyn Scorer>)> {
+        // Run the expanding-radius k-NN search (up to ~23 BKD passes)
+        // once and share it (#996); ranking is identical to building
+        // matcher and scorer independently.
+        let matches = self.find_matches(reader)?;
+        Ok((
+            Box::new(Geo3dMatcher::new(matches.clone())),
+            Box::new(Geo3dScorer::new(matches, self.boost)),
+        ))
+    }
+
     fn boost(&self) -> f32 {
         self.boost
     }
@@ -1152,5 +1193,101 @@ mod tests {
         )
         .unwrap_err();
         assert!(format!("{err_z:?}").contains("min.z"));
+    }
+
+    /// Reader counting `get_bkd_tree` lookups. `find_matches` calls it
+    /// exactly once per invocation, so the counter observes how many
+    /// times the candidate search ran (#996).
+    #[derive(Debug)]
+    struct BkdCountingReader {
+        get_bkd_tree_calls: std::sync::atomic::AtomicU64,
+    }
+
+    impl BkdCountingReader {
+        fn new() -> Self {
+            BkdCountingReader {
+                get_bkd_tree_calls: std::sync::atomic::AtomicU64::new(0),
+            }
+        }
+
+        fn calls(&self) -> u64 {
+            self.get_bkd_tree_calls
+                .load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl crate::lexical::reader::LexicalIndexReader for BkdCountingReader {
+        fn doc_count(&self) -> u64 {
+            1
+        }
+        fn max_doc(&self) -> u64 {
+            1
+        }
+        fn is_deleted(&self, _doc_id: u64) -> bool {
+            false
+        }
+        fn document(
+            &self,
+            _doc_id: u64,
+        ) -> crate::error::Result<Option<crate::lexical::core::document::Document>> {
+            Ok(None)
+        }
+        fn get_bkd_tree(
+            &self,
+            _field: &str,
+        ) -> crate::error::Result<
+            Option<std::sync::Arc<dyn crate::lexical::index::structures::bkd_tree::BKDTree>>,
+        > {
+            self.get_bkd_tree_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(None)
+        }
+        fn term_info(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+            Ok(None)
+        }
+        fn postings(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>>
+        {
+            Ok(None)
+        }
+        fn field_stats(
+            &self,
+            _field: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::FieldStats>> {
+            Ok(None)
+        }
+        fn close(&mut self) -> crate::error::Result<()> {
+            Ok(())
+        }
+        fn is_closed(&self) -> bool {
+            false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// #996 regression: `matcher_scorer()` must run `find_matches` once
+    /// (one `get_bkd_tree` lookup), not once for the matcher and once
+    /// for the scorer.
+    #[test]
+    fn matcher_scorer_shares_one_bkd_traversal() {
+        let reader = BkdCountingReader::new();
+        let query = Geo3dDistanceQuery::new("position", GeoEcefPoint::new(0.0, 0.0, 0.0), 1000.0);
+
+        let (_matcher, _scorer) = query.matcher_scorer(&reader).unwrap();
+
+        assert_eq!(
+            reader.calls(),
+            1,
+            "find_matches must run exactly once for the matcher/scorer pair"
+        );
     }
 }

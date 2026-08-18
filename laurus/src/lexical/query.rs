@@ -115,6 +115,30 @@ pub trait Query: Send + Sync + Debug {
     /// Create a scorer for this query.
     fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>>;
 
+    /// Create the matcher and scorer for this query in one pass.
+    ///
+    /// The default implementation builds them independently via
+    /// [`matcher`](Query::matcher) and [`scorer`](Query::scorer),
+    /// preserving the historical behavior. Queries whose matcher and
+    /// scorer derive from the same expensive candidate computation
+    /// (e.g. geo queries computing per-document distances) override
+    /// this to run that computation once and build both from the
+    /// shared result (#996).
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The index reader to search.
+    ///
+    /// # Returns
+    ///
+    /// The `(matcher, scorer)` pair for this query.
+    fn matcher_scorer(
+        &self,
+        reader: &dyn LexicalIndexReader,
+    ) -> Result<(Box<dyn Matcher>, Box<dyn Scorer>)> {
+        Ok((self.matcher(reader)?, self.scorer(reader)?))
+    }
+
     /// Get the boost factor for this query.
     fn boost(&self) -> f32;
 

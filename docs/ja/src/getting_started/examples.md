@@ -32,7 +32,7 @@ cargo run --example quickstart
 cargo run --example lexical_search
 ```
 
-デモ内容: `TermQuery`、`PhraseQuery`、`FuzzyQuery`、`WildcardQuery`、`NumericRangeQuery`、`GeoQuery`、`BooleanQuery`、`SpanQuery`
+デモ内容: `TermQuery`、`PhraseQuery`、`FuzzyQuery`、`WildcardQuery`、`NumericRangeQuery`、`GeoDistanceQuery` / `GeoBoundingBoxQuery`、`BooleanQuery`、`SpanQuery`
 
 ### vector_search
 
