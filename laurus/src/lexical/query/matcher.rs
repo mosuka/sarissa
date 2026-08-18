@@ -83,7 +83,15 @@ impl Matcher for EmptyMatcher {
     }
 }
 
-/// A matcher that matches all documents.
+/// A matcher that matches every doc id in the dense range `[0, max_doc)`.
+///
+/// Note: this yields *ids*, not documents — the range includes ids that
+/// were never assigned, ids owned by other segments (when `max_doc` is a
+/// fanout-global value), and soft-deleted docs. #997 therefore replaced
+/// its production use (the MustNot-only universe) with a
+/// [`PreComputedMatcher`] over the reader's present, live doc ids; this
+/// type remains for API compatibility and for callers that genuinely
+/// want the dense range.
 #[derive(Debug)]
 pub struct AllMatcher {
     current_doc: u64,
@@ -708,7 +716,14 @@ impl Matcher for ConjunctionNotMatcher {
     }
 }
 
-/// A matcher that matches all documents except those matched by the negative matcher.
+/// A matcher that matches every doc id in the dense range `[0, max_doc)`
+/// except those matched by the negative matcher.
+///
+/// Note: like [`AllMatcher`], the dense universe includes never-assigned,
+/// cross-segment, and soft-deleted ids. #997 replaced its production use
+/// (MustNot-only boolean queries) with a [`ConjunctionNotMatcher`] over a
+/// present-live-docs [`PreComputedMatcher`] universe; this type remains
+/// for API compatibility.
 #[derive(Debug)]
 pub struct NotMatcher {
     /// The matcher for documents to exclude.

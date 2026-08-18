@@ -9,11 +9,11 @@ use crate::lexical::index::inverted::per_segment_view::PerSegmentReaderView;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::query::Query;
 use crate::lexical::query::matcher::{
-    AllMatcher, ConjunctionMatcher, ConjunctionNotMatcher, DisjunctionMatcher, EmptyMatcher,
-    Matcher, NotMatcher, PreComputedMatcher,
+    ConjunctionMatcher, ConjunctionNotMatcher, DisjunctionMatcher, EmptyMatcher, Matcher,
+    PreComputedMatcher,
 };
 use crate::lexical::query::scorer::{BM25Scorer, Scorer};
-use crate::lexical::reader::LexicalIndexReader;
+use crate::lexical::reader::{LexicalIndexReader, scan_doc_ids};
 
 /// Occurrence requirements for boolean clauses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,9 +256,17 @@ impl Query for BooleanQuery {
                     Box::new(ConjunctionMatcher::new(matchers))
                 }
             } else {
-                // No required clauses, but we have MUST_NOT clauses and no SHOULD clauses
-                // Match all documents and exclude the ones matching MUST_NOT
-                Box::new(AllMatcher::new(reader.max_doc()))
+                // No required clauses, but we have MUST_NOT clauses and no
+                // SHOULD clauses: match every present, live document and
+                // exclude the MUST_NOT matches. The universe is the ids
+                // actually present in the reader (segment-bounded under the
+                // fanout, correct for sparse id spaces) minus soft-deleted
+                // docs — not the dense `0..max_doc()` range, which yielded
+                // cross-segment, phantom, and deleted ids (#997).
+                let universe: Vec<u64> = scan_doc_ids(reader)?
+                    .filter(|&doc_id| !reader.is_deleted(doc_id))
+                    .collect();
+                Box::new(PreComputedMatcher::new(universe))
             };
 
             // If minimum_should_match is set and we have SHOULD clauses, combine them with MUST
@@ -301,29 +309,16 @@ impl Query for BooleanQuery {
                 }
 
                 if !negative_matchers.is_empty() {
-                    if required_clauses.is_empty() {
-                        // Only MUST_NOT clauses - use NotMatcher
-                        if negative_matchers.len() == 1 {
-                            Ok(Box::new(NotMatcher::new(
-                                negative_matchers.into_iter().next().unwrap(),
-                                reader.max_doc(),
-                            )))
-                        } else {
-                            // Multiple MUST_NOT clauses - combine them with DisjunctionMatcher
-                            let combined_negatives =
-                                Box::new(DisjunctionMatcher::new(negative_matchers));
-                            Ok(Box::new(NotMatcher::new(
-                                combined_negatives,
-                                reader.max_doc(),
-                            )))
-                        }
-                    } else {
-                        // Both MUST and MUST_NOT clauses - use ConjunctionNotMatcher
-                        Ok(Box::new(ConjunctionNotMatcher::new(
-                            positive_matcher,
-                            negative_matchers,
-                        )))
-                    }
+                    // The positive matcher is either the required-clause
+                    // conjunction or the present-live universe (MustNot-only
+                    // shape); either way `ConjunctionNotMatcher` applies the
+                    // exclusions. #997 removed the dense `NotMatcher` path,
+                    // which walked `0..max_doc()` and broke multi-segment
+                    // MustNot-only results.
+                    Ok(Box::new(ConjunctionNotMatcher::new(
+                        positive_matcher,
+                        negative_matchers,
+                    )))
                 } else {
                     // All negative matchers are exhausted, just return positive matcher
                     Ok(positive_matcher)
@@ -452,11 +447,25 @@ impl Query for BooleanQuery {
             return Ok(true);
         }
 
-        // Check if any clause can match
+        // MustNot clauses only restrict the result set; their own
+        // emptiness says nothing about whether the query can match. An
+        // exhausted negative excludes NOTHING — the query matches the
+        // whole universe, not nothing (#997).
+        let mut has_positive = false;
         for clause in &self.clauses {
+            if clause.occur == Occur::MustNot {
+                continue;
+            }
+            has_positive = true;
             if !clause.query.is_empty(reader)? {
                 return Ok(false);
             }
+        }
+
+        if !has_positive {
+            // MustNot-only: matches the present-live universe, which is
+            // empty only when the reader holds no documents.
+            return Ok(reader.doc_count() == 0);
         }
 
         Ok(true)
@@ -839,6 +848,100 @@ mod tests {
         assert!(
             q.cache_key().is_none(),
             "an uncacheable child must make the whole boolean uncacheable"
+        );
+    }
+
+    /// Reader with a sparse id set: ids exist beyond `max_doc()` (sparse
+    /// post-merge id spaces, fanout views reporting the global
+    /// `max_doc`) — see #997.
+    #[derive(Debug)]
+    struct SparseIdReader {
+        ids: Vec<u64>,
+        max_doc: u64,
+    }
+
+    impl crate::lexical::reader::LexicalIndexReader for SparseIdReader {
+        fn doc_count(&self) -> u64 {
+            self.max_doc
+        }
+        fn max_doc(&self) -> u64 {
+            self.max_doc
+        }
+        fn is_deleted(&self, _doc_id: u64) -> bool {
+            false
+        }
+        fn document(
+            &self,
+            _doc_id: u64,
+        ) -> crate::error::Result<Option<crate::lexical::core::document::Document>> {
+            Ok(None)
+        }
+        fn doc_ids(&self) -> crate::error::Result<Vec<u64>> {
+            Ok(self.ids.clone())
+        }
+        fn term_info(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+            Ok(None)
+        }
+        fn postings(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>>
+        {
+            Ok(None)
+        }
+        fn field_stats(
+            &self,
+            _field: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::FieldStats>> {
+            Ok(None)
+        }
+        fn close(&mut self) -> crate::error::Result<()> {
+            Ok(())
+        }
+        fn is_closed(&self) -> bool {
+            false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// #997 regression: a MustNot-only query whose negatives all come up
+    /// empty must match exactly the docs present in the reader — not the
+    /// dense `0..max_doc()` range, which over-scans under the fanout and
+    /// cannot reach ids above `max_doc()`.
+    #[test]
+    fn must_not_only_universe_is_present_docs() {
+        let reader = SparseIdReader {
+            ids: vec![5, 1500],
+            max_doc: 10,
+        };
+        let query = BooleanQueryBuilder::new()
+            .must_not(Box::new(TermQuery::new("body", "absent")))
+            .build();
+
+        let mut matcher = query.matcher(&reader).unwrap();
+        let mut found = Vec::new();
+        while !matcher.is_exhausted() {
+            let doc_id = matcher.doc_id();
+            if doc_id == u64::MAX {
+                break;
+            }
+            found.push(doc_id);
+            if !matcher.next().unwrap() {
+                break;
+            }
+        }
+
+        assert_eq!(
+            found,
+            vec![5, 1500],
+            "universe must be the present ids, not 0..max_doc()"
         );
     }
 }

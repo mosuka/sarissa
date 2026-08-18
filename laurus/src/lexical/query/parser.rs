@@ -254,8 +254,12 @@ impl LexicalQueryParser {
             }
         }
 
-        // If only one term, return it directly
-        if terms.len() == 1 {
+        // If only one term, return it directly — unless it is prohibited
+        // (`-term`): dropping the `Occur` here would silently turn the
+        // negation into a positive query (#997). MustNot must stay
+        // wrapped in a BooleanQuery so the matcher applies it against
+        // the present-live universe.
+        if terms.len() == 1 && !matches!(terms[0].0, Occur::MustNot) {
             return Ok(terms.into_iter().next().unwrap().1);
         }
 
@@ -1072,6 +1076,30 @@ mod tests {
         let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("hello -world").unwrap();
         assert!(format!("{query:?}").contains("BooleanQuery"));
+    }
+
+    /// #997 regression: a lone prohibited clause must keep its negation.
+    /// The single-term unwrap used to discard the `Occur`, silently
+    /// turning `-term` into a positive query.
+    #[test]
+    fn test_prohibited_only_query_keeps_negation() {
+        let parser = create_test_parser().with_default_field("content");
+
+        let query = parser.parse("-content:spam").unwrap();
+        let debug = format!("{query:?}");
+        assert!(
+            debug.contains("BooleanQuery"),
+            "a lone prohibited clause must stay wrapped in a BooleanQuery: {debug}"
+        );
+        assert!(
+            debug.contains("MustNot"),
+            "the MustNot occur must survive parsing: {debug}"
+        );
+
+        // Same for the default-field form.
+        let query = parser.parse("-spam").unwrap();
+        let debug = format!("{query:?}");
+        assert!(debug.contains("MustNot"), "default-field form: {debug}");
     }
 
     #[test]
