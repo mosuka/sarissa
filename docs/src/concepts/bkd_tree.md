@@ -179,4 +179,4 @@ internal-node descent entirely.
 - [Lexical Indexing](indexing/lexical_indexing.md) — where the `.bkd` segment
   file fits within the broader segment layout.
 - [Lexical Search](search/lexical_search.md) — `NumericRangeQuery`,
-  `GeoQuery`, and `Geo3dDistanceQuery` programmatic entry points.
+  `GeoDistanceQuery` / `GeoBoundingBoxQuery`, and `Geo3dDistanceQuery` programmatic entry points.

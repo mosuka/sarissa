@@ -163,23 +163,30 @@ when the segment has one; segments without a BKD tree for the field
 field configured `indexed = false, stored = true`) fall back to scanning
 only the stored documents actually present in that segment.
 
-### GeoQuery
+### GeoDistanceQuery / GeoBoundingBoxQuery
 
-Matches documents by 2D geographic location (WGS84 latitude / longitude).
+Match documents by 2D geographic location (WGS84 latitude / longitude).
 
 ```rust
-use laurus::lexical::query::geo::GeoQuery;
+use laurus::lexical::query::geo::{GeoBoundingBoxQuery, GeoDistanceQuery};
 
 // Find documents within 10 km (= 10 000 m) of Tokyo Station (35.6812, 139.7671)
-let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10_000.0)?; // distance in metres
+let query = GeoDistanceQuery::within_radius("location", 35.6812, 139.7671, 10_000.0)?; // distance in metres
 
 // Find documents within a bounding box (min_lat, min_lon, max_lat, max_lon)
-let query = GeoQuery::within_bounding_box(
+let query = GeoBoundingBoxQuery::within_bounding_box(
     "location",
     35.0, 139.0,  // min (lat, lon)
     36.0, 140.0,  // max (lat, lon)
 )?;
 ```
+
+Both queries score by distance (closer documents rank higher: linear decay
+from the circle's centre, or from the box's centre). Matching uses the
+field's BKD tree when the segment has one; segments without a BKD tree for
+the field (for example, segments none of whose documents carry the field,
+or a field configured `indexed = false, stored = true`) fall back to
+scanning only the stored documents actually present in that segment.
 
 ### Geo3dDistanceQuery / Geo3dBoundingBoxQuery / Geo3dNearestQuery
 
@@ -215,6 +222,11 @@ let q = Geo3dNearestQuery::new("position", centre, 10)
 | `Geo3dDistanceQuery` | `1 - distance / radius`, clamped to `[0, 1]`. |
 | `Geo3dBoundingBoxQuery` | Constant `1.0` for every match. |
 | `Geo3dNearestQuery` | Normalised so the closest hit is `1.0`, the farthest in the returned set is `0.0`. |
+
+Geo3d queries require the field to be indexed (`indexed = true`, the
+default): they run entirely on the field's BKD tree and return no hits
+from segments that lack one — there is no stored-document fallback for
+3D queries.
 
 ### SpanQuery
 
