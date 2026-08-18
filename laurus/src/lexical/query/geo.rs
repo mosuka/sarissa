@@ -13,7 +13,7 @@ use crate::error::Result;
 use crate::lexical::query::Query;
 use crate::lexical::query::matcher::Matcher;
 use crate::lexical::query::scorer::Scorer;
-use crate::lexical::reader::LexicalIndexReader;
+use crate::lexical::reader::{LexicalIndexReader, scan_doc_ids};
 
 /// A 2D geographical bounding box, expressed as the south-west `min` corner
 /// and the north-east `max` corner of an axis-aligned lat/lon rectangle.
@@ -285,11 +285,10 @@ impl GeoDistanceQuery {
             return Ok(candidates);
         }
 
-        // Get the maximum document ID to iterate through all documents
-        let max_doc = reader.max_doc();
-
-        // Iterate through all documents in the index
-        for doc_id in 0..max_doc {
+        // Fallback: scan the stored documents present in this reader
+        // (segment-bounded under the fanout; correct for sparse id
+        // spaces — #996).
+        for doc_id in scan_doc_ids(reader)? {
             // Get the document
             if let Some(doc) = reader.document(doc_id)? {
                 // Get the geo field value
@@ -395,6 +394,21 @@ impl Query for GeoDistanceQuery {
     fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         let matches = self.find_matches(reader)?;
         Ok(Box::new(GeoScorer::new(matches, self.boost)))
+    }
+
+    fn matcher_scorer(
+        &self,
+        reader: &dyn LexicalIndexReader,
+    ) -> Result<(Box<dyn Matcher>, Box<dyn Scorer>)> {
+        // Run the candidate scan once and share it (#996): the scorer's
+        // per-doc distance scores derive from the same matches the
+        // matcher iterates, so ranking is identical to building them
+        // independently.
+        let matches = self.find_matches(reader)?;
+        Ok((
+            Box::new(GeoMatcher::new(matches.clone())),
+            Box::new(GeoScorer::new(matches, self.boost)),
+        ))
     }
 
     fn boost(&self) -> f32 {
@@ -608,11 +622,10 @@ impl GeoBoundingBoxQuery {
             return Ok(candidates);
         }
 
-        // Get the maximum document ID to iterate through all documents
-        let max_doc = reader.max_doc();
-
-        // Iterate through all documents in the index
-        for doc_id in 0..max_doc {
+        // Fallback: scan the stored documents present in this reader
+        // (segment-bounded under the fanout; correct for sparse id
+        // spaces — #996).
+        for doc_id in scan_doc_ids(reader)? {
             // Get the document
             if let Some(doc) = reader.document(doc_id)? {
                 // Get the geo field value
@@ -765,6 +778,21 @@ impl Query for GeoBoundingBoxQuery {
 
     fn set_boost(&mut self, boost: f32) {
         self.boost = boost;
+    }
+
+    fn matcher_scorer(
+        &self,
+        reader: &dyn LexicalIndexReader,
+    ) -> Result<(Box<dyn Matcher>, Box<dyn Scorer>)> {
+        // Run the candidate scan once and share it (#996): the scorer's
+        // per-doc center-distance scores derive from the same matches
+        // the matcher iterates, so ranking is identical to building
+        // them independently.
+        let matches = self.find_matches(reader)?;
+        Ok((
+            Box::new(GeoMatcher::new(matches.clone())),
+            Box::new(GeoScorer::new(matches, self.boost)),
+        ))
     }
 
     fn clone_box(&self) -> Box<dyn Query> {
@@ -1255,5 +1283,174 @@ mod tests {
         // Both should have some bonus, but for different reasons
         assert!(equator_geo_bonus > 0.0);
         assert!(non_equator_geo_bonus > 0.0);
+    }
+
+    /// Reader with a configurable stored-doc id set that counts
+    /// `document()` probes. `max_doc()` deliberately disagrees with the
+    /// id set to model sparse id spaces (post-merge segments, per-segment
+    /// fanout views reporting the global `max_doc`) — see #996 / #994.
+    /// Every present doc carries a `location` geo point near Tokyo.
+    #[derive(Debug)]
+    struct GeoCountingReader {
+        ids: Vec<u64>,
+        max_doc: u64,
+        document_calls: std::sync::atomic::AtomicU64,
+    }
+
+    impl GeoCountingReader {
+        fn new(ids: Vec<u64>, max_doc: u64) -> Self {
+            GeoCountingReader {
+                ids,
+                max_doc,
+                document_calls: std::sync::atomic::AtomicU64::new(0),
+            }
+        }
+
+        fn calls(&self) -> u64 {
+            self.document_calls
+                .load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl LexicalIndexReader for GeoCountingReader {
+        fn doc_count(&self) -> u64 {
+            self.max_doc
+        }
+        fn max_doc(&self) -> u64 {
+            self.max_doc
+        }
+        fn is_deleted(&self, _doc_id: u64) -> bool {
+            false
+        }
+        fn document(
+            &self,
+            doc_id: u64,
+        ) -> crate::error::Result<Option<crate::lexical::core::document::Document>> {
+            self.document_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if self.ids.contains(&doc_id) {
+                let doc = crate::data::Document::builder()
+                    .add_field(
+                        "location",
+                        crate::data::DataValue::Geo(GeoPoint::new(35.68, 139.76)),
+                    )
+                    .build();
+                Ok(Some(doc))
+            } else {
+                Ok(None)
+            }
+        }
+        fn doc_ids(&self) -> crate::error::Result<Vec<u64>> {
+            Ok(self.ids.clone())
+        }
+        fn term_info(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+            Ok(None)
+        }
+        fn postings(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>>
+        {
+            Ok(None)
+        }
+        fn field_stats(
+            &self,
+            _field: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::FieldStats>> {
+            Ok(None)
+        }
+        fn close(&mut self) -> crate::error::Result<()> {
+            Ok(())
+        }
+        fn is_closed(&self) -> bool {
+            false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn drain_matcher(mut matcher: Box<dyn Matcher>) -> Vec<u64> {
+        let mut found = Vec::new();
+        while !matcher.is_exhausted() {
+            let doc_id = matcher.doc_id();
+            if doc_id == u64::MAX {
+                break;
+            }
+            found.push(doc_id);
+            if !matcher.next().unwrap() {
+                break;
+            }
+        }
+        found
+    }
+
+    /// #996 regression: the BKD-less bounding-box fallback must probe
+    /// only the doc ids actually present — not the dense `0..max_doc()`
+    /// range, which both over-scans (fanout-global `max_doc`) and
+    /// under-scans (ids above `max_doc` in sparse post-merge segments).
+    #[test]
+    fn bbox_fallback_scans_only_present_doc_ids() {
+        let reader = GeoCountingReader::new(vec![5, 1500], 10);
+        let query =
+            GeoBoundingBoxQuery::within_bounding_box("location", 34.0, 138.0, 37.0, 141.0).unwrap();
+
+        let found = drain_matcher(query.matcher(&reader).unwrap());
+
+        assert_eq!(
+            found,
+            vec![5, 1500],
+            "id above max_doc() must not be missed"
+        );
+        assert_eq!(
+            reader.calls(),
+            2,
+            "fallback must probe only the present ids"
+        );
+    }
+
+    /// #996 regression: `matcher_scorer()` must run the candidate scan
+    /// once, shared between the matcher and the scorer — not once each.
+    #[test]
+    fn matcher_scorer_shares_one_candidate_pass() {
+        let reader = GeoCountingReader::new(vec![5, 1500], 10);
+        let query =
+            GeoBoundingBoxQuery::within_bounding_box("location", 34.0, 138.0, 37.0, 141.0).unwrap();
+
+        let (matcher, scorer) = query.matcher_scorer(&reader).unwrap();
+
+        assert_eq!(
+            reader.calls(),
+            2,
+            "one probe per present id — the candidate pass must run exactly once"
+        );
+        assert_eq!(drain_matcher(matcher), vec![5, 1500]);
+        // The shared result must still feed distance-based scores.
+        assert!(scorer.score(5, 1.0, None) > 0.0);
+    }
+
+    /// #996 regression: same gate for the distance-query fallback.
+    #[test]
+    fn distance_fallback_scans_only_present_doc_ids() {
+        let reader = GeoCountingReader::new(vec![5, 1500], 10);
+        let query = GeoDistanceQuery::within_radius("location", 35.68, 139.76, 50_000.0).unwrap();
+
+        let found = drain_matcher(query.matcher(&reader).unwrap());
+
+        assert_eq!(
+            found,
+            vec![5, 1500],
+            "id above max_doc() must not be missed"
+        );
+        assert_eq!(
+            reader.calls(),
+            2,
+            "fallback must probe only the present ids"
+        );
     }
 }

@@ -9,7 +9,7 @@ use crate::lexical::core::field::NumericType;
 use crate::lexical::query::Query;
 use crate::lexical::query::matcher::{EmptyMatcher, Matcher, PreComputedMatcher};
 use crate::lexical::query::scorer::{BM25Scorer, Scorer};
-use crate::lexical::reader::LexicalIndexReader;
+use crate::lexical::reader::{LexicalIndexReader, scan_doc_ids};
 
 /// Bound type for range queries.
 #[derive(Debug, Clone, PartialEq)]
@@ -609,37 +609,6 @@ impl Scorer for RangeScorer {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-}
-
-/// Enumerate the document ids a stored-document scan should probe.
-///
-/// Prefers [`LexicalIndexReader::doc_ids`], which yields exactly the ids
-/// present in the reader. This keeps the scan segment-bounded under the
-/// per-segment fanout (where `max_doc()` reports the *global* document
-/// count) and correct for sparse id spaces (post-merge segments whose
-/// surviving ids exceed `max_doc()`, non-zero shard offsets) — see #994.
-/// The returned ids are sorted and deduplicated so matchers built from
-/// them observe the ascending doc-id contract.
-///
-/// Readers without id enumeration support (their `doc_ids()` is empty
-/// while `max_doc()` is non-zero) fall back to the legacy dense
-/// `0..max_doc()` range.
-///
-/// # Arguments
-///
-/// * `reader` - The index reader whose document ids should be probed.
-///
-/// # Returns
-///
-/// An iterator over the document ids to probe, in ascending order.
-fn scan_doc_ids(reader: &dyn LexicalIndexReader) -> Result<Box<dyn Iterator<Item = u64>>> {
-    let mut ids = reader.doc_ids()?;
-    if ids.is_empty() && reader.max_doc() > 0 {
-        return Ok(Box::new(0..reader.max_doc()));
-    }
-    ids.sort_unstable();
-    ids.dedup();
-    Ok(Box::new(ids.into_iter()))
 }
 
 impl Query for NumericRangeQuery {

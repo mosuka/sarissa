@@ -868,8 +868,9 @@ impl BooleanScorer {
     ) -> Result<Self> {
         let mut clauses = Vec::with_capacity(queries.len());
         for query in queries {
-            let matcher = query.matcher(reader)?;
-            let scorer = query.scorer(reader)?;
+            // One pass per clause (#996): queries with an expensive
+            // shared candidate computation build both from a single run.
+            let (matcher, scorer) = query.matcher_scorer(reader)?;
             clauses.push((
                 LeafScorer::from_box(scorer),
                 crate::lexical::query::matcher::LeafMatcher::from_box(matcher),
