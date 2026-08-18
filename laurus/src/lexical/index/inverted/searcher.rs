@@ -531,6 +531,21 @@ impl InvertedIndexSearcher {
             return Ok(collector);
         }
 
+        // MustNot-only booleans have no positive clause to parallelize:
+        // the per-clause merge below would invert a single negation (the
+        // single-clause shortcut runs the negated query as-is) or return
+        // nothing (the survivor set starts empty without Must/Should
+        // hits). Route them through the serial matcher path, whose
+        // universe is the present-live doc set (#997).
+        if clauses.iter().all(|clause| clause.occur == Occur::MustNot) {
+            return self.search_with_collector_deadline(
+                boolean_query.clone_box(),
+                collector,
+                false,
+                deadline,
+            );
+        }
+
         // Single clause: no need for parallel execution
         if clauses.len() == 1 {
             return self.search_with_collector_deadline(
