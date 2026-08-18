@@ -155,6 +155,14 @@ let query = NumericRangeQuery::new(
 );
 ```
 
+Numeric range queries are **constant-scored**: every matching document
+receives the same score (the query's boost, `1.0` by default), following
+Lucene's `PointRangeQuery` semantics. Matching uses the field's BKD tree
+when the segment has one; segments without a BKD tree for the field
+(for example, segments none of whose documents carry the field, or a
+field configured `indexed = false, stored = true`) fall back to scanning
+only the stored documents actually present in that segment.
+
 ### GeoQuery
 
 Matches documents by 2D geographic location (WGS84 latitude / longitude).
