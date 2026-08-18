@@ -161,6 +161,14 @@ impl LexicalIndexReader for PerSegmentReaderView {
         seg.document(doc_id)
     }
 
+    fn doc_ids(&self) -> Result<Vec<u64>> {
+        // Segment-local ids (global id values, but only those present in
+        // this segment) so stored-document scans stay segment-bounded
+        // under the fanout instead of probing `0..global_max_doc` (#994).
+        let seg = self.segment.read().unwrap();
+        seg.doc_ids()
+    }
+
     fn term_info(&self, field: &str, term: &str) -> Result<Option<ReaderTermInfo>> {
         // Combine: global doc_freq / total_freq + per-segment posting
         // offset, max_score_factor, and (critically) the per-segment

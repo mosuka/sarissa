@@ -522,7 +522,7 @@ impl SegmentReader {
 
     /// Get all document IDs in this segment.
     pub fn doc_ids(&self) -> Result<Vec<u64>> {
-        if !self.loaded.load(Ordering::Acquire) {
+        if self.stored_documents.read().unwrap().is_none() {
             self.load_stored_documents()?;
         }
         let docs = self.stored_documents.read().unwrap();
@@ -585,7 +585,13 @@ impl SegmentReader {
         Ok(())
     }
 
-    /// Load stored documents for this segment.
+    /// Load stored documents for this segment into the
+    /// `stored_documents` cache.
+    ///
+    /// Callers gate on the cache being `None`; after this returns the
+    /// cache is always `Some` (an empty map when the segment has no
+    /// stored-documents file), so misses stay O(1) instead of re-probing
+    /// storage on every lookup.
     fn load_stored_documents(&self) -> Result<()> {
         // Primary: typed binary `.docs`, which records the real doc_id per
         // document (correct for non-contiguous ids, e.g. merged segments).
@@ -719,6 +725,14 @@ impl SegmentReader {
             }
 
             *self.stored_documents.write().unwrap() = Some(documents);
+        }
+
+        // No stored-documents file (or the primary `.docs` failed to
+        // open): cache an empty map so later lookups don't re-probe
+        // storage per call.
+        let mut docs = self.stored_documents.write().unwrap();
+        if docs.is_none() {
+            *docs = Some(BTreeMap::new());
         }
 
         Ok(())
@@ -1009,9 +1023,10 @@ impl SegmentReader {
 
     /// Get a document by ID from this segment.
     pub fn document(&self, doc_id: u64) -> Result<Option<Document>> {
-        // Ensure documents are loaded
-        if !self.loaded.load(Ordering::Acquire) {
-            // Load documents on-demand
+        // Load once, on demand; the cache itself is the load gate (the
+        // `loaded` flag is only set by the optional bulk `load()` path,
+        // so gating on it re-decoded the whole segment per call — #994).
+        if self.stored_documents.read().unwrap().is_none() {
             self.load_stored_documents()?;
         }
 
@@ -1041,7 +1056,7 @@ impl SegmentReader {
         doc_id: u64,
         field_names: &[&str],
     ) -> Result<Option<std::collections::HashMap<String, crate::data::DataValue>>> {
-        if !self.loaded.load(Ordering::Acquire) {
+        if self.stored_documents.read().unwrap().is_none() {
             self.load_stored_documents()?;
         }
 

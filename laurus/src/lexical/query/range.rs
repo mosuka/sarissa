@@ -480,10 +480,22 @@ impl NumericRangeQuery {
     /// For multi-valued fields, a document is counted at most once even
     /// when several of its values fall in the range (Lucene-style "any
     /// match" semantics).
+    ///
+    /// This probes every stored document present in the reader (O(n));
+    /// it is no longer called by `scorer()` — range queries are
+    /// constant-scored and need no matching-document count (#994) — but
+    /// is retained as a public utility.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The index reader whose stored documents are probed.
+    ///
+    /// # Returns
+    ///
+    /// The number of documents with at least one value in this range.
     pub fn count_matching_documents(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         let mut count = 0u64;
-        let total_docs = reader.max_doc();
-        for doc_id in 0..total_docs {
+        for doc_id in scan_doc_ids(reader)? {
             if let Ok(Some(doc)) = reader.document(doc_id)
                 && let Some(val) = doc.get(&self.field)
                 && self.value_matches_any(val)
@@ -526,9 +538,6 @@ impl NumericRangeQuery {
 /// produced surprising rankings.
 #[derive(Debug, Clone)]
 pub struct RangeScorer {
-    /// Number of documents matching the range. Retained for `max_score`'s
-    /// "is anything matching?" check.
-    matching_docs: u64,
     /// Boost factor; the per-document score is exactly this value.
     boost: f32,
 }
@@ -536,20 +545,20 @@ pub struct RangeScorer {
 impl RangeScorer {
     /// Create a new range scorer.
     ///
-    /// Bounds and total document count were used by the legacy IDF /
-    /// proximity scorer; they are accepted (and ignored) so existing call
-    /// sites continue to compile.
+    /// Bounds, matching-document count, and total document count were
+    /// used by the legacy IDF / proximity scorer; they are accepted (and
+    /// ignored) so existing call sites continue to compile. The
+    /// matching-document count in particular required an O(total_docs)
+    /// stored-document scan per segment that constant scoring never
+    /// needed (#994).
     pub fn new(
         _lower_bound: Option<f64>,
         _upper_bound: Option<f64>,
-        matching_docs: u64,
+        _matching_docs: u64,
         _total_docs: u64,
         boost: f32,
     ) -> Self {
-        RangeScorer {
-            matching_docs,
-            boost,
-        }
+        RangeScorer { boost }
     }
 }
 
@@ -581,10 +590,15 @@ impl Scorer for RangeScorer {
         self.boost = boost;
     }
 
+    /// Upper bound for pruning: the constant `boost`, unconditionally.
+    ///
+    /// An over-estimate (e.g. when the matcher turns out to be empty) is
+    /// safe — pruning only compares against this bound, so a looser bound
+    /// merely prunes less. Returning `0.0` for "no matches" (the previous
+    /// behavior) required an exact O(total_docs) counting scan and could
+    /// truncate results when the count disagreed with the matcher, e.g.
+    /// on `indexed=true, stored=false` fields (#994).
     fn max_score(&self) -> f32 {
-        if self.matching_docs == 0 {
-            return 0.0;
-        }
         self.boost
     }
 
@@ -595,6 +609,37 @@ impl Scorer for RangeScorer {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
+
+/// Enumerate the document ids a stored-document scan should probe.
+///
+/// Prefers [`LexicalIndexReader::doc_ids`], which yields exactly the ids
+/// present in the reader. This keeps the scan segment-bounded under the
+/// per-segment fanout (where `max_doc()` reports the *global* document
+/// count) and correct for sparse id spaces (post-merge segments whose
+/// surviving ids exceed `max_doc()`, non-zero shard offsets) — see #994.
+/// The returned ids are sorted and deduplicated so matchers built from
+/// them observe the ascending doc-id contract.
+///
+/// Readers without id enumeration support (their `doc_ids()` is empty
+/// while `max_doc()` is non-zero) fall back to the legacy dense
+/// `0..max_doc()` range.
+///
+/// # Arguments
+///
+/// * `reader` - The index reader whose document ids should be probed.
+///
+/// # Returns
+///
+/// An iterator over the document ids to probe, in ascending order.
+fn scan_doc_ids(reader: &dyn LexicalIndexReader) -> Result<Box<dyn Iterator<Item = u64>>> {
+    let mut ids = reader.doc_ids()?;
+    if ids.is_empty() && reader.max_doc() > 0 {
+        return Ok(Box::new(0..reader.max_doc()));
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(Box::new(ids.into_iter()))
 }
 
 impl Query for NumericRangeQuery {
@@ -612,14 +657,13 @@ impl Query for NumericRangeQuery {
             return Ok(Box::new(PreComputedMatcher::new(doc_ids)));
         }
 
-        // Fallback: scan all documents and filter by numeric range.
-        // Multi-valued fields match if ANY value falls in the range
-        // (Lucene-style "any match"), and the document is recorded at
-        // most once per query.
+        // Fallback: scan the stored documents present in this reader and
+        // filter by numeric range. Multi-valued fields match if ANY value
+        // falls in the range (Lucene-style "any match"), and the document
+        // is recorded at most once per query.
         let mut matching_docs = Vec::new();
-        let max_doc = reader.max_doc();
 
-        for doc_id in 0..max_doc {
+        for doc_id in scan_doc_ids(reader)? {
             if let Ok(Some(doc)) = reader.document(doc_id)
                 && let Some(val) = doc.get(&self.field)
             {
@@ -656,14 +700,13 @@ impl Query for NumericRangeQuery {
             return Ok(Box::new(BM25Scorer::new(0, 0, 0, 1.0, 1, self.boost)));
         }
 
-        // Count actual matching documents for accurate scoring
-        let matching_docs = self.count_matching_documents(reader)?;
-
-        // Create specialized range scorer with actual statistics
+        // Constant scoring needs no document statistics; counting
+        // matches here would cost an O(total_docs) stored-document scan
+        // per segment under the per-segment fanout (#994).
         Ok(Box::new(RangeScorer::new(
             self.min_f64(),
             self.max_f64(),
-            matching_docs,
+            0,
             total_docs,
             self.boost,
         )))
@@ -1478,5 +1521,145 @@ mod tests {
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
+    }
+
+    /// Reader with a configurable stored-doc id set that counts
+    /// `document()` probes. `max_doc()` deliberately disagrees with the
+    /// id set to model sparse id spaces (post-merge segments, per-segment
+    /// fanout views reporting the global `max_doc`) — see #994.
+    #[derive(Debug)]
+    struct CountingReader {
+        ids: Vec<u64>,
+        max_doc: u64,
+        document_calls: std::sync::atomic::AtomicU64,
+    }
+
+    impl CountingReader {
+        fn new(ids: Vec<u64>, max_doc: u64) -> Self {
+            CountingReader {
+                ids,
+                max_doc,
+                document_calls: std::sync::atomic::AtomicU64::new(0),
+            }
+        }
+
+        fn calls(&self) -> u64 {
+            self.document_calls
+                .load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl LexicalIndexReader for CountingReader {
+        fn doc_count(&self) -> u64 {
+            self.max_doc
+        }
+        fn max_doc(&self) -> u64 {
+            self.max_doc
+        }
+        fn is_deleted(&self, _doc_id: u64) -> bool {
+            false
+        }
+        fn document(
+            &self,
+            doc_id: u64,
+        ) -> crate::error::Result<Option<crate::lexical::core::document::Document>> {
+            self.document_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if self.ids.contains(&doc_id) {
+                let doc = crate::data::Document::builder()
+                    .add_integer("price", doc_id as i64)
+                    .build();
+                Ok(Some(doc))
+            } else {
+                Ok(None)
+            }
+        }
+        fn doc_ids(&self) -> crate::error::Result<Vec<u64>> {
+            Ok(self.ids.clone())
+        }
+        fn term_info(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+            Ok(None)
+        }
+        fn postings(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>>
+        {
+            Ok(None)
+        }
+        fn field_stats(
+            &self,
+            _field: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::FieldStats>> {
+            Ok(None)
+        }
+        fn close(&mut self) -> crate::error::Result<()> {
+            Ok(())
+        }
+        fn is_closed(&self) -> bool {
+            false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// #994 regression: building the scorer must not scan stored
+    /// documents — range queries are constant-scored and need no
+    /// matching-document count.
+    #[test]
+    fn scorer_does_not_scan_stored_documents() {
+        let reader = CountingReader::new(Vec::new(), 100);
+        let query = NumericRangeQuery::i64_range("price", Some(0), Some(1000));
+
+        let scorer = query.scorer(&reader).unwrap();
+
+        assert_eq!(
+            reader.calls(),
+            0,
+            "scorer() must not probe stored documents"
+        );
+        assert_eq!(scorer.max_score(), query.boost());
+        assert_eq!(scorer.score(0, 1.0, None), query.boost());
+    }
+
+    /// #994 regression: the BKD-less matcher fallback must probe only
+    /// the doc ids actually present in the reader — not the dense
+    /// `0..max_doc()` range, which both over-scans (fanout-global
+    /// `max_doc`) and under-scans (ids above `max_doc` in sparse
+    /// post-merge segments).
+    #[test]
+    fn matcher_fallback_scans_only_present_doc_ids() {
+        let reader = CountingReader::new(vec![5, 1500], 10);
+        let query = NumericRangeQuery::i64_range("price", Some(0), Some(2000));
+
+        let mut matcher = query.matcher(&reader).unwrap();
+        let mut found = Vec::new();
+        while !matcher.is_exhausted() {
+            let doc_id = matcher.doc_id();
+            if doc_id == u64::MAX {
+                break;
+            }
+            found.push(doc_id);
+            if !matcher.next().unwrap() {
+                break;
+            }
+        }
+
+        assert_eq!(
+            found,
+            vec![5, 1500],
+            "id above max_doc() must not be missed"
+        );
+        assert_eq!(
+            reader.calls(),
+            2,
+            "fallback must probe only the present ids"
+        );
     }
 }
