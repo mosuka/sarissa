@@ -183,10 +183,13 @@ let query = GeoBoundingBoxQuery::within_bounding_box(
 
 Both queries score by distance (closer documents rank higher: linear decay
 from the circle's centre, or from the box's centre). Matching uses the
-field's BKD tree when the segment has one; segments without a BKD tree for
-the field (for example, segments none of whose documents carry the field,
-or a field configured `indexed = false, stored = true`) fall back to
-scanning only the stored documents actually present in that segment.
+field's BKD tree when the segment has one, reading the coordinates
+directly from the tree — so an index-only field
+(`indexed = true, stored = false`) works without stored documents.
+Segments without a BKD tree for the field (for example, segments none of
+whose documents carry the field, or a field configured
+`indexed = false, stored = true`) fall back to scanning only the stored
+documents actually present in that segment.
 
 ### Geo3dDistanceQuery / Geo3dBoundingBoxQuery / Geo3dNearestQuery
 

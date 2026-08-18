@@ -92,6 +92,51 @@ fn stored_only_geo_field_matches_via_fallback_across_segments() {
     assert_eq!(search_hits(&store, near_tokyo), vec![1, 2]);
 }
 
+/// #1000: an index-only geo field (`indexed = true, stored = false`)
+/// lives solely in the BKD tree. The BKD path must recover coordinates
+/// from the tree itself — the old stored-document probe silently
+/// dropped every candidate, returning zero hits guaranteed (the BKD
+/// branch returns early, so the fallback never ran either).
+#[test]
+fn index_only_geo_field_matches_via_bkd() {
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let config = LexicalIndexConfig::builder()
+        .add_field(
+            "location",
+            FieldOption::Geo(GeoOption {
+                indexed: true,
+                stored: false,
+            }),
+        )
+        .build();
+    let store = LexicalStore::new(storage, config).unwrap();
+
+    // Two segments, both carrying the geo field.
+    store.upsert_document(1, geo_doc(35.68, 139.76)).unwrap(); // Tokyo
+    store.upsert_document(2, geo_doc(35.44, 139.64)).unwrap(); // Yokohama
+    store.commit().unwrap();
+    store.upsert_document(3, geo_doc(34.69, 135.50)).unwrap(); // Osaka
+    store.commit().unwrap();
+
+    let all_japan = Box::new(
+        GeoBoundingBoxQuery::within_bounding_box("location", 30.0, 128.0, 46.0, 146.0).unwrap(),
+    );
+    assert_eq!(
+        search_hits(&store, all_japan),
+        vec![1, 2, 3],
+        "BKD-only coordinates must produce hits on a stored=false field"
+    );
+
+    let near_tokyo =
+        Box::new(GeoDistanceQuery::within_radius("location", 35.68, 139.76, 50_000.0).unwrap());
+    assert_eq!(search_hits(&store, near_tokyo), vec![1, 2]);
+
+    let osaka_box = Box::new(
+        GeoBoundingBoxQuery::within_bounding_box("location", 34.0, 135.0, 35.0, 136.0).unwrap(),
+    );
+    assert_eq!(search_hits(&store, osaka_box), vec![3]);
+}
+
 /// #996: mixed BKD / fallback fan-out — only one of three segments
 /// carries the (indexed) geo field; the field-less segments take the
 /// fallback path and must not disturb the result.

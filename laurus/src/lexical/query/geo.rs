@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 pub use crate::data::GeoPoint;
 
 use crate::error::Result;
+use crate::lexical::index::structures::aabb::AABB;
+use crate::lexical::index::structures::visitor::{CellRelation, IntersectVisitor};
 use crate::lexical::query::Query;
 use crate::lexical::query::matcher::Matcher;
 use crate::lexical::query::scorer::Scorer;
@@ -88,6 +90,78 @@ impl GeoBoundingBox {
             .iter()
             .map(|corner| center.distance_to(corner))
             .fold(0.0, f64::max)
+    }
+}
+
+/// [`IntersectVisitor`] collecting `(doc_id, GeoPoint)` pairs for every
+/// indexed point inside a closed 2D `[lat, lon]` box, reading the
+/// coordinates straight from the BKD leaves (#1000).
+///
+/// `compare` never returns [`CellRelation::Inside`]: the `Inside` path
+/// reports doc ids via `visit_inside` **without** coordinates, which the
+/// geo queries need for exact haversine filtering and distance-based
+/// scoring. Returning `Crosses` for a fully-contained cell only costs
+/// pruning efficiency, never correctness (same pattern as geo3d's
+/// `NearestVisitor` and the merge engine's `CollectPointsVisitor`).
+#[derive(Debug)]
+struct GeoBoxPointsVisitor {
+    /// Closed lower bounds: `[min_lat, min_lon]`.
+    min: [f64; 2],
+    /// Closed upper bounds: `[max_lat, max_lon]`.
+    max: [f64; 2],
+    /// Collected in-box points, in BKD traversal order.
+    hits: Vec<(u64, GeoPoint)>,
+}
+
+impl GeoBoxPointsVisitor {
+    /// Create a visitor for the closed box `[min, max]` (both bounds
+    /// inclusive, matching the previous `range_search(.., true, true)`).
+    fn new(min_lat: f64, min_lon: f64, max_lat: f64, max_lon: f64) -> Self {
+        GeoBoxPointsVisitor {
+            min: [min_lat, min_lon],
+            max: [max_lat, max_lon],
+            hits: Vec::new(),
+        }
+    }
+
+    /// Consume the visitor and return the collected `(doc_id, point)`
+    /// pairs, sorted by doc id and deduplicated (first occurrence wins)
+    /// so callers observe the same order/uniqueness the previous
+    /// `range_search`-based path produced.
+    fn into_candidates(mut self) -> Vec<(u64, GeoPoint)> {
+        self.hits.sort_by_key(|(doc_id, _)| *doc_id);
+        self.hits.dedup_by_key(|(doc_id, _)| *doc_id);
+        self.hits
+    }
+}
+
+impl IntersectVisitor for GeoBoxPointsVisitor {
+    fn compare(&self, cell: &AABB) -> CellRelation {
+        debug_assert_eq!(cell.num_dims(), 2, "GeoBoxPointsVisitor expects a 2D BKD");
+        let cell_min = cell.min();
+        let cell_max = cell.max();
+        let disjoint =
+            (0..2).any(|dim| cell_max[dim] < self.min[dim] || cell_min[dim] > self.max[dim]);
+        if disjoint {
+            CellRelation::Outside
+        } else {
+            // Always Crosses, even for contained cells: the geo queries
+            // need the per-point coordinates the Inside path withholds.
+            CellRelation::Crosses
+        }
+    }
+
+    fn visit_inside(&mut self, _doc_id: u64) {
+        // Unreachable in practice — `compare` never returns Inside —
+        // but if a future BKD impl chooses to call this we ignore the
+        // hit (we have no coordinates to record).
+    }
+
+    fn visit(&mut self, doc_id: u64, point: &[f64]) {
+        let inside = (0..2).all(|dim| point[dim] >= self.min[dim] && point[dim] <= self.max[dim]);
+        if inside {
+            self.hits.push((doc_id, GeoPoint::new(point[0], point[1])));
+        }
     }
 }
 
@@ -260,29 +334,19 @@ impl GeoDistanceQuery {
     ) -> Result<Vec<(u64, GeoPoint)>> {
         let mut candidates = Vec::new();
 
-        // Try to use BKD tree for efficient candidate retrieval
+        // Try to use BKD tree for efficient candidate retrieval. The
+        // coordinates come straight from the BKD leaves via the visitor
+        // — no stored-document probes, so `indexed = true, stored =
+        // false` geo fields work too (#1000).
         if let Some(bkd_tree) = reader.get_bkd_tree(&self.field)? {
-            // Lat range is [min_lat, max_lat], Lon range is [min_lon, max_lon]
-            let mins = [
-                Some(bounding_box.min.lat), // min_lat
-                Some(bounding_box.min.lon), // min_lon
-            ];
-            let maxs = [
-                Some(bounding_box.max.lat), // max_lat
-                Some(bounding_box.max.lon), // max_lon
-            ];
-
-            let doc_ids = bkd_tree.range_search(&mins, &maxs, true, true)?;
-            for doc_id in doc_ids {
-                // Retrieve GeoPoint for exact distance calculation
-                if let Some(doc) = reader.document(doc_id)?
-                    && let Some(field_value) = doc.get_field(&self.field)
-                    && let Some(geo_point) = field_value.as_geo()
-                {
-                    candidates.push((doc_id, geo_point));
-                }
-            }
-            return Ok(candidates);
+            let mut visitor = GeoBoxPointsVisitor::new(
+                bounding_box.min.lat,
+                bounding_box.min.lon,
+                bounding_box.max.lat,
+                bounding_box.max.lon,
+            );
+            bkd_tree.intersect(&mut visitor)?;
+            return Ok(visitor.into_candidates());
         }
 
         // Fallback: scan the stored documents present in this reader
@@ -598,28 +662,19 @@ impl GeoBoundingBoxQuery {
     ) -> Result<Vec<(u64, GeoPoint)>> {
         let mut candidates = Vec::new();
 
-        // Try to use BKD tree for efficient candidate retrieval
+        // Try to use BKD tree for efficient candidate retrieval. The
+        // coordinates come straight from the BKD leaves via the visitor
+        // — no stored-document probes, so `indexed = true, stored =
+        // false` geo fields work too (#1000).
         if let Some(bkd_tree) = reader.get_bkd_tree(&self.field)? {
-            let mins = [
-                Some(self.bounding_box.min.lat), // min_lat
-                Some(self.bounding_box.min.lon), // min_lon
-            ];
-            let maxs = [
-                Some(self.bounding_box.max.lat), // max_lat
-                Some(self.bounding_box.max.lon), // max_lon
-            ];
-
-            let doc_ids = bkd_tree.range_search(&mins, &maxs, true, true)?;
-            for doc_id in doc_ids {
-                // Retrieve GeoPoint for exact check
-                if let Some(doc) = reader.document(doc_id)?
-                    && let Some(field_value) = doc.get_field(&self.field)
-                    && let Some(geo_point) = field_value.as_geo()
-                {
-                    candidates.push((doc_id, geo_point));
-                }
-            }
-            return Ok(candidates);
+            let mut visitor = GeoBoxPointsVisitor::new(
+                self.bounding_box.min.lat,
+                self.bounding_box.min.lon,
+                self.bounding_box.max.lat,
+                self.bounding_box.max.lon,
+            );
+            bkd_tree.intersect(&mut visitor)?;
+            return Ok(visitor.into_candidates());
         }
 
         // Fallback: scan the stored documents present in this reader
@@ -1411,6 +1466,171 @@ mod tests {
             reader.calls(),
             2,
             "fallback must probe only the present ids"
+        );
+    }
+
+    /// #1000: a cell wholly inside the box would be classified `Inside`
+    /// by a plain range visitor — `GeoBoxPointsVisitor` must say
+    /// `Crosses` so the BKD streams the points and the coordinates stay
+    /// available (2D twin of `nearest_visitor_never_returns_inside`).
+    #[test]
+    fn geo_box_points_visitor_never_returns_inside() {
+        let visitor = GeoBoxPointsVisitor::new(0.0, 0.0, 10.0, 10.0);
+
+        let contained = AABB::new(vec![4.0, 4.0], vec![6.0, 6.0]).unwrap();
+        assert_eq!(visitor.compare(&contained), CellRelation::Crosses);
+
+        let overlapping = AABB::new(vec![-5.0, -5.0], vec![5.0, 5.0]).unwrap();
+        assert_eq!(visitor.compare(&overlapping), CellRelation::Crosses);
+
+        let disjoint = AABB::new(vec![20.0, 20.0], vec![30.0, 30.0]).unwrap();
+        assert_eq!(visitor.compare(&disjoint), CellRelation::Outside);
+    }
+
+    /// #1000: `visit` records only in-box points, with closed bounds on
+    /// both ends (matching the previous `range_search(.., true, true)`),
+    /// and `into_candidates` sorts by doc id and deduplicates.
+    #[test]
+    fn geo_box_points_visitor_filters_and_orders() {
+        let mut visitor = GeoBoxPointsVisitor::new(0.0, 0.0, 10.0, 10.0);
+
+        visitor.visit(7, &[5.0, 5.0]); // inside
+        visitor.visit(3, &[0.0, 10.0]); // on the boundary — inclusive
+        visitor.visit(9, &[10.5, 5.0]); // outside (lat)
+        visitor.visit(1, &[5.0, -0.1]); // outside (lon)
+        visitor.visit(7, &[5.0, 5.0]); // duplicate doc id
+        visitor.visit_inside(2); // must be ignored (no coordinates)
+
+        let candidates = visitor.into_candidates();
+        let ids: Vec<u64> = candidates.iter().map(|(doc_id, _)| *doc_id).collect();
+        assert_eq!(ids, vec![3, 7], "sorted, deduped, boundary-inclusive");
+    }
+
+    /// In-memory `BKDTree` that streams its fixed points through
+    /// `visit()` (always-`Crosses` semantics — a legal tree behavior).
+    #[derive(Debug)]
+    struct FakeBkdTree {
+        points: Vec<(u64, [f64; 2])>,
+    }
+
+    impl crate::lexical::index::structures::bkd_tree::BKDTree for FakeBkdTree {
+        fn intersect(
+            &self,
+            visitor: &mut dyn crate::lexical::index::structures::visitor::IntersectVisitor,
+        ) -> Result<()> {
+            for (doc_id, point) in &self.points {
+                visitor.visit(*doc_id, point);
+            }
+            Ok(())
+        }
+    }
+
+    /// Reader whose geo field is backed by a [`FakeBkdTree`] and whose
+    /// stored documents are absent (`document()` returns `None`, as for
+    /// an `indexed = true, stored = false` field) while counting probes.
+    #[derive(Debug)]
+    struct BkdBackedReader {
+        points: Vec<(u64, [f64; 2])>,
+        document_calls: std::sync::atomic::AtomicU64,
+    }
+
+    impl BkdBackedReader {
+        fn new(points: Vec<(u64, [f64; 2])>) -> Self {
+            BkdBackedReader {
+                points,
+                document_calls: std::sync::atomic::AtomicU64::new(0),
+            }
+        }
+
+        fn calls(&self) -> u64 {
+            self.document_calls
+                .load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl LexicalIndexReader for BkdBackedReader {
+        fn doc_count(&self) -> u64 {
+            self.points.len() as u64
+        }
+        fn max_doc(&self) -> u64 {
+            self.points.iter().map(|(id, _)| id + 1).max().unwrap_or(0)
+        }
+        fn is_deleted(&self, _doc_id: u64) -> bool {
+            false
+        }
+        fn document(
+            &self,
+            _doc_id: u64,
+        ) -> crate::error::Result<Option<crate::lexical::core::document::Document>> {
+            self.document_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(None)
+        }
+        fn get_bkd_tree(
+            &self,
+            _field: &str,
+        ) -> crate::error::Result<
+            Option<std::sync::Arc<dyn crate::lexical::index::structures::bkd_tree::BKDTree>>,
+        > {
+            Ok(Some(std::sync::Arc::new(FakeBkdTree {
+                points: self.points.clone(),
+            })))
+        }
+        fn term_info(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+            Ok(None)
+        }
+        fn postings(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>>
+        {
+            Ok(None)
+        }
+        fn field_stats(
+            &self,
+            _field: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::FieldStats>> {
+            Ok(None)
+        }
+        fn close(&mut self) -> crate::error::Result<()> {
+            Ok(())
+        }
+        fn is_closed(&self) -> bool {
+            false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// #1000 regression: the BKD path must take coordinates from the
+    /// tree itself and never probe stored documents (which do not exist
+    /// for an `indexed = true, stored = false` field).
+    #[test]
+    fn bkd_path_uses_tree_coordinates_without_stored_doc_probes() {
+        let reader = BkdBackedReader::new(vec![
+            (5, [35.68, 139.76]), // Tokyo
+            (7, [34.69, 135.50]), // Osaka
+            (9, [50.0, 10.0]),    // outside the Japan box
+        ]);
+
+        let bbox =
+            GeoBoundingBoxQuery::within_bounding_box("location", 30.0, 128.0, 46.0, 146.0).unwrap();
+        assert_eq!(drain_matcher(bbox.matcher(&reader).unwrap()), vec![5, 7]);
+
+        let distance =
+            GeoDistanceQuery::within_radius("location", 35.68, 139.76, 50_000.0).unwrap();
+        assert_eq!(drain_matcher(distance.matcher(&reader).unwrap()), vec![5]);
+
+        assert_eq!(
+            reader.calls(),
+            0,
+            "the BKD path must not probe stored documents"
         );
     }
 
