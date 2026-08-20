@@ -2120,11 +2120,25 @@ impl Engine {
             } else {
                 fetch_count
             };
-            Some(
-                crate::lexical::search::searcher::LexicalSearchRequest::new(q)
-                    .limit(overfetch_limit)
-                    .load_documents(false),
-            )
+            let mut req = crate::lexical::search::searcher::LexicalSearchRequest::new(q)
+                .limit(overfetch_limit)
+                .load_documents(false);
+            // Carry the caller's resolved lexical params through (#942):
+            // rebuilding the request from scratch silently dropped them.
+            // `limit` / `load_documents` stay engine-controlled (overfetch
+            // and engine-side document resolution). `sort_by` applies only
+            // to lexical-only searches: under hybrid fusion the ranking is
+            // the fused score, and a field-sorted candidate set would
+            // neither survive fusion nor be a relevance top-K.
+            if let Some(src) = &lexical_search_request {
+                req.params.min_score = src.params.min_score;
+                req.params.timeout_ms = src.params.timeout_ms;
+                req.params.parallel = src.params.parallel;
+                if vector_search_request.is_none() {
+                    req.params.sort_by = src.params.sort_by.clone();
+                }
+            }
+            Some(req)
         } else {
             None
         };
@@ -4030,6 +4044,139 @@ mod tests {
              segments; got {} (bug: per-segment fanout drops BKD tree)",
             hits.len()
         );
+    }
+
+    /// Build an engine with `body` (text) + `popularity` (integer) and
+    /// four docs whose popularity order differs from doc order (#942).
+    async fn options_test_engine() -> Engine {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::{IntegerOption, TextOption};
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("body", FieldOption::Text(TextOption::default()))
+            .add_field("popularity", FieldOption::Integer(IntegerOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        for (id, popularity) in [("A", 30i64), ("B", 10), ("C", 40), ("D", 20)] {
+            let mut doc = crate::data::Document::new();
+            doc.fields
+                .insert("body".into(), DataValue::Text("alpha".into()));
+            doc.fields
+                .insert("popularity".into(), DataValue::Int64(popularity));
+            engine.put_document(id, doc).await.unwrap();
+        }
+        engine.commit().await.unwrap();
+        engine
+    }
+
+    /// #942 regression: `SearchRequestBuilder::sort_by` must take effect
+    /// through `Engine::search` — it used to be a silent no-op because
+    /// the execution path rebuilt the lexical request without params.
+    #[tokio::test]
+    async fn test_engine_search_honors_sort_by() {
+        use crate::lexical::search::searcher::{LexicalSearchQuery, SortField, SortOrder};
+
+        let engine = options_test_engine().await;
+
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("body:alpha"))
+            .sort_by(SortField::Field {
+                name: "popularity".into(),
+                order: SortOrder::Desc,
+            })
+            .limit(4)
+            .build();
+        let hits = engine.search(request).await.unwrap();
+
+        let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["C", "A", "D", "B"],
+            "results must be ordered by popularity desc, not by score"
+        );
+    }
+
+    /// #942 regression: `lexical_min_score` must take effect through
+    /// `Engine::search`.
+    #[tokio::test]
+    async fn test_engine_search_honors_min_score() {
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+
+        let engine = options_test_engine().await;
+
+        let baseline = engine
+            .search(
+                crate::engine::search::SearchRequestBuilder::new()
+                    .lexical_query(LexicalSearchQuery::from("body:alpha"))
+                    .limit(4)
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(baseline.len(), 4);
+        let max_score = baseline
+            .iter()
+            .map(|h| h.score)
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        // A threshold above every real score must exclude everything.
+        let filtered = engine
+            .search(
+                crate::engine::search::SearchRequestBuilder::new()
+                    .lexical_query(LexicalSearchQuery::from("body:alpha"))
+                    .lexical_min_score(max_score + 1.0)
+                    .limit(4)
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            filtered.is_empty(),
+            "min_score above every score must exclude all hits; got {}",
+            filtered.len()
+        );
+    }
+
+    /// #942: `lexical_parallel` must be honored and produce the same
+    /// result set as the serial path (wiring equality gate).
+    #[tokio::test]
+    async fn test_engine_search_parallel_matches_serial() {
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+
+        let engine = options_test_engine().await;
+
+        let mut serial_ids: Vec<String> = engine
+            .search(
+                crate::engine::search::SearchRequestBuilder::new()
+                    .lexical_query(LexicalSearchQuery::from("body:alpha"))
+                    .lexical_parallel(false)
+                    .limit(4)
+                    .build(),
+            )
+            .await
+            .unwrap()
+            .iter()
+            .map(|h| h.id.clone())
+            .collect();
+        let mut parallel_ids: Vec<String> = engine
+            .search(
+                crate::engine::search::SearchRequestBuilder::new()
+                    .lexical_query(LexicalSearchQuery::from("body:alpha"))
+                    .lexical_parallel(true)
+                    .limit(4)
+                    .build(),
+            )
+            .await
+            .unwrap()
+            .iter()
+            .map(|h| h.id.clone())
+            .collect();
+        serial_ids.sort();
+        parallel_ids.sort();
+        assert_eq!(serial_ids, parallel_ids);
     }
 
     /// Combined regression test: per-segment fanout must restore BKD
