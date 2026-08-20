@@ -170,41 +170,55 @@ impl AdvancedQuery {
         // Optimize query first
         self.optimize()?;
 
-        // Get matcher and scorer
-        let matcher = self.core_query.matcher(reader)?;
-        let scorer = self.core_query.scorer(reader)?;
+        // Build the matcher and scorer in one pass (#999).
+        let (mut matcher, scorer) = self.core_query.matcher_scorer(reader)?;
+
+        // Build each post filter's matcher once: candidates arrive in
+        // ascending doc-id order, so a single monotonic forward pass per
+        // filter suffices (#1001 — the previous code rebuilt every
+        // filter matcher per candidate document).
+        let mut post_filter_matchers = self
+            .post_filters
+            .iter()
+            .map(|filter| filter.matcher(reader))
+            .collect::<Result<Vec<_>>>()?;
 
         let mut results = Vec::new();
         let start_time = crate::util::time::Timer::now();
 
-        // Execute core query
-        let mut matcher = matcher;
-        while matcher.next()? {
+        // Drain the core matcher. It is positioned on its first match at
+        // construction, so read the current doc before advancing (the
+        // previous `while matcher.next()` loop dropped the first hit),
+        // and advance exactly once per iteration so score / filter
+        // rejections never skip the advance.
+        while !matcher.is_exhausted() {
+            let doc_id = matcher.doc_id();
+            if doc_id == u64::MAX {
+                break;
+            }
+
             // Check timeout
             if self.config.timeout_ms > 0 && start_time.elapsed_ms() > self.config.timeout_ms {
                 break;
             }
 
-            let doc_id = matcher.doc_id();
-
             // Calculate score
             let mut score = scorer.score(doc_id, matcher.term_freq() as f32, None);
             score *= self.boost;
 
-            // Apply minimum score threshold
-            if score < self.min_score.max(self.config.min_score) {
-                continue;
+            // Minimum score threshold, then post filters
+            let admitted = score >= self.min_score.max(self.config.min_score)
+                && Self::post_filters_match(&mut post_filter_matchers, doc_id)?;
+            if admitted {
+                results.push(QueryResult { doc_id, score });
+
+                // Early termination check
+                if self.config.enable_early_termination && results.len() > 10000 {
+                    break;
+                }
             }
 
-            // Apply post filters
-            if !self.apply_post_filters(doc_id, reader)? {
-                continue;
-            }
-
-            results.push(QueryResult { doc_id, score });
-
-            // Early termination check
-            if self.config.enable_early_termination && results.len() > 10000 {
+            if !matcher.next()? {
                 break;
             }
         }
@@ -215,11 +229,16 @@ impl AdvancedQuery {
         Ok(results)
     }
 
-    /// Apply post filters to a document.
-    fn apply_post_filters(&self, doc_id: u64, reader: &dyn LexicalIndexReader) -> Result<bool> {
-        for filter in &self.post_filters {
-            let mut matcher = filter.matcher(reader)?;
-            // Skip to the target document and check if it matches
+    /// Check `doc_id` against every prebuilt post-filter matcher.
+    ///
+    /// The matchers advance monotonically: candidates arrive in
+    /// ascending doc-id order, so `skip_to` never needs to move
+    /// backwards. A matcher already past `doc_id` reports a mismatch —
+    /// the same verdict a freshly built matcher would reach — and an
+    /// exhausted matcher correctly rejects everything after its last
+    /// match.
+    fn post_filters_match(matchers: &mut [Box<dyn Matcher>], doc_id: u64) -> Result<bool> {
+        for matcher in matchers.iter_mut() {
             if !matcher.skip_to(doc_id)? || matcher.doc_id() != doc_id {
                 return Ok(false);
             }
@@ -650,5 +669,175 @@ mod tests {
         assert!(!config.enable_optimization);
         assert_eq!(config.max_clause_count, 500);
         assert_eq!(config.timeout_ms, 10000);
+    }
+
+    /// Minimal reader: the mock queries below ignore it entirely.
+    #[derive(Debug)]
+    struct TestReader;
+
+    impl LexicalIndexReader for TestReader {
+        fn doc_count(&self) -> u64 {
+            0
+        }
+        fn max_doc(&self) -> u64 {
+            0
+        }
+        fn is_deleted(&self, _doc_id: u64) -> bool {
+            false
+        }
+        fn document(
+            &self,
+            _doc_id: u64,
+        ) -> crate::error::Result<Option<crate::lexical::core::document::Document>> {
+            Ok(None)
+        }
+        fn term_info(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+            Ok(None)
+        }
+        fn postings(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> crate::error::Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>>
+        {
+            Ok(None)
+        }
+        fn field_stats(
+            &self,
+            _field: &str,
+        ) -> crate::error::Result<Option<crate::lexical::reader::FieldStats>> {
+            Ok(None)
+        }
+        fn close(&mut self) -> crate::error::Result<()> {
+            Ok(())
+        }
+        fn is_closed(&self) -> bool {
+            false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// Constant scorer for the mock query.
+    #[derive(Debug, Clone)]
+    struct UnitScorer;
+
+    impl Scorer for UnitScorer {
+        fn score(&self, _doc_id: u64, _term_freq: f32, _field_length: Option<f32>) -> f32 {
+            1.0
+        }
+        fn boost(&self) -> f32 {
+            1.0
+        }
+        fn set_boost(&mut self, _boost: f32) {}
+        fn max_score(&self) -> f32 {
+            1.0
+        }
+        fn name(&self) -> &'static str {
+            "UnitScorer"
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// Query yielding a fixed doc-id set, counting matcher constructions
+    /// (#1001: post filters must build their matcher once per execute,
+    /// not once per candidate document).
+    #[derive(Debug)]
+    struct FixedDocsQuery {
+        docs: Vec<u64>,
+        matcher_builds: std::sync::Arc<std::sync::atomic::AtomicU64>,
+        boost: f32,
+    }
+
+    impl FixedDocsQuery {
+        fn new(docs: Vec<u64>) -> Self {
+            FixedDocsQuery {
+                docs,
+                matcher_builds: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                boost: 1.0,
+            }
+        }
+    }
+
+    impl Query for FixedDocsQuery {
+        fn matcher(&self, _reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
+            self.matcher_builds
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(Box::new(
+                crate::lexical::query::matcher::PreComputedMatcher::new(self.docs.clone()),
+            ))
+        }
+        fn scorer(&self, _reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
+            Ok(Box::new(UnitScorer))
+        }
+        fn boost(&self) -> f32 {
+            self.boost
+        }
+        fn set_boost(&mut self, boost: f32) {
+            self.boost = boost;
+        }
+        fn description(&self) -> String {
+            "FixedDocsQuery".to_string()
+        }
+        fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
+            Ok(self.docs.is_empty())
+        }
+        fn cost(&self, _reader: &dyn LexicalIndexReader) -> Result<u64> {
+            Ok(self.docs.len() as u64)
+        }
+        fn clone_box(&self) -> Box<dyn Query> {
+            Box::new(FixedDocsQuery {
+                docs: self.docs.clone(),
+                matcher_builds: self.matcher_builds.clone(),
+                boost: self.boost,
+            })
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// #1001 regression: each post filter's matcher must be built once
+    /// per `execute()`, not once per candidate document.
+    #[test]
+    fn post_filters_build_one_matcher_per_execute() {
+        let reader = TestReader;
+        let filter = FixedDocsQuery::new(vec![2, 4]);
+        let filter_builds = filter.matcher_builds.clone();
+
+        let mut query = AdvancedQuery::new(Box::new(FixedDocsQuery::new(vec![1, 2, 3, 4, 5])))
+            .with_post_filter(Box::new(filter));
+        let results = query.execute(&reader).unwrap();
+
+        let mut ids: Vec<u64> = results.iter().map(|r| r.doc_id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![2, 4]);
+        assert_eq!(
+            filter_builds.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "post-filter matcher must be built once per execute"
+        );
+    }
+
+    /// #1001 regression: `execute()` must not drop the matcher's first
+    /// hit (matchers are positioned on their first match at
+    /// construction; the old loop advanced before reading it).
+    #[test]
+    fn execute_keeps_the_first_hit() {
+        let reader = TestReader;
+        let mut query = AdvancedQuery::new(Box::new(FixedDocsQuery::new(vec![7, 9])));
+
+        let results = query.execute(&reader).unwrap();
+
+        let mut ids: Vec<u64> = results.iter().map(|r| r.doc_id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![7, 9], "the first hit must not be dropped");
     }
 }
