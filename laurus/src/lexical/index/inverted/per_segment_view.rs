@@ -169,6 +169,23 @@ impl LexicalIndexReader for PerSegmentReaderView {
         seg.doc_ids()
     }
 
+    fn get_doc_value(
+        &self,
+        field: &str,
+        doc_id: u64,
+    ) -> Result<Option<crate::lexical::core::field::FieldValue>> {
+        // Segment-local DocValues so per-segment field-sorted collection
+        // works under the fanout (#944); the trait default returned
+        // `None`, which would sort every document as `Null`.
+        let seg = self.segment.read().unwrap();
+        seg.get_doc_value(field, doc_id)
+    }
+
+    fn has_doc_values(&self, field: &str) -> bool {
+        let seg = self.segment.read().unwrap();
+        seg.has_doc_values(field)
+    }
+
     fn term_info(&self, field: &str, term: &str) -> Result<Option<ReaderTermInfo>> {
         // Combine: global doc_freq / total_freq + per-segment posting
         // offset, max_score_factor, and (critically) the per-segment

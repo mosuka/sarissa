@@ -667,6 +667,70 @@ fn bench_term_query_varying_limit(c: &mut Criterion) {
     group.finish();
 }
 
+/// Field-sorted top-K (#944 Phase A). The corpus's `year` integer field
+/// is DocValues-backed, so `sort_by(year)` exercises the
+/// `TopFieldCollector` path end-to-end. Parameterised over segment
+/// count: the single-segment case measures the scan itself; the
+/// multi-segment case measures the per-segment fanout.
+fn bench_field_sorted_query(c: &mut Criterion) {
+    use laurus::lexical::search::searcher::{SortField, SortOrder};
+
+    let rt = Runtime::new().unwrap();
+    let corpus_n = *corpus_sizes()
+        .last()
+        .expect("corpus_sizes() must be non-empty");
+
+    for &segment_count in &[1usize, 4] {
+        let engine = cached_engine(&rt, EngineShape::Uniform, corpus_n, segment_count);
+
+        // Sanity probe: the sorted search must return hits.
+        let probe = rt.block_on(async {
+            let query = Box::new(TermQuery::new("body", "programming"));
+            let request = SearchRequestBuilder::new()
+                .lexical_query(LexicalSearchQuery::Obj(query))
+                .sort_by(SortField::Field {
+                    name: "year".into(),
+                    order: SortOrder::Desc,
+                })
+                .limit(10)
+                .build();
+            engine.search(request).await.unwrap()
+        });
+        assert!(
+            !probe.is_empty(),
+            "field_sort probe must return at least one hit (corpus={corpus_n}, segments={segment_count})"
+        );
+
+        let mut group = c.benchmark_group(format!("lexical/field_sort/seg_{segment_count}"));
+        apply_sample_size(&mut group, &[corpus_n]);
+
+        for &limit in &[10, 100] {
+            group.bench_with_input(
+                BenchmarkId::new(format!("corpus_{corpus_n}/top"), limit),
+                &limit,
+                |b, &limit| {
+                    b.to_async(&rt).iter(|| {
+                        let engine = &engine;
+                        async move {
+                            let query = Box::new(TermQuery::new("body", "programming"));
+                            let request = SearchRequestBuilder::new()
+                                .lexical_query(LexicalSearchQuery::Obj(query))
+                                .sort_by(SortField::Field {
+                                    name: "year".into(),
+                                    order: SortOrder::Desc,
+                                })
+                                .limit(limit)
+                                .build();
+                            black_box(engine.search(request).await.unwrap())
+                        }
+                    });
+                },
+            );
+        }
+        group.finish();
+    }
+}
+
 fn bench_boolean_query(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("lexical/boolean_query");
@@ -1181,6 +1245,7 @@ criterion_group!(
     benches,
     bench_term_query,
     bench_term_query_varying_limit,
+    bench_field_sorted_query,
     bench_boolean_query,
     bench_topk_or_skewed_tf,
     bench_topk_or_multi_segment,

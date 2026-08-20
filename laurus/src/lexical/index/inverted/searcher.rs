@@ -506,6 +506,142 @@ impl InvertedIndexSearcher {
         Ok(collector)
     }
 
+    /// Field-sorted per-segment fanout (#944 Phase A).
+    ///
+    /// Runs the query independently on every segment with a per-segment
+    /// [`TopFieldCollector`] (in parallel off-wasm), then re-collects
+    /// the per-segment top-K into a fresh global-reader collector so
+    /// ordering — including the doc-id tie-break — matches the
+    /// single-pass path exactly. The merge re-resolves at most
+    /// `limit × segment_count` DocValues.
+    ///
+    /// `total_hits` sums the per-segment totals: segments partition the
+    /// live documents (tombstoned copies are filtered at posting-decode
+    /// level), so the documented true-match-count contract for
+    /// field-sorted searches is preserved.
+    ///
+    /// The generic [`Self::search_per_segment_fanout`] is deliberately
+    /// not reused: it is gated on `bmw_capable()` and hard-codes a
+    /// per-segment [`TopDocsCollector`], both of which are
+    /// score-competitiveness concepts that do not apply to field sort.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The query to execute on each segment.
+    /// * `field_name` - The sort field.
+    /// * `ascending` - Sort direction.
+    /// * `limit` - Global top-K (also the per-segment K, so the merge
+    ///   can pick any combination of per-segment hits).
+    /// * `min_score` - Minimum score threshold, applied per segment.
+    /// * `deadline` - Optional cooperative deadline, propagated to each
+    ///   per-segment search.
+    ///
+    /// # Returns
+    ///
+    /// The merged, field-ordered hits and the true total match count.
+    fn search_field_sorted_fanout(
+        &self,
+        query: Box<dyn Query>,
+        field_name: &str,
+        ascending: bool,
+        limit: usize,
+        min_score: f32,
+        deadline: Option<Deadline>,
+    ) -> Result<(Vec<SearchHit>, u64)> {
+        let inverted_reader = self
+            .reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .expect("search_field_sorted_fanout requires InvertedIndexReader");
+
+        let global_doc_count = inverted_reader.doc_count();
+        let global_max_doc = inverted_reader.max_doc();
+        let global_term_info_fn = {
+            let reader_arc = self.reader.clone();
+            std::sync::Arc::new(
+                move |field: &str,
+                      term: &str|
+                      -> Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+                    reader_arc.term_info(field, term)
+                },
+            )
+        };
+        let global_matching_doc_ids_fn = {
+            let reader_arc = self.reader.clone();
+            std::sync::Arc::new(
+                move |query: &dyn Query| -> Result<Arc<roaring::RoaringTreemap>> {
+                    if let Some(inverted) =
+                        reader_arc.as_any().downcast_ref::<InvertedIndexReader>()
+                    {
+                        inverted.matching_doc_ids(query)
+                    } else {
+                        let matcher = query.matcher(reader_arc.as_ref())?;
+                        Ok(Arc::new(
+                            crate::lexical::index::inverted::query_cache::drain_matcher(matcher)?,
+                        ))
+                    }
+                },
+            )
+        };
+
+        let segments = inverted_reader.segment_readers().to_vec();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let segment_iter = segments.par_iter();
+        #[cfg(target_arch = "wasm32")]
+        let segment_iter = segments.iter();
+
+        let per_segment_results: Vec<Result<(Vec<SearchHit>, u64)>> = segment_iter
+            .map(|seg_arc| -> Result<(Vec<SearchHit>, u64)> {
+                let view = PerSegmentReaderView::new(
+                    seg_arc.clone(),
+                    global_doc_count,
+                    global_max_doc,
+                    global_term_info_fn.clone(),
+                    global_matching_doc_ids_fn.clone(),
+                );
+                let view_reader: Arc<dyn LexicalIndexReader> = Arc::new(view);
+                let temp_searcher = InvertedIndexSearcher::from_arc(view_reader);
+                let temp_collector = TopFieldCollector::with_min_score(
+                    limit,
+                    min_score,
+                    field_name.to_string(),
+                    ascending,
+                    temp_searcher.reader.as_ref(),
+                );
+                let collected = temp_searcher.search_with_collector_deadline(
+                    query.clone_box(),
+                    temp_collector,
+                    false,
+                    deadline,
+                )?;
+                Ok((collected.results(), collected.total_hits()))
+            })
+            .collect();
+
+        // Merge: re-collect the per-segment top-K into a global-reader
+        // collector (same comparator + doc-id tie-break as the
+        // single-pass path). `min_score` was already applied per
+        // segment, and scores are unchanged, so re-applying it here is
+        // a no-op either way.
+        let mut merged = TopFieldCollector::with_min_score(
+            limit,
+            min_score,
+            field_name.to_string(),
+            ascending,
+            self.reader.as_ref(),
+        );
+        let mut total_hits = 0u64;
+        for seg_result in per_segment_results {
+            let (seg_hits, seg_total) = seg_result?;
+            total_hits += seg_total;
+            for hit in seg_hits {
+                merged.collect(hit.doc_id, hit.score)?;
+            }
+        }
+        Ok((merged.results(), total_hits))
+    }
+
     /// Execute a BooleanQuery with parallel sub-query execution.
     ///
     /// Each clause is executed in parallel, then boolean logic is applied:
@@ -732,24 +868,42 @@ impl InvertedIndexSearcher {
         // Create collector based on sort type
         let (mut hits, total_hits) = match &params.sort_by {
             SortField::Field { name, order } => {
-                // Use TopFieldCollector for field-based sorting
                 let ascending = matches!(order, SortOrder::Asc);
-                let collector = TopFieldCollector::with_min_score(
-                    params.limit,
-                    params.min_score,
-                    name.clone(),
-                    ascending,
-                    self.reader.as_ref(),
-                );
+                if self
+                    .reader
+                    .as_any()
+                    .downcast_ref::<InvertedIndexReader>()
+                    .is_some_and(|r| r.segment_count() >= 2)
+                {
+                    // Multi-segment: per-segment field-sorted fanout
+                    // (#944 Phase A).
+                    self.search_field_sorted_fanout(
+                        query.clone_box(),
+                        name,
+                        ascending,
+                        params.limit,
+                        params.min_score,
+                        deadline,
+                    )?
+                } else {
+                    // Use TopFieldCollector for field-based sorting
+                    let collector = TopFieldCollector::with_min_score(
+                        params.limit,
+                        params.min_score,
+                        name.clone(),
+                        ascending,
+                        self.reader.as_ref(),
+                    );
 
-                let result_collector = self.search_with_collector_deadline(
-                    query.clone_box(),
-                    collector,
-                    params.parallel,
-                    deadline,
-                )?;
+                    let result_collector = self.search_with_collector_deadline(
+                        query.clone_box(),
+                        collector,
+                        params.parallel,
+                        deadline,
+                    )?;
 
-                (result_collector.results(), result_collector.total_hits())
+                    (result_collector.results(), result_collector.total_hits())
+                }
             }
             SortField::Score => {
                 // Use TopDocsCollector for score-based sorting
@@ -848,24 +1002,41 @@ impl InvertedIndexSearcher {
             // Check if we should use field-based sorting during collection
             match &request.params.sort_by {
                 SortField::Field { name, order } => {
-                    // Use TopFieldCollector for field-based sorting
                     let ascending = matches!(order, SortOrder::Asc);
-                    let collector = TopFieldCollector::with_min_score(
-                        request.params.limit,
-                        request.params.min_score,
-                        name.clone(),
-                        ascending,
-                        self.reader.as_ref(),
-                    );
+                    let (mut hits, total_hits) = if self
+                        .reader
+                        .as_any()
+                        .downcast_ref::<InvertedIndexReader>()
+                        .is_some_and(|r| r.segment_count() >= 2)
+                    {
+                        // Multi-segment: per-segment field-sorted fanout
+                        // (#944 Phase A).
+                        self.search_field_sorted_fanout(
+                            query.clone_box(),
+                            name,
+                            ascending,
+                            request.params.limit,
+                            request.params.min_score,
+                            None,
+                        )?
+                    } else {
+                        // Use TopFieldCollector for field-based sorting
+                        let collector = TopFieldCollector::with_min_score(
+                            request.params.limit,
+                            request.params.min_score,
+                            name.clone(),
+                            ascending,
+                            self.reader.as_ref(),
+                        );
 
-                    let result_collector = self.search_with_collector_parallel(
-                        query.clone_box(),
-                        collector,
-                        request.params.parallel,
-                    )?;
+                        let result_collector = self.search_with_collector_parallel(
+                            query.clone_box(),
+                            collector,
+                            request.params.parallel,
+                        )?;
 
-                    let mut hits = result_collector.results();
-                    let total_hits = result_collector.total_hits();
+                        (result_collector.results(), result_collector.total_hits())
+                    };
 
                     // Load documents if requested
                     if request.params.load_documents {
@@ -1577,6 +1748,57 @@ mod tests {
     /// PR-F follow-up #476 Phase 1: a non-`bmw_capable` collector
     /// (here: `CountCollector`) must skip both the BMW fast path and
     /// the per-segment fanout, so multi-segment count queries still
+    /// #944 Phase A prerequisite: the per-segment view must forward
+    /// DocValues access to its segment — with the trait defaults a
+    /// per-segment `TopFieldCollector` would see every doc as `Null`.
+    #[test]
+    fn per_segment_view_forwards_doc_values() {
+        use crate::lexical::core::field::FieldValue;
+        use crate::lexical::index::inverted::per_segment_view::PerSegmentReaderView;
+        use crate::lexical::index::inverted::writer::{
+            InvertedIndexWriter, InvertedIndexWriterConfig,
+        };
+        use crate::lexical::writer::LexicalIndexWriter;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut writer =
+            InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+        writer
+            .add_document(
+                crate::Document::builder()
+                    .add_integer("popularity", 42)
+                    .build(),
+            )
+            .unwrap();
+        writer.commit().unwrap();
+        let reader = writer.build_reader().unwrap();
+        let inverted = reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .unwrap();
+        let seg = inverted.segment_readers()[0].clone();
+
+        let view = PerSegmentReaderView::new(
+            seg,
+            inverted.doc_count(),
+            inverted.max_doc(),
+            std::sync::Arc::new(|_: &str, _: &str| Ok(None)),
+            std::sync::Arc::new(|_: &dyn crate::lexical::query::Query| {
+                Ok(std::sync::Arc::new(RoaringTreemap::new()))
+            }),
+        );
+
+        assert!(
+            view.has_doc_values("popularity"),
+            "view must forward has_doc_values to its segment"
+        );
+        let value = view.get_doc_value("popularity", 0).unwrap();
+        assert!(
+            matches!(value, Some(FieldValue::Int64(42))),
+            "view must forward get_doc_value to its segment; got {value:?}"
+        );
+    }
+
     /// hit the legacy aggregation path.
     #[test]
     fn per_segment_fanout_falls_back_for_count_collector() {

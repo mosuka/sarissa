@@ -854,7 +854,7 @@ impl SegmentReader {
     }
 
     /// Get a DocValues field value for a document.
-    fn get_doc_value(&self, field: &str, doc_id: u64) -> Result<Option<FieldValue>> {
+    pub(crate) fn get_doc_value(&self, field: &str, doc_id: u64) -> Result<Option<FieldValue>> {
         // Mirror `document()`: a soft-deleted doc (e.g. the pre-upsert
         // copy in an older segment) must not surface its stale value
         // through the cross-segment first-hit resolution (#943).
@@ -880,7 +880,7 @@ impl SegmentReader {
     }
 
     /// Check if DocValues are available for a field.
-    fn has_doc_values(&self, field: &str) -> bool {
+    pub(crate) fn has_doc_values(&self, field: &str) -> bool {
         // Load on demand so availability is answered correctly even as
         // the first operation on a fresh reader (#943); previously this
         // reported `false` until something else loaded the cache.
