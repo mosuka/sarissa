@@ -1,7 +1,5 @@
 //! Searcher implementation for executing queries against an index.
 
-use crate::lexical::core::field::FieldValue;
-use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,12 +12,7 @@ use crate::util::time::Timer;
 use rayon::prelude::*;
 
 use crate::analysis::analyzer::standard::StandardAnalyzer;
-use crate::data::DataValue::{
-    Bool as Boolean, Bytes, DateTime, Float64 as Float, Geo, Int64 as Integer, Null, Text,
-};
 use crate::error::{LaurusError, Result};
-// Note: Geo and DateTime were removed from FieldValue definition implicitly by switching to DataValue.
-// Only standard types remain. Logic using Geo/DateTime needs update.
 use crate::lexical::index::inverted::bmw::{BlockMaxOrExecutor, is_bmw_eligible};
 use crate::lexical::index::inverted::parsed_query_cache::ParsedQueryCache;
 use crate::lexical::index::inverted::per_segment_view::PerSegmentReaderView;
@@ -922,85 +915,6 @@ impl InvertedIndexSearcher {
                     })
                 }
             }
-        }
-    }
-
-    /// Sort search hits according to the specified sort field.
-    /// This is the old post-collection sorting approach, kept for compatibility.
-    #[allow(dead_code)]
-    fn sort_hits(&self, hits: &mut [SearchHit], sort_by: &SortField) -> Result<()> {
-        match sort_by {
-            SortField::Score => {
-                // Default behavior: already sorted by score from collector
-                // Re-sort to ensure descending order
-                hits.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
-            }
-            SortField::Field { name, order } => {
-                // Sort by field value
-                hits.sort_unstable_by(|a, b| {
-                    let cmp = self.compare_field_values(a, b, name);
-                    match order {
-                        SortOrder::Asc => cmp,
-                        SortOrder::Desc => cmp.reverse(),
-                    }
-                });
-            }
-        }
-        Ok(())
-    }
-
-    /// Compare two search hits by a specific field value.
-    #[allow(dead_code)]
-    fn compare_field_values(&self, a: &SearchHit, b: &SearchHit, field_name: &str) -> Ordering {
-        let val_a = a.document.as_ref().and_then(|doc| doc.get(field_name));
-        let val_b = b.document.as_ref().and_then(|doc| doc.get(field_name));
-
-        match (val_a, val_b) {
-            (Some(a_val), Some(b_val)) => self.compare_values(a_val, b_val),
-            (Some(_), None) => Ordering::Less, // Documents with value come first
-            (None, Some(_)) => Ordering::Greater, // Documents without value come last
-            (None, None) => Ordering::Equal,
-        }
-    }
-
-    /// Compare two field values.
-    #[allow(dead_code)]
-    fn compare_values(&self, a: &FieldValue, b: &FieldValue) -> Ordering {
-        match (a, b) {
-            // Same type comparisons
-            (Text(a_str), Text(b_str)) => a_str.cmp(b_str),
-            (Integer(a_int), Integer(b_int)) => a_int.cmp(b_int),
-            (Float(a_float), Float(b_float)) => a_float.total_cmp(b_float),
-            (Boolean(a_bool), Boolean(b_bool)) => a_bool.cmp(b_bool),
-            (DateTime(a_dt), DateTime(b_dt)) => a_dt.cmp(b_dt),
-            (Geo(a), Geo(b)) => a
-                .lat
-                .total_cmp(&b.lat)
-                .then_with(|| a.lon.total_cmp(&b.lon)),
-            (Bytes(_, a_bytes), Bytes(_, b_bytes)) => a_bytes.cmp(b_bytes),
-            (Null, Null) => Ordering::Equal,
-
-            // Mixed types ordering precedence
-            // Null < Bool < Int < Float < Text < Bytes
-            (Null, _) => Ordering::Less,
-            (_, Null) => Ordering::Greater,
-
-            (Boolean(_), _) => Ordering::Less,
-            (_, Boolean(_)) => Ordering::Greater,
-
-            (Integer(_), _) => Ordering::Less,
-            (_, Integer(_)) => Ordering::Greater,
-
-            (Float(_), _) => Ordering::Less,
-            (_, Float(_)) => Ordering::Greater,
-
-            (Text(_), _) => Ordering::Less,
-            (_, Text(_)) => Ordering::Greater,
-
-            (Bytes(_, _), _) => Ordering::Less,
-            (_, Bytes(_, _)) => Ordering::Greater,
-
-            _ => Ordering::Equal, // Fallback
         }
     }
 
