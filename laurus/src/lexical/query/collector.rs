@@ -293,6 +293,14 @@ impl PartialOrd for FieldScoredDoc {
 /// `Null` always sorts greatest (last in ascending order), independent
 /// of sort direction; direction is applied by the caller via
 /// [`Ordering::reverse`].
+///
+/// Mixed-type pairs (#945): `Int64` vs `Float64` compare numerically —
+/// a dynamic-schema field can store `42` and `42.5` as different
+/// variants, and a type-priority order would be numerically wrong for
+/// them. Every other mixed pair orders by [`sort_type_rank`], a
+/// deterministic type precedence. Same-rank pairs without a per-type
+/// comparison (e.g. two arrays) compare `Equal`; the caller's doc-id
+/// tie-break keeps the final order deterministic.
 fn compare_sort_key(
     a: &crate::lexical::core::field::FieldValue,
     b: &crate::lexical::core::field::FieldValue,
@@ -306,6 +314,8 @@ fn compare_sort_key(
         (FieldValue::Text(a), FieldValue::Text(b)) => a.cmp(b),
         (FieldValue::Int64(a), FieldValue::Int64(b)) => a.cmp(b),
         (FieldValue::Float64(a), FieldValue::Float64(b)) => a.total_cmp(b),
+        (FieldValue::Int64(a), FieldValue::Float64(b)) => (*a as f64).total_cmp(b),
+        (FieldValue::Float64(a), FieldValue::Int64(b)) => a.total_cmp(&(*b as f64)),
         (FieldValue::Bool(a), FieldValue::Bool(b)) => a.cmp(b),
         (FieldValue::DateTime(a), FieldValue::DateTime(b)) => a.cmp(b),
         (FieldValue::Geo(a), FieldValue::Geo(b)) => a
@@ -313,7 +323,31 @@ fn compare_sort_key(
             .total_cmp(&b.lat)
             .then_with(|| a.lon.total_cmp(&b.lon)),
         (FieldValue::Bytes(a, _), FieldValue::Bytes(b, _)) => a.cmp(b),
-        _ => Ordering::Equal,
+        _ => sort_type_rank(a).cmp(&sort_type_rank(b)),
+    }
+}
+
+/// Deterministic precedence for mixed-type sort-key pairs (#945):
+/// `Bool < numeric < DateTime < Text < Geo < GeoEcef < Bytes < Vector <
+/// Int64Array < Float64Array`. `Null` never reaches this (handled first
+/// in [`compare_sort_key`]); `Int64` and `Float64` share a rank because
+/// they compare numerically instead. Exhaustive on purpose: adding a
+/// `FieldValue` variant must force a rank decision here.
+fn sort_type_rank(v: &crate::lexical::core::field::FieldValue) -> u8 {
+    use crate::lexical::core::field::FieldValue;
+
+    match v {
+        FieldValue::Null => 0,
+        FieldValue::Bool(_) => 1,
+        FieldValue::Int64(_) | FieldValue::Float64(_) => 2,
+        FieldValue::DateTime(_) => 3,
+        FieldValue::Text(_) => 4,
+        FieldValue::Geo(_) => 5,
+        FieldValue::GeoEcef(_) => 6,
+        FieldValue::Bytes(_, _) => 7,
+        FieldValue::Vector(_) => 8,
+        FieldValue::Int64Array(_) => 9,
+        FieldValue::Float64Array(_) => 10,
     }
 }
 
@@ -1091,5 +1125,82 @@ mod tests {
         assert_eq!(collector.total_hits(), 0);
         assert_eq!(collector.results().len(), 0);
         assert!(collector.needs_more());
+    }
+
+    /// #945: `Int64` and `Float64` for the same sort field (dynamic
+    /// schema can store `42` and `42.5` as different variants) must
+    /// compare numerically, not fall to the mixed-type fallback.
+    #[test]
+    fn sort_key_compares_int_and_float_numerically() {
+        use crate::lexical::core::field::FieldValue;
+
+        assert_eq!(
+            compare_sort_key(&FieldValue::Int64(1), &FieldValue::Float64(2.5)),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_sort_key(&FieldValue::Float64(2.5), &FieldValue::Int64(3)),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_sort_key(&FieldValue::Float64(3.5), &FieldValue::Int64(3)),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_sort_key(&FieldValue::Int64(2), &FieldValue::Float64(2.0)),
+            Ordering::Equal
+        );
+    }
+
+    /// #945: mixed non-numeric type pairs must order by a deterministic
+    /// type rank instead of collapsing to `Equal`.
+    #[test]
+    fn sort_key_orders_mixed_types_by_rank() {
+        use crate::lexical::core::field::FieldValue;
+
+        // numeric < Text
+        assert_eq!(
+            compare_sort_key(&FieldValue::Int64(999), &FieldValue::Text("a".into())),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_sort_key(&FieldValue::Text("a".into()), &FieldValue::Float64(999.0)),
+            Ordering::Greater
+        );
+        // Bool < numeric
+        assert_eq!(
+            compare_sort_key(&FieldValue::Bool(true), &FieldValue::Int64(0)),
+            Ordering::Less
+        );
+        // Text < Bytes
+        assert_eq!(
+            compare_sort_key(
+                &FieldValue::Text("z".into()),
+                &FieldValue::Bytes(vec![0], None)
+            ),
+            Ordering::Less
+        );
+    }
+
+    /// #945: the documented `Null`-sorts-greatest contract (#608) must
+    /// hold against mixed types too.
+    #[test]
+    fn sort_key_null_stays_greatest() {
+        use crate::lexical::core::field::FieldValue;
+
+        for other in [
+            FieldValue::Bool(true),
+            FieldValue::Int64(i64::MAX),
+            FieldValue::Float64(f64::INFINITY),
+            FieldValue::Text("zzz".into()),
+            FieldValue::Bytes(vec![255], None),
+        ] {
+            assert_eq!(
+                compare_sort_key(&FieldValue::Null, &other),
+                Ordering::Greater,
+                "Null must sort greatest vs {other:?}"
+            );
+            assert_eq!(compare_sort_key(&other, &FieldValue::Null), Ordering::Less);
+        }
     }
 }
