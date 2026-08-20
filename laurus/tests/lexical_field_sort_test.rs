@@ -172,3 +172,133 @@ fn field_sort_with_min_score() {
     );
     assert_eq!(included, vec![9, 8, 7]);
 }
+
+/// #943: a doc upserted across a segment boundary must sort by its NEW
+/// field value. The tombstoned pre-upsert copy's DocValues entry in the
+/// older segment used to shadow it (segments are scanned oldest-first
+/// with no `is_deleted` check).
+#[test]
+fn field_sort_reflects_upserted_value_across_segments() {
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let config = LexicalIndexConfig::builder().max_segments(1000).build();
+    let store = LexicalStore::new(storage, config).unwrap();
+
+    // Segment 1: doc 1 with the soon-to-be-stale value + doc 2.
+    store.upsert_document(1, doc(10)).unwrap();
+    store.upsert_document(2, doc(50)).unwrap();
+    store.commit().unwrap();
+    // Segment 2: doc 1 upserted with a new value + doc 3.
+    store.upsert_document(1, doc(99)).unwrap();
+    store.upsert_document(3, doc(20)).unwrap();
+    store.commit().unwrap();
+
+    let query: Box<dyn Query> = Box::new(TermQuery::new("body", "alpha"));
+    let ids = field_sorted_ids(
+        &store,
+        LexicalSearchRequest::new(query)
+            .limit(3)
+            .sort_by_field_desc("popularity"),
+    );
+
+    assert_eq!(
+        ids,
+        vec![1, 2, 3],
+        "doc 1 must sort by its upserted value (99), not the stale 10"
+    );
+}
+
+/// Storage decorator counting `open_input` calls on `.dv` files, so a
+/// test can assert DocValues are loaded once per segment rather than
+/// once per `get_doc_value` call (#943; same pattern as #995's
+/// stored-documents gate).
+#[derive(Debug)]
+struct DvOpenCountingStorage {
+    inner: Arc<dyn Storage>,
+    dv_opens: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Storage for DvOpenCountingStorage {
+    fn open_input(&self, name: &str) -> laurus::Result<Box<dyn laurus::storage::StorageInput>> {
+        if name.ends_with(".dv") {
+            self.dv_opens
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.inner.open_input(name)
+    }
+    fn create_output(&self, name: &str) -> laurus::Result<Box<dyn laurus::storage::StorageOutput>> {
+        self.inner.create_output(name)
+    }
+    fn create_output_append(
+        &self,
+        name: &str,
+    ) -> laurus::Result<Box<dyn laurus::storage::StorageOutput>> {
+        self.inner.create_output_append(name)
+    }
+    fn delete_file(&self, name: &str) -> laurus::Result<()> {
+        self.inner.delete_file(name)
+    }
+    fn file_exists(&self, name: &str) -> bool {
+        self.inner.file_exists(name)
+    }
+    fn list_files(&self) -> laurus::Result<Vec<String>> {
+        self.inner.list_files()
+    }
+    fn file_size(&self, name: &str) -> laurus::Result<u64> {
+        self.inner.file_size(name)
+    }
+    fn rename_file(&self, from: &str, to: &str) -> laurus::Result<()> {
+        self.inner.rename_file(from, to)
+    }
+    fn metadata(&self, name: &str) -> laurus::Result<laurus::storage::FileMetadata> {
+        self.inner.metadata(name)
+    }
+    fn create_temp_output(
+        &self,
+        prefix: &str,
+    ) -> laurus::Result<(String, Box<dyn laurus::storage::StorageOutput>)> {
+        self.inner.create_temp_output(prefix)
+    }
+    fn sync(&self) -> laurus::Result<()> {
+        self.inner.sync()
+    }
+    fn close(&mut self) -> laurus::Result<()> {
+        Ok(())
+    }
+}
+
+/// #943: repeated field-sorted searches must load each segment's `.dv`
+/// file once — not re-parse it on every per-hit `get_doc_value` call.
+#[test]
+fn doc_values_load_once_per_segment() {
+    let dv_opens = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let storage: Arc<dyn Storage> = Arc::new(DvOpenCountingStorage {
+        inner: Arc::new(MemoryStorage::new(MemoryStorageConfig::default())),
+        dv_opens: dv_opens.clone(),
+    });
+    let config = LexicalIndexConfig::builder().max_segments(1000).build();
+    let store = LexicalStore::new(storage, config).unwrap();
+
+    store.upsert_document(1, doc(10)).unwrap();
+    store.upsert_document(2, doc(50)).unwrap();
+    store.commit().unwrap();
+    store.upsert_document(3, doc(99)).unwrap();
+    store.upsert_document(4, doc(20)).unwrap();
+    store.commit().unwrap();
+
+    for _ in 0..2 {
+        let query: Box<dyn Query> = Box::new(TermQuery::new("body", "alpha"));
+        let ids = field_sorted_ids(
+            &store,
+            LexicalSearchRequest::new(query)
+                .limit(4)
+                .sort_by_field_desc("popularity"),
+        );
+        assert_eq!(ids, vec![3, 2, 4, 1]);
+    }
+
+    assert_eq!(
+        dv_opens.load(std::sync::atomic::Ordering::Relaxed),
+        2,
+        ".dv must be loaded once per segment, not per get_doc_value call"
+    );
+}
