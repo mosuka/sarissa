@@ -751,6 +751,23 @@ impl UnifiedDocumentStore {
             }
         }
 
+        // Then the LRU cache, under a single lock for the whole batch
+        // rather than one lock per document as `get_document` takes
+        // (#1010). Without this the batch path bypassed the cache
+        // entirely, so wiring it into the search path would have made
+        // repeated / paginated queries slower.
+        {
+            let mut cache = self.doc_cache.lock();
+            for &doc_id in &id_set {
+                if results.contains_key(&doc_id) {
+                    continue;
+                }
+                if let Some(doc) = cache.get(&doc_id) {
+                    results.insert(doc_id, doc.clone());
+                }
+            }
+        }
+
         // Find remaining IDs not yet resolved.
         let remaining: std::collections::HashSet<u64> = id_set
             .iter()
@@ -762,7 +779,12 @@ impl UnifiedDocumentStore {
             return Ok(results);
         }
 
-        // Batch-load from segments (one file open per segment).
+        // Batch-load from segments (one file open per segment). Segments
+        // are ordered oldest-first and a later one overwrites an earlier
+        // hit, matching `get_document`'s newest-wins resolution (which
+        // reaches the same answer by scanning `.rev()` and taking the
+        // first hit).
+        let mut loaded: HashMap<u64, Document> = HashMap::new();
         for segment in &self.segments {
             let segment_ids: std::collections::HashSet<u64> = remaining
                 .iter()
@@ -775,13 +797,24 @@ impl UnifiedDocumentStore {
 
             if let Some(reader) = self.reader_cache.get(&segment.id) {
                 let batch = reader.get_documents_batch(&segment_ids)?;
-                results.extend(batch);
+                loaded.extend(batch);
             } else {
                 let reader = DocumentSegmentReader::new(self.storage.clone(), segment.clone());
                 let batch = reader.get_documents_batch(&segment_ids)?;
-                results.extend(batch);
+                loaded.extend(batch);
             }
         }
+
+        // Populate the LRU with what we just read, mirroring
+        // `get_document` (#1010), so a repeat of the same query is served
+        // from cache.
+        if !loaded.is_empty() {
+            let mut cache = self.doc_cache.lock();
+            for (doc_id, doc) in &loaded {
+                cache.put(*doc_id, doc.clone());
+            }
+        }
+        results.extend(loaded);
 
         Ok(results)
     }

@@ -1581,19 +1581,33 @@ impl Engine {
         Ok(docs)
     }
 
-    /// Check if a field should be stored based on the schema.
+    /// Check if a field should be stored, decided against an
+    /// already-acquired schema guard.
     ///
     /// - `_id`: always stored (system field)
     /// - Lexical fields: stored only if `stored=true`
     /// - Vector fields: always stored
     /// - Unknown fields: not stored
-    fn is_field_stored(&self, name: &str) -> bool {
+    ///
+    /// Takes the guard rather than locking internally so callers that
+    /// test many fields (i.e. [`Self::filter_stored_fields`] and the
+    /// search-result resolver, which run once per returned hit) acquire
+    /// the schema lock once instead of once per field (#1010).
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - The already-locked schema.
+    /// * `name` - The field name to test.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the field's value is kept in the document store.
+    fn is_field_stored_in(schema: &Schema, name: &str) -> bool {
         use crate::engine::schema::FieldOption;
 
         if name == "_id" {
             return true;
         }
-        let schema = self.schema.read();
         if let Some(field_opt) = schema.fields.get(name) {
             match field_opt {
                 FieldOption::Text(o) => o.stored,
@@ -1617,9 +1631,12 @@ impl Engine {
     /// The document log (WAL) stores ALL fields for recovery, but the
     /// document store only keeps stored fields to save space.
     fn filter_stored_fields(&self, doc: &Document) -> Document {
+        // One schema lock for the whole document, not one per field
+        // (#1010): this runs once per returned search hit.
+        let schema = self.schema.read();
         let mut stored_doc = Document::new();
         for (name, val) in &doc.fields {
-            if self.is_field_stored(name) {
+            if Self::is_field_stored_in(&schema, name) {
                 stored_doc.fields.insert(name.clone(), val.clone());
             }
         }
@@ -1655,19 +1672,36 @@ impl Engine {
         &self,
         internal_ids: &[u64],
     ) -> Result<HashMap<u64, (String, Option<Document>)>> {
+        // One batched store call instead of one lookup per id (#1010):
+        // the store opens each segment file once and seeks in offset
+        // order, and consults / populates the document cache for the
+        // whole batch under a single lock.
+        let mut fetched = self.log.get_documents_batch(internal_ids)?;
+
+        // One schema lock for every document in the batch, rather than
+        // one per field per document (#1010).
+        let schema = self.schema.read();
         let mut results = HashMap::with_capacity(internal_ids.len());
         for &id in internal_ids {
-            if let Some(doc) = self.log.get_document(id)? {
-                let external_id = doc
-                    .fields
-                    .get("_id")
-                    .and_then(|v| v.as_text())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("unknown_{}", id));
-                let filtered = self.filter_stored_fields(&doc);
-                results.insert(id, (external_id, Some(filtered)));
-            } else {
-                results.insert(id, (format!("unknown_{}", id), None));
+            match fetched.remove(&id) {
+                Some(doc) => {
+                    let external_id = doc
+                        .fields
+                        .get("_id")
+                        .and_then(|v| v.as_text())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("unknown_{}", id));
+                    let mut filtered = Document::new();
+                    for (name, val) in doc.fields {
+                        if Self::is_field_stored_in(&schema, &name) {
+                            filtered.fields.insert(name, val);
+                        }
+                    }
+                    results.insert(id, (external_id, Some(filtered)));
+                }
+                None => {
+                    results.insert(id, (format!("unknown_{}", id), None));
+                }
             }
         }
         Ok(results)
@@ -2258,14 +2292,18 @@ impl Engine {
                 .take(request_limit)
                 .collect();
             let ids: Vec<u64> = paginated.iter().map(|h| h.doc_id).collect();
-            let resolved = self.resolve_ids_and_documents_batch(&ids)?;
+            let mut resolved = self.resolve_ids_and_documents_batch(&ids)?;
             let mut results = Vec::with_capacity(paginated.len());
             for hit in paginated {
-                if let Some((external_id, document)) = resolved.get(&hit.doc_id) {
+                // `remove` moves the id and document out instead of
+                // cloning them per hit (#1010). Hits carry distinct doc
+                // ids — they come from a collector's top-K — so no entry
+                // is needed twice.
+                if let Some((external_id, document)) = resolved.remove(&hit.doc_id) {
                     results.push(SearchResult {
-                        id: external_id.clone(),
+                        id: external_id,
                         score: hit.score,
-                        document: document.clone(),
+                        document,
                     });
                 }
             }
@@ -2278,14 +2316,18 @@ impl Engine {
                 .take(request_limit)
                 .collect();
             let ids: Vec<u64> = paginated.iter().map(|h| h.doc_id).collect();
-            let resolved = self.resolve_ids_and_documents_batch(&ids)?;
+            let mut resolved = self.resolve_ids_and_documents_batch(&ids)?;
             let mut results = Vec::with_capacity(paginated.len());
             for hit in paginated {
-                if let Some((external_id, document)) = resolved.get(&hit.doc_id) {
+                // `remove` moves the id and document out instead of
+                // cloning them per hit (#1010). Hits carry distinct doc
+                // ids — they come from a collector's top-K — so no entry
+                // is needed twice.
+                if let Some((external_id, document)) = resolved.remove(&hit.doc_id) {
                     results.push(SearchResult {
-                        id: external_id.clone(),
+                        id: external_id,
                         score: hit.score,
-                        document: document.clone(),
+                        document,
                     });
                 }
             }
@@ -2391,20 +2433,23 @@ impl Engine {
         // Collect IDs that need resolution (either missing external ID or
         // missing document).
         let ids_to_resolve: Vec<u64> = intermediate.iter().map(|(doc_id, _, _)| *doc_id).collect();
-        let resolved = self.resolve_ids_and_documents_batch(&ids_to_resolve)?;
+        let mut resolved = self.resolve_ids_and_documents_batch(&ids_to_resolve)?;
 
         let mut results = Vec::with_capacity(intermediate.len());
         for (doc_id, score, document) in intermediate {
-            if let Some((external_id, resolved_doc)) = resolved.get(&doc_id) {
+            // `remove` moves the id and document out instead of cloning
+            // them per hit (#1010); the fused map is keyed by doc id, so
+            // each entry is wanted exactly once.
+            if let Some((external_id, resolved_doc)) = resolved.remove(&doc_id) {
                 // Prefer the document already fetched by the lexical search;
                 // fall back to the batch-resolved copy.
                 let final_doc = if document.is_some() {
                     document
                 } else {
-                    resolved_doc.clone()
+                    resolved_doc
                 };
                 results.push(SearchResult {
-                    id: external_id.clone(),
+                    id: external_id,
                     score,
                     document: final_doc,
                 });

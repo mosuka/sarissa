@@ -2156,4 +2156,87 @@ mod tests {
              alongside the retained tail"
         );
     }
+
+    /// #1010: the batch fetch must agree with N individual fetches,
+    /// including the newest-wins resolution when the same doc id exists
+    /// in several committed segments (`get_document` scans segments in
+    /// reverse and takes the first hit; the batch path scans forward and
+    /// overwrites — both must land on the newest copy).
+    #[test]
+    fn get_documents_batch_matches_individual_gets() {
+        let log = make_log();
+
+        let body = |t: &str| {
+            Document::builder()
+                .add_field("body", DataValue::Text(t.to_string()))
+                .build()
+        };
+
+        // Segment 1: docs 1 and 2.
+        log.store_document(1, body("one-old"));
+        log.store_document(2, body("two"));
+        log.commit_documents().unwrap();
+        // Segment 2: doc 1 superseded, doc 3 added.
+        log.store_document(1, body("one-new"));
+        log.store_document(3, body("three"));
+        log.commit_documents().unwrap();
+
+        let ids = [1u64, 2, 3, 999];
+        let batch = log.get_documents_batch(&ids).unwrap();
+
+        for id in ids {
+            let single = log.get_document(id).unwrap();
+            assert_eq!(
+                batch.get(&id).map(|d| d.fields.get("body")),
+                single.as_ref().map(|d| d.fields.get("body")),
+                "batch and single fetch must agree for doc {id}"
+            );
+        }
+        assert_eq!(
+            batch.get(&1).unwrap().fields.get("body"),
+            Some(&DataValue::Text("one-new".to_string())),
+            "the newest copy must win across segments"
+        );
+        assert!(!batch.contains_key(&999), "missing ids must be absent");
+    }
+
+    /// #1010: the batch path now populates and reads the document cache.
+    /// A doc superseded after being cached must still resolve to its new
+    /// content — i.e. the cache stays coherent.
+    #[test]
+    fn get_documents_batch_stays_coherent_after_update() {
+        let log = make_log();
+
+        let body = |t: &str| {
+            Document::builder()
+                .add_field("body", DataValue::Text(t.to_string()))
+                .build()
+        };
+
+        log.store_document(1, body("before"));
+        log.commit_documents().unwrap();
+
+        // Warm the cache through the batch path.
+        let warm = log.get_documents_batch(&[1]).unwrap();
+        assert_eq!(
+            warm.get(&1).unwrap().fields.get("body"),
+            Some(&DataValue::Text("before".to_string()))
+        );
+
+        // Supersede it and re-fetch: the stale cached copy must not win.
+        log.store_document(1, body("after"));
+        log.commit_documents().unwrap();
+
+        let refetched = log.get_documents_batch(&[1]).unwrap();
+        assert_eq!(
+            refetched.get(&1).unwrap().fields.get("body"),
+            Some(&DataValue::Text("after".to_string())),
+            "the batch path must not serve a stale cached document"
+        );
+        // And the single-document path must agree.
+        assert_eq!(
+            log.get_document(1).unwrap().unwrap().fields.get("body"),
+            Some(&DataValue::Text("after".to_string()))
+        );
+    }
 }
