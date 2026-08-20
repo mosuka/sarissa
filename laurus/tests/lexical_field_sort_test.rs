@@ -108,14 +108,59 @@ fn field_sort_asc_single_segment() {
 fn field_sort_multi_segment() {
     let (store, _storage) = store_with_segments(4);
     let query: Box<dyn Query> = Box::new(TermQuery::new("body", "alpha"));
-    let ids = field_sorted_ids(
+    let results = store
+        .search(
+            LexicalSearchRequest::new(query)
+                .limit(3)
+                .sort_by_field_desc("popularity"),
+        )
+        .unwrap();
+
+    assert_eq!(
+        results.hits.iter().map(|h| h.doc_id).collect::<Vec<_>>(),
+        vec![9, 8, 7]
+    );
+    // #944 Phase A: the per-segment fanout must preserve the documented
+    // true-match-count contract by summing per-segment totals.
+    assert_eq!(
+        results.total_hits, 12,
+        "total_hits must remain the true match count under the fanout"
+    );
+}
+
+/// #944 Phase A: `min_score` must be honored on the multi-segment
+/// fanout path too (per-segment collectors apply it).
+#[test]
+fn field_sort_multi_segment_with_min_score() {
+    let (store, _storage) = store_with_segments(4);
+    let query: Box<dyn Query> = Box::new(TermQuery::new("body", "alpha"));
+
+    let all = store
+        .search(
+            LexicalSearchRequest::new(query.clone_box())
+                .limit(3)
+                .sort_by_field_desc("popularity"),
+        )
+        .unwrap();
+    let uniform_score = all.hits[0].score;
+
+    let excluded = field_sorted_ids(
+        &store,
+        LexicalSearchRequest::new(query.clone_box())
+            .limit(3)
+            .min_score(uniform_score + 1.0)
+            .sort_by_field_desc("popularity"),
+    );
+    assert!(excluded.is_empty());
+
+    let included = field_sorted_ids(
         &store,
         LexicalSearchRequest::new(query)
             .limit(3)
+            .min_score(0.0)
             .sort_by_field_desc("popularity"),
     );
-
-    assert_eq!(ids, vec![9, 8, 7]);
+    assert_eq!(included, vec![9, 8, 7]);
 }
 
 #[test]
