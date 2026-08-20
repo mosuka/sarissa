@@ -855,10 +855,20 @@ impl SegmentReader {
 
     /// Get a DocValues field value for a document.
     fn get_doc_value(&self, field: &str, doc_id: u64) -> Result<Option<FieldValue>> {
-        // Ensure DocValues are loaded (lazy loading)
-        if !self.loaded.load(Ordering::Acquire) {
-            // Try to load if not loaded yet (this is safe for read-only operations after load)
-            self.ensure_loaded()?;
+        // Mirror `document()`: a soft-deleted doc (e.g. the pre-upsert
+        // copy in an older segment) must not surface its stale value
+        // through the cross-segment first-hit resolution (#943).
+        if self.is_deleted(doc_id)? {
+            return Ok(None);
+        }
+
+        // Load once, on demand; the cache itself is the load gate (the
+        // `loaded` flag is only set by the optional bulk `load()` path,
+        // so gating on it re-parsed the whole `.dv` file per call —
+        // #943, same class as #995). A missing `.dv` file loads as an
+        // empty reader, so misses stay O(1).
+        if self.doc_values.read().unwrap().is_none() {
+            self.load_doc_values()?;
         }
 
         let doc_values = self.doc_values.read().unwrap();
@@ -869,19 +879,14 @@ impl SegmentReader {
         }
     }
 
-    /// Ensure the segment is loaded (for lazy loading support)
-    fn ensure_loaded(&self) -> Result<()> {
-        if !self.loaded.load(Ordering::Acquire) {
-            // Load DocValues only (other data loaded on-demand)
-            self.load_doc_values()?;
-            // Note: We don't set loaded=true here to avoid race conditions
-            // Full load should be done via load() method
-        }
-        Ok(())
-    }
-
     /// Check if DocValues are available for a field.
     fn has_doc_values(&self, field: &str) -> bool {
+        // Load on demand so availability is answered correctly even as
+        // the first operation on a fresh reader (#943); previously this
+        // reported `false` until something else loaded the cache.
+        if self.doc_values.read().unwrap().is_none() && self.load_doc_values().is_err() {
+            return false;
+        }
         let doc_values = self.doc_values.read().unwrap();
         if let Some(reader) = doc_values.as_ref() {
             reader.has_field(field)
