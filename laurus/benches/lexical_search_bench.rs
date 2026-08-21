@@ -329,6 +329,7 @@ async fn build_engine_into_storage(
         .add_text_field("body", TextOption::default())
         .add_text_field("category", TextOption::default())
         .add_integer_field("year", IntegerOption::default())
+        .add_integer_field("seq", IntegerOption::default())
         .add_default_field("body")
         .build();
 
@@ -346,6 +347,11 @@ async fn build_engine_into_storage(
             .add_text("body", &body)
             .add_text("category", CATEGORIES[i % CATEGORIES.len()])
             .add_integer("year", 2020 + (i % 5) as i64)
+            // Monotonic with insertion order, so segment-per-commit
+            // leaves each segment a disjoint range — the time-series
+            // shape #944 Phase B's segment pruning targets. `year`
+            // cycles every 5 docs and therefore overlaps everywhere.
+            .add_integer("seq", i as i64)
             .build();
 
         engine.add_document(&i.to_string(), doc).await?;
@@ -388,7 +394,7 @@ impl EngineShape {
 /// `build_body` / `build_body_skewed` synthesis, or laurus's segment
 /// format. Caches written under a stale version are rebuilt
 /// automatically (the helper compares against `.bench_version`).
-const BENCH_INDEX_FORMAT_VERSION: &str = "1";
+const BENCH_INDEX_FORMAT_VERSION: &str = "2";
 
 /// Process-and-cargo-wide cache directory for pre-built indexes.
 /// `target/laurus_bench_index_cache/<shape>_<n>_segs<k>_v<N>/` holds a
@@ -447,6 +453,7 @@ async fn open_persistent_engine(dir: &Path) -> Result<Engine> {
         .add_text_field("body", TextOption::default())
         .add_text_field("category", TextOption::default())
         .add_integer_field("year", IntegerOption::default())
+        .add_integer_field("seq", IntegerOption::default())
         .add_default_field("body")
         .build();
     Engine::builder(storage, schema)
@@ -680,7 +687,7 @@ fn bench_field_sorted_query(c: &mut Criterion) {
         .last()
         .expect("corpus_sizes() must be non-empty");
 
-    for &segment_count in &[1usize, 4] {
+    for &(sort_field, segment_count) in &[("year", 1usize), ("year", 4), ("seq", 4)] {
         let engine = cached_engine(&rt, EngineShape::Uniform, corpus_n, segment_count);
 
         // Sanity probe: the sorted search must return hits.
@@ -689,7 +696,7 @@ fn bench_field_sorted_query(c: &mut Criterion) {
             let request = SearchRequestBuilder::new()
                 .lexical_query(LexicalSearchQuery::Obj(query))
                 .sort_by(SortField::Field {
-                    name: "year".into(),
+                    name: sort_field.into(),
                     order: SortOrder::Desc,
                 })
                 .limit(10)
@@ -698,10 +705,12 @@ fn bench_field_sorted_query(c: &mut Criterion) {
         });
         assert!(
             !probe.is_empty(),
-            "field_sort probe must return at least one hit (corpus={corpus_n}, segments={segment_count})"
+            "field_sort probe must return at least one hit (corpus={corpus_n}, field={sort_field}, segments={segment_count})"
         );
 
-        let mut group = c.benchmark_group(format!("lexical/field_sort/seg_{segment_count}"));
+        let mut group = c.benchmark_group(format!(
+            "lexical/field_sort/{sort_field}/seg_{segment_count}"
+        ));
         apply_sample_size(&mut group, &[corpus_n]);
 
         for &limit in &[10, 100] {
@@ -716,7 +725,7 @@ fn bench_field_sorted_query(c: &mut Criterion) {
                             let request = SearchRequestBuilder::new()
                                 .lexical_query(LexicalSearchQuery::Obj(query))
                                 .sort_by(SortField::Field {
-                                    name: "year".into(),
+                                    name: sort_field.into(),
                                     order: SortOrder::Desc,
                                 })
                                 .limit(limit)
