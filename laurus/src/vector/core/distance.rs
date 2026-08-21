@@ -129,14 +129,12 @@ impl DistanceMetric {
         let mut norm_a_sum = f32x8::ZERO;
         let mut norm_b_sum = f32x8::ZERO;
 
-        let chunks_a = a.chunks_exact(8);
-        let chunks_b = b.chunks_exact(8);
-        let rem_a = chunks_a.remainder();
-        let rem_b = chunks_b.remainder();
+        let (chunks_a, rem_a) = a.as_chunks::<8>();
+        let (chunks_b, rem_b) = b.as_chunks::<8>();
 
-        for (ca, cb) in chunks_a.zip(chunks_b) {
-            let va = f32x8::from(ca);
-            let vb = f32x8::from(cb);
+        for (ca, cb) in chunks_a.iter().zip(chunks_b) {
+            let va = f32x8::from(*ca);
+            let vb = f32x8::from(*cb);
             dot_sum += va * vb;
             norm_a_sum += va * va;
             norm_b_sum += vb * vb;
@@ -168,14 +166,12 @@ impl DistanceMetric {
         let mut dot_sum = f32x8::ZERO;
         let mut norm_b_sum = f32x8::ZERO;
 
-        let chunks_a = a.chunks_exact(8);
-        let chunks_b = b.chunks_exact(8);
-        let rem_a = chunks_a.remainder();
-        let rem_b = chunks_b.remainder();
+        let (chunks_a, rem_a) = a.as_chunks::<8>();
+        let (chunks_b, rem_b) = b.as_chunks::<8>();
 
-        for (ca, cb) in chunks_a.zip(chunks_b) {
-            let va = f32x8::from(ca);
-            let vb = f32x8::from(cb);
+        for (ca, cb) in chunks_a.iter().zip(chunks_b) {
+            let va = f32x8::from(*ca);
+            let vb = f32x8::from(*cb);
             dot_sum += va * vb;
             norm_b_sum += vb * vb;
         }
@@ -197,13 +193,11 @@ impl DistanceMetric {
         use wide::f32x8;
 
         let mut sum = f32x8::ZERO;
-        let chunks_a = a.chunks_exact(8);
-        let chunks_b = b.chunks_exact(8);
-        let rem_a = chunks_a.remainder();
-        let rem_b = chunks_b.remainder();
+        let (chunks_a, rem_a) = a.as_chunks::<8>();
+        let (chunks_b, rem_b) = b.as_chunks::<8>();
 
-        for (ca, cb) in chunks_a.zip(chunks_b) {
-            sum += f32x8::from(ca) * f32x8::from(cb);
+        for (ca, cb) in chunks_a.iter().zip(chunks_b) {
+            sum += f32x8::from(*ca) * f32x8::from(*cb);
         }
 
         let mut dot_product: f32 = sum.reduce_add();
@@ -218,13 +212,11 @@ impl DistanceMetric {
         use wide::f32x8;
 
         let mut sum = f32x8::ZERO;
-        let chunks_a = a.chunks_exact(8);
-        let chunks_b = b.chunks_exact(8);
-        let rem_a = chunks_a.remainder();
-        let rem_b = chunks_b.remainder();
+        let (chunks_a, rem_a) = a.as_chunks::<8>();
+        let (chunks_b, rem_b) = b.as_chunks::<8>();
 
-        for (ca, cb) in chunks_a.zip(chunks_b) {
-            let diff = f32x8::from(ca) - f32x8::from(cb);
+        for (ca, cb) in chunks_a.iter().zip(chunks_b) {
+            let diff = f32x8::from(*ca) - f32x8::from(*cb);
             sum += diff * diff;
         }
 
@@ -240,14 +232,12 @@ impl DistanceMetric {
         use wide::f32x8;
 
         let mut sum = f32x8::ZERO;
-        let chunks_a = a.chunks_exact(8);
-        let chunks_b = b.chunks_exact(8);
-        let rem_a = chunks_a.remainder();
-        let rem_b = chunks_b.remainder();
+        let (chunks_a, rem_a) = a.as_chunks::<8>();
+        let (chunks_b, rem_b) = b.as_chunks::<8>();
 
-        for (ca, cb) in chunks_a.zip(chunks_b) {
-            let va = f32x8::from(ca);
-            let vb = f32x8::from(cb);
+        for (ca, cb) in chunks_a.iter().zip(chunks_b) {
+            let va = f32x8::from(*ca);
+            let vb = f32x8::from(*cb);
             sum += (va - vb).abs();
         }
 
@@ -277,10 +267,9 @@ impl DistanceMetric {
             DistanceMetric::Cosine | DistanceMetric::Angular => {
                 use wide::f32x8;
                 let mut sum = f32x8::ZERO;
-                let chunks = query.chunks_exact(8);
-                let rem = chunks.remainder();
+                let (chunks, rem) = query.as_chunks::<8>();
                 for c in chunks {
-                    let v = f32x8::from(c);
+                    let v = f32x8::from(*c);
                     sum += v * v;
                 }
                 let mut s: f32 = sum.reduce_add();

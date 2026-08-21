@@ -3,6 +3,13 @@
 //! Provides HTTP/JSON endpoints that act as a proxy to the gRPC server.
 //! `User Request (HTTP/JSON) → gRPC Gateway (axum) → gRPC Server (tonic) → Engine`
 
+// Handlers reject with axum's own `Response`, the idiomatic rejection
+// shape for this framework. At 128 bytes it trips `result_large_err`
+// (raised to an error by `-D warnings` since Rust 1.98), but the type is
+// axum's, not ours: boxing it would add an allocation to every error
+// path without shrinking anything we control.
+#![allow(clippy::result_large_err)]
+
 mod convert;
 mod document;
 mod error;

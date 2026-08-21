@@ -499,13 +499,11 @@ fn l2_squared_slice(a: &[f32], b: &[f32]) -> f32 {
 
     debug_assert_eq!(a.len(), b.len());
     let mut acc = f32x8::ZERO;
-    let chunks_a = a.chunks_exact(8);
-    let chunks_b = b.chunks_exact(8);
-    let rem_a = chunks_a.remainder();
-    let rem_b = chunks_b.remainder();
+    let (chunks_a, rem_a) = a.as_chunks::<8>();
+    let (chunks_b, rem_b) = b.as_chunks::<8>();
 
-    for (ca, cb) in chunks_a.zip(chunks_b) {
-        let diff = f32x8::from(ca) - f32x8::from(cb);
+    for (ca, cb) in chunks_a.iter().zip(chunks_b) {
+        let diff = f32x8::from(*ca) - f32x8::from(*cb);
         acc += diff * diff;
     }
 

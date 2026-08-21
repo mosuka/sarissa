@@ -12,8 +12,7 @@ pub mod ascii {
         let mut result = Vec::with_capacity(bytes.len());
 
         // Process 8 bytes at a time for better cache efficiency
-        let chunks = bytes.chunks_exact(8);
-        let remainder = chunks.remainder();
+        let (chunks, remainder) = bytes.as_chunks::<8>();
 
         for chunk in chunks {
             let mut processed = [0u8; 8];
@@ -65,11 +64,10 @@ pub mod ascii {
             return input.iter().position(|&b| b.is_ascii_whitespace());
         }
 
-        let mut chunks = input.chunks_exact(8);
-        let remainder = chunks.remainder();
+        let (chunks, remainder) = input.as_chunks::<8>();
         let mut chunk_idx = 0;
 
-        for chunk in &mut chunks {
+        for chunk in chunks {
             for (byte_idx, &byte) in chunk.iter().enumerate() {
                 if byte == b' ' || byte == b'\t' || byte == b'\n' || byte == b'\r' {
                     return Some(chunk_idx * 8 + byte_idx);
@@ -115,13 +113,12 @@ pub mod numeric {
         let k1_plus_1 = f32x8::splat(k1 + 1.0);
         let k1_vec = f32x8::splat(k1);
 
-        let tf_chunks = term_freqs.chunks_exact(8);
-        let norm_chunks = norm_factors.chunks_exact(8);
-        let tf_remainder = tf_chunks.remainder();
+        let (tf_chunks, tf_remainder) = term_freqs.as_chunks::<8>();
+        let (norm_chunks, _) = norm_factors.as_chunks::<8>();
 
-        for (tf_chunk, norm_chunk) in tf_chunks.zip(norm_chunks) {
-            let tf = f32x8::from(tf_chunk);
-            let norm = f32x8::from(norm_chunk);
+        for (tf_chunk, norm_chunk) in tf_chunks.iter().zip(norm_chunks) {
+            let tf = f32x8::from(*tf_chunk);
+            let norm = f32x8::from(*norm_chunk);
             // BM25 TF: tf * (k1 + 1) / (tf + k1 * norm)
             let numerator = tf * k1_plus_1;
             let denominator = tf + k1_vec * norm;
@@ -160,15 +157,16 @@ pub mod numeric {
         let len = tf_scores.len();
         let mut results = Vec::with_capacity(len);
 
-        let tf_chunks = tf_scores.chunks_exact(8);
-        let idf_chunks = idf_scores.chunks_exact(8);
-        let boost_chunks = boosts.chunks_exact(8);
-        let tf_remainder = tf_chunks.remainder();
+        let (tf_chunks, tf_remainder) = tf_scores.as_chunks::<8>();
+        let (idf_chunks, _) = idf_scores.as_chunks::<8>();
+        let (boost_chunks, _) = boosts.as_chunks::<8>();
 
-        for ((tf_chunk, idf_chunk), boost_chunk) in tf_chunks.zip(idf_chunks).zip(boost_chunks) {
-            let tf = f32x8::from(tf_chunk);
-            let idf = f32x8::from(idf_chunk);
-            let boost = f32x8::from(boost_chunk);
+        for ((tf_chunk, idf_chunk), boost_chunk) in
+            tf_chunks.iter().zip(idf_chunks).zip(boost_chunks)
+        {
+            let tf = f32x8::from(*tf_chunk);
+            let idf = f32x8::from(*idf_chunk);
+            let boost = f32x8::from(*boost_chunk);
             let result = idf * tf * boost;
             results.extend_from_slice(&result.to_array());
         }

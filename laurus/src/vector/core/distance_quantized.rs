@@ -269,11 +269,9 @@ pub fn dot_u8_to_i32(a: &[u8], b: &[u8]) -> i32 {
 pub fn dot_u8_to_i32_scalar(a: &[u8], b: &[u8]) -> i32 {
     debug_assert_eq!(a.len(), b.len());
     let mut acc = i32x8::ZERO;
-    let chunks_a = a.chunks_exact(8);
-    let chunks_b = b.chunks_exact(8);
-    let rem_a = chunks_a.remainder();
-    let rem_b = chunks_b.remainder();
-    for (ca, cb) in chunks_a.zip(chunks_b) {
+    let (chunks_a, rem_a) = a.as_chunks::<8>();
+    let (chunks_b, rem_b) = b.as_chunks::<8>();
+    for (ca, cb) in chunks_a.iter().zip(chunks_b) {
         let va = i32x8::from([
             ca[0] as i32,
             ca[1] as i32,
@@ -334,11 +332,9 @@ pub fn sq_diff_u8_to_i32(a: &[u8], b: &[u8]) -> i32 {
 pub fn sq_diff_u8_to_i32_scalar(a: &[u8], b: &[u8]) -> i32 {
     debug_assert_eq!(a.len(), b.len());
     let mut acc = i32x8::ZERO;
-    let chunks_a = a.chunks_exact(8);
-    let chunks_b = b.chunks_exact(8);
-    let rem_a = chunks_a.remainder();
-    let rem_b = chunks_b.remainder();
-    for (ca, cb) in chunks_a.zip(chunks_b) {
+    let (chunks_a, rem_a) = a.as_chunks::<8>();
+    let (chunks_b, rem_b) = b.as_chunks::<8>();
+    for (ca, cb) in chunks_a.iter().zip(chunks_b) {
         let va = i32x8::from([
             ca[0] as i32,
             ca[1] as i32,
@@ -400,11 +396,9 @@ pub fn abs_diff_u8_to_i32(a: &[u8], b: &[u8]) -> i32 {
 pub fn abs_diff_u8_to_i32_scalar(a: &[u8], b: &[u8]) -> i32 {
     debug_assert_eq!(a.len(), b.len());
     let mut acc = i32x8::ZERO;
-    let chunks_a = a.chunks_exact(8);
-    let chunks_b = b.chunks_exact(8);
-    let rem_a = chunks_a.remainder();
-    let rem_b = chunks_b.remainder();
-    for (ca, cb) in chunks_a.zip(chunks_b) {
+    let (chunks_a, rem_a) = a.as_chunks::<8>();
+    let (chunks_b, rem_b) = b.as_chunks::<8>();
+    for (ca, cb) in chunks_a.iter().zip(chunks_b) {
         let va = i32x8::from([
             ca[0] as i32,
             ca[1] as i32,

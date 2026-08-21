@@ -194,8 +194,8 @@ pub fn load_fvecs(
         }
         reader.read_exact(&mut vec_buf)?;
         let mut v = Vec::with_capacity(dim);
-        for chunk in vec_buf.chunks_exact(4) {
-            v.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+        for chunk in vec_buf.as_chunks::<4>().0 {
+            v.push(f32::from_le_bytes(*chunk));
         }
         out.push(v);
         if let Some(cap) = max
