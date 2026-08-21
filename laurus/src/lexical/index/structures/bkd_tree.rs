@@ -42,6 +42,30 @@ pub trait BKDTree: Send + Sync + std::fmt::Debug {
     ///   via `visit` so the visitor can perform the final per-point check.
     fn intersect(&self, visitor: &mut dyn IntersectVisitor) -> Result<()>;
 
+    /// This tree's global value range on dimension `dim`, plus the
+    /// number of points it covers, without walking the tree.
+    ///
+    /// Returns `(min, max, total_point_count)`. Implementations that
+    /// cannot answer cheaply return `None`, and callers must then treat
+    /// the range as unknown — the default does exactly that (#944).
+    ///
+    /// The range covers every point written at flush time, including
+    /// those of documents deleted since, so it is a superset of the live
+    /// values. Callers using it to prune therefore only ever fail to
+    /// prune; they never prune something that could have matched.
+    ///
+    /// # Arguments
+    ///
+    /// * `dim` - Zero-based dimension index.
+    ///
+    /// # Returns
+    ///
+    /// `Some((min, max, total_point_count))` when known, else `None`.
+    fn value_range(&self, dim: usize) -> Option<(f64, f64, u64)> {
+        let _ = dim;
+        None
+    }
+
     /// Axis-aligned range search returning the matching doc ids in sorted
     /// and deduplicated order.
     ///
@@ -859,6 +883,18 @@ impl IntersectScratch {
 }
 
 impl BKDTree for BKDReader {
+    fn value_range(&self, dim: usize) -> Option<(f64, f64, u64)> {
+        // The global AABB is computed at write time and parsed with the
+        // header at `open`, so this costs nothing beyond two indexed
+        // reads (#944).
+        if self.header.total_point_count == 0 {
+            return None;
+        }
+        let min = *self.header.min_values.get(dim)?;
+        let max = *self.header.max_values.get(dim)?;
+        Some((min, max, self.header.total_point_count))
+    }
+
     fn intersect(&self, visitor: &mut dyn IntersectVisitor) -> Result<()> {
         if self.header.total_point_count == 0 {
             return Ok(());

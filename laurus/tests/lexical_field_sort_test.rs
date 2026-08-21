@@ -347,3 +347,95 @@ fn doc_values_load_once_per_segment() {
         ".dv must be loaded once per segment, not per get_doc_value call"
     );
 }
+
+/// #944 Phase B: with time-series-shaped data (each commit's values
+/// strictly newer than the previous), segment ranges are disjoint and the
+/// lead segment alone fills the top-K — every other segment gets pruned
+/// to a count-only walk. Results, order and the exact `total_hits`
+/// contract must all be unchanged.
+#[test]
+fn field_sort_disjoint_segment_ranges_matches_unpruned() {
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let config = LexicalIndexConfig::builder().max_segments(1000).build();
+    let store = LexicalStore::new(storage, config).unwrap();
+
+    // Six commits, values strictly increasing per commit: doc N has
+    // popularity N, so segment ranges never overlap.
+    for group in 0..6u64 {
+        for offset in 0..4u64 {
+            let id = group * 4 + offset + 1;
+            store.upsert_document(id, doc(id as i64)).unwrap();
+        }
+        store.commit().unwrap();
+    }
+
+    let query: Box<dyn Query> = Box::new(TermQuery::new("body", "alpha"));
+    let results = store
+        .search(
+            LexicalSearchRequest::new(query.clone_box())
+                .limit(3)
+                .sort_by_field_desc("popularity"),
+        )
+        .unwrap();
+    assert_eq!(
+        results.hits.iter().map(|h| h.doc_id).collect::<Vec<_>>(),
+        vec![24, 23, 22],
+        "the newest segment holds the whole answer"
+    );
+    assert_eq!(
+        results.total_hits, 24,
+        "pruned segments must still contribute their exact match count"
+    );
+
+    // Ascending takes the opposite end, exercising the other direction.
+    let asc = store
+        .search(
+            LexicalSearchRequest::new(query)
+                .limit(3)
+                .sort_by_field_asc("popularity"),
+        )
+        .unwrap();
+    assert_eq!(
+        asc.hits.iter().map(|h| h.doc_id).collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert_eq!(asc.total_hits, 24);
+}
+
+/// #944 Phase B: when a document lacks the sort field it sorts as `Null`
+/// (greatest), which a segment's value range cannot bound — descending
+/// pruning must therefore keep such segments and still surface the
+/// `Null` docs last.
+#[test]
+fn field_sort_with_missing_values_across_segments() {
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let config = LexicalIndexConfig::builder().max_segments(1000).build();
+    let store = LexicalStore::new(storage, config).unwrap();
+
+    // Segment 1: high values. Segment 2: low values plus docs with no
+    // `popularity` at all.
+    store.upsert_document(1, doc(90)).unwrap();
+    store.upsert_document(2, doc(91)).unwrap();
+    store.commit().unwrap();
+    store.upsert_document(3, doc(10)).unwrap();
+    store
+        .upsert_document(4, Document::builder().add_text("body", "alpha").build())
+        .unwrap();
+    store.commit().unwrap();
+
+    let query: Box<dyn Query> = Box::new(TermQuery::new("body", "alpha"));
+    let results = store
+        .search(
+            LexicalSearchRequest::new(query)
+                .limit(4)
+                .sort_by_field_desc("popularity"),
+        )
+        .unwrap();
+
+    // Null sorts greatest, so doc 4 leads; the rest descend by value.
+    assert_eq!(
+        results.hits.iter().map(|h| h.doc_id).collect::<Vec<_>>(),
+        vec![4, 2, 1, 3]
+    );
+    assert_eq!(results.total_hits, 4);
+}

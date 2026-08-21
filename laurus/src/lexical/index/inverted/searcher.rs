@@ -41,6 +41,232 @@ const DEFAULT_PARSED_QUERY_CACHE_CAPACITY: usize = 1024;
 /// batched approach as Lucene's `TimeLimitingCollector`).
 const DEADLINE_CHECK_INTERVAL: u64 = 2048;
 
+/// A segment's sort-field value range, read from its BKD header (#944).
+///
+/// `min` / `max` are in the same `f64` space the writer indexed the
+/// points in, so a sort key is compared by converting it the same way
+/// rather than by converting the range back (which would be lossy for
+/// `i64` beyond 2^53 and could prune a segment that should have won).
+#[derive(Debug, Clone, Copy)]
+struct SegmentSortRange {
+    min: f64,
+    max: f64,
+    /// Whether every document in the segment contributes exactly one
+    /// point. When false, some document either lacks the field — and
+    /// therefore sorts as `Null`, i.e. greatest — or is multi-valued, so
+    /// the range cannot bound the segment's greatest key.
+    covers_every_doc: bool,
+}
+
+/// Convert a sort key to the `f64` space the BKD points were written in.
+///
+/// Mirrors the writer's per-type conversions exactly (`Int64 as f64`,
+/// `Float64` verbatim, `DateTime` as epoch seconds), so a comparison
+/// against [`SegmentSortRange`] is consistent. Types that index no point
+/// (text, bool, geo) return `None` and are never pruned.
+///
+/// # Arguments
+///
+/// * `value` - The sort key to convert.
+///
+/// # Returns
+///
+/// The point-space value, or `None` for types without 1-D points.
+fn sort_key_as_point(value: &crate::lexical::core::field::FieldValue) -> Option<f64> {
+    use crate::lexical::core::field::FieldValue;
+
+    match value {
+        FieldValue::Int64(v) => Some(*v as f64),
+        FieldValue::Float64(v) => Some(*v),
+        FieldValue::DateTime(dt) => Some(dt.timestamp() as f64),
+        _ => None,
+    }
+}
+
+/// Whether a segment could still contribute a document that outranks the
+/// current K-th best (#944).
+///
+/// Returns `true` whenever pruning is not provably safe — an unknown
+/// range, an unconvertible floor, or a segment whose range does not cover
+/// every document all keep the segment in full collection.
+///
+/// The comparison is strict: a segment whose best value merely *ties* the
+/// floor is kept, because the doc-id tie-break in
+/// [`compare_sort_key`](crate::lexical::query::collector) could still
+/// rank it ahead. Values that collide under `f64` rounding likewise
+/// compare equal and are kept.
+///
+/// # Arguments
+///
+/// * `range` - The segment's range, or `None` when unknown.
+/// * `floor` - The current K-th best key in point space, or `None` while
+///   fewer than K hits have been collected.
+/// * `ascending` - Sort direction.
+///
+/// # Returns
+///
+/// `false` only when the segment provably cannot beat `floor`.
+fn segment_can_contribute(
+    range: Option<SegmentSortRange>,
+    floor: Option<f64>,
+    ascending: bool,
+) -> bool {
+    let (Some(range), Some(floor)) = (range, floor) else {
+        return true;
+    };
+
+    if ascending {
+        // Smallest first, so the segment's best key is its minimum.
+        // Documents missing the field sort as `Null` (greatest) and are
+        // therefore the worst possible, so the minimum bounds the
+        // segment even when it does not cover every document.
+        range.min <= floor
+    } else {
+        // Largest first. A segment that does not cover every document
+        // may hold a `Null`, which sorts greatest and would outrank
+        // anything, so its maximum cannot bound it.
+        !range.covers_every_doc || range.max >= floor
+    }
+}
+
+/// Index of the segment whose best possible sort key is the strongest,
+/// i.e. the one most likely to fill the top-K on its own (#944).
+///
+/// Only segments with a known range are eligible, so the lead segment
+/// always yields a usable floor when it fills K. Returns `None` when no
+/// segment has a range, in which case nothing can be pruned anyway.
+///
+/// # Arguments
+///
+/// * `ranges` - Per-segment ranges, positionally aligned with the
+///   segment list.
+/// * `ascending` - Sort direction.
+///
+/// # Returns
+///
+/// The index of the most promising segment, or `None`.
+fn best_segment_index(ranges: &[Option<SegmentSortRange>], ascending: bool) -> Option<usize> {
+    ranges
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| r.map(|r| (i, r)))
+        .reduce(|best, cur| {
+            let better = if ascending {
+                cur.1.min < best.1.min
+            } else {
+                cur.1.max > best.1.max
+            };
+            if better { cur } else { best }
+        })
+        .map(|(i, _)| i)
+}
+
+/// Whether any segment could be pruned at all, given the tightest floor
+/// the lead segment can possibly produce (#944).
+///
+/// The floor is the lead segment's K-th best key, which can never be
+/// stronger than the lead segment's own extreme value. Testing every
+/// other segment against that bound therefore answers "could pruning
+/// ever fire here?" before any search runs. The answer is optimistic by
+/// construction — it assumes the tightest floor the lead could possibly
+/// produce — so a `true` here permits the split rather than promising a
+/// prune.
+///
+/// When it cannot — the usual case for a sort field uncorrelated with
+/// segment boundaries, where every segment spans the same range — the
+/// caller skips the two-wave split and collects every segment in
+/// parallel, exactly as it did before this optimization. Uncorrelated
+/// data therefore pays nothing for the serialized lead wave.
+///
+/// # Arguments
+///
+/// * `ranges` - Per-segment ranges, positionally aligned with the
+///   segment list.
+/// * `lead` - Index of the lead segment, from [`best_segment_index`].
+/// * `ascending` - Sort direction.
+///
+/// # Returns
+///
+/// `true` when at least one other segment could be pruned.
+fn pruning_is_possible(ranges: &[Option<SegmentSortRange>], lead: usize, ascending: bool) -> bool {
+    let Some(lead_range) = ranges.get(lead).copied().flatten() else {
+        return false;
+    };
+    let tightest_floor = if ascending {
+        lead_range.min
+    } else {
+        lead_range.max
+    };
+    ranges.iter().enumerate().any(|(i, range)| {
+        i != lead && !segment_can_contribute(*range, Some(tightest_floor), ascending)
+    })
+}
+
+/// Read a segment's sort-field range from its BKD header (#944).
+///
+/// Returns `None` when the field has no BKD tree in this segment (not
+/// indexed, or no document carries it), when the tree is not 1-D, or on
+/// any read error — all of which mean "range unknown", so the caller
+/// keeps the segment.
+///
+/// # Arguments
+///
+/// * `segment` - The segment to inspect.
+/// * `field_name` - The sort field.
+///
+/// # Returns
+///
+/// The segment's range, or `None` when it cannot be determined.
+fn segment_sort_range(
+    segment: &std::sync::RwLock<crate::lexical::index::inverted::reader::SegmentReader>,
+    field_name: &str,
+) -> Option<SegmentSortRange> {
+    let seg = segment.read().ok()?;
+    let tree = seg.get_bkd_tree(field_name).ok()??;
+    let (min, max, point_count) = tree.value_range(0)?;
+    Some(SegmentSortRange {
+        min,
+        max,
+        // One point per document exactly: no document is missing the
+        // field (which would sort as `Null`) and none is multi-valued.
+        covers_every_doc: point_count == seg.segment_info().doc_count,
+    })
+}
+
+/// Count a query's matches without scoring or reading field values.
+///
+/// Used for segments that field-sorted search has proven cannot reach
+/// the current top-K: their matches still have to be counted so
+/// `total_hits` stays the true match count, but none of the per-document
+/// work a full collection performs (term frequency, field length, BM25,
+/// DocValues, heap) is needed (#944).
+///
+/// Deleted documents are already filtered at posting-decode level, so
+/// the walk counts live matches only.
+///
+/// # Arguments
+///
+/// * `query` - The query to count matches for.
+/// * `reader` - The reader (a per-segment view) to count against.
+///
+/// # Returns
+///
+/// The number of matching documents.
+fn count_matches_only(query: &dyn Query, reader: &dyn LexicalIndexReader) -> Result<u64> {
+    let mut matcher = query.matcher(reader)?;
+    let mut count = 0u64;
+    while !matcher.is_exhausted() {
+        if matcher.doc_id() == u64::MAX {
+            break;
+        }
+        count += 1;
+        if !matcher.next()? {
+            break;
+        }
+    }
+    Ok(count)
+}
+
 /// A wall-clock deadline for cooperative search interruption (Issue #600).
 ///
 /// Threaded through every scan loop (the default matcher loop, the Block-Max
@@ -586,38 +812,134 @@ impl InvertedIndexSearcher {
 
         let segments = inverted_reader.segment_readers().to_vec();
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let segment_iter = segments.par_iter();
-        #[cfg(target_arch = "wasm32")]
-        let segment_iter = segments.iter();
+        // Pruning needs an exact match count from the pruned segments to
+        // keep `total_hits` true, and a matcher-only walk can only
+        // deliver that when no score threshold applies.
+        let eligible = min_score <= 0.0 && segments.len() > 1;
 
-        let per_segment_results: Vec<Result<(Vec<SearchHit>, u64)>> = segment_iter
-            .map(|seg_arc| -> Result<(Vec<SearchHit>, u64)> {
-                let view = PerSegmentReaderView::new(
-                    seg_arc.clone(),
-                    global_doc_count,
-                    global_max_doc,
-                    global_term_info_fn.clone(),
-                    global_matching_doc_ids_fn.clone(),
-                );
-                let view_reader: Arc<dyn LexicalIndexReader> = Arc::new(view);
-                let temp_searcher = InvertedIndexSearcher::from_arc(view_reader);
-                let temp_collector = TopFieldCollector::with_min_score(
-                    limit,
-                    min_score,
-                    field_name.to_string(),
-                    ascending,
-                    temp_searcher.reader.as_ref(),
-                );
-                let collected = temp_searcher.search_with_collector_deadline(
-                    query.clone_box(),
-                    temp_collector,
-                    false,
-                    deadline,
-                )?;
-                Ok((collected.results(), collected.total_hits()))
+        // Per-segment sort-field ranges, read from the BKD headers in
+        // O(1) each (#944). A segment whose best possible key cannot
+        // beat the running K-th best only needs its matches counted.
+        let ranges: Vec<Option<SegmentSortRange>> = if eligible {
+            segments
+                .iter()
+                .map(|seg| segment_sort_range(seg, field_name))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Collect one segment fully first so later ones have a floor to
+        // be pruned against — the most promising one, so the floor is as
+        // tight as possible. With time-correlated data (segment-per-
+        // commit over a timestamp or monotonic id) this segment holds
+        // the whole answer and every other one is pruned.
+        //
+        // Splitting the fan-out into two waves serializes the lead
+        // segment, so it is only worth doing when the ranges actually
+        // permit pruning. Otherwise every segment stays in the single
+        // parallel wave below, which is exactly the unpruned path.
+        let lead = if eligible {
+            best_segment_index(&ranges, ascending)
+                .filter(|&idx| pruning_is_possible(&ranges, idx, ascending))
+        } else {
+            None
+        };
+        let prunable = lead.is_some();
+
+        let collect_segment = |seg_arc: &Arc<
+            std::sync::RwLock<crate::lexical::index::inverted::reader::SegmentReader>,
+        >|
+         -> Result<(Vec<SearchHit>, u64)> {
+            let view = PerSegmentReaderView::new(
+                seg_arc.clone(),
+                global_doc_count,
+                global_max_doc,
+                global_term_info_fn.clone(),
+                global_matching_doc_ids_fn.clone(),
+            );
+            let view_reader: Arc<dyn LexicalIndexReader> = Arc::new(view);
+            let temp_searcher = InvertedIndexSearcher::from_arc(view_reader);
+            let temp_collector = TopFieldCollector::with_min_score(
+                limit,
+                min_score,
+                field_name.to_string(),
+                ascending,
+                temp_searcher.reader.as_ref(),
+            );
+            let collected = temp_searcher.search_with_collector_deadline(
+                query.clone_box(),
+                temp_collector,
+                false,
+                deadline,
+            )?;
+            Ok((collected.results(), collected.total_hits()))
+        };
+
+        // Wave 1: the lead segment, establishing the floor.
+        let mut lead_result: Option<Result<(Vec<SearchHit>, u64)>> = None;
+        let mut floor: Option<f64> = None;
+        if let Some(idx) = lead {
+            let result = collect_segment(&segments[idx]);
+            if let Ok((hits, _)) = &result
+                && hits.len() >= limit
+                && let Some(worst) = hits.last()
+            {
+                // The K-th best of a full per-segment top-K: nothing
+                // ranked below it can enter the global top-K either.
+                floor = worst
+                    .document
+                    .as_ref()
+                    .and_then(|d| d.get(field_name))
+                    .and_then(sort_key_as_point);
+                if floor.is_none() {
+                    floor = segments[idx]
+                        .read()
+                        .ok()
+                        .and_then(|seg| seg.get_doc_value(field_name, worst.doc_id).ok().flatten())
+                        .as_ref()
+                        .and_then(sort_key_as_point);
+                }
+            }
+            lead_result = Some(result);
+        }
+
+        // Wave 2: everything else, in parallel, pruned against the floor.
+        let rest: Vec<(usize, &Arc<std::sync::RwLock<_>>)> = segments
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| Some(*i) != lead)
+            .collect();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let rest_iter = rest.par_iter();
+        #[cfg(target_arch = "wasm32")]
+        let rest_iter = rest.iter();
+
+        let mut per_segment_results: Vec<Result<(Vec<SearchHit>, u64)>> = rest_iter
+            .map(|(i, seg_arc)| -> Result<(Vec<SearchHit>, u64)> {
+                if prunable
+                    && !segment_can_contribute(ranges.get(*i).copied().flatten(), floor, ascending)
+                {
+                    // Cannot reach the top-K: count the matches so
+                    // `total_hits` stays exact, and skip the rest.
+                    let view = PerSegmentReaderView::new(
+                        (*seg_arc).clone(),
+                        global_doc_count,
+                        global_max_doc,
+                        global_term_info_fn.clone(),
+                        global_matching_doc_ids_fn.clone(),
+                    );
+                    let count = count_matches_only(query.as_ref(), &view)?;
+                    return Ok((Vec::new(), count));
+                }
+                collect_segment(seg_arc)
             })
             .collect();
+
+        if let Some(result) = lead_result {
+            per_segment_results.push(result);
+        }
 
         // Merge: re-collect the per-segment top-K into a global-reader
         // collector (same comparator + doc-id tie-break as the
@@ -1745,9 +2067,300 @@ mod tests {
         assert!(!hits.is_empty(), "single-seg query should return hits");
     }
 
-    /// PR-F follow-up #476 Phase 1: a non-`bmw_capable` collector
-    /// (here: `CountCollector`) must skip both the BMW fast path and
-    /// the per-segment fanout, so multi-segment count queries still
+    /// #944 Phase B: the pruning predicate must keep a segment whenever
+    /// pruning is not provably safe, and only drop one that cannot beat
+    /// the current K-th best.
+    #[test]
+    fn segment_can_contribute_prunes_only_provably_worse_segments() {
+        let full = |min: f64, max: f64| {
+            Some(SegmentSortRange {
+                min,
+                max,
+                covers_every_doc: true,
+            })
+        };
+        let with_nulls = |min: f64, max: f64| {
+            Some(SegmentSortRange {
+                min,
+                max,
+                covers_every_doc: false,
+            })
+        };
+
+        // No floor yet (fewer than K collected) — never prune.
+        assert!(segment_can_contribute(full(0.0, 1.0), None, false));
+        assert!(segment_can_contribute(full(0.0, 1.0), None, true));
+        // Unknown range (no BKD, unsupported type) — never prune.
+        assert!(segment_can_contribute(None, Some(10.0), false));
+        assert!(segment_can_contribute(None, Some(10.0), true));
+
+        // Descending: keep when the maximum can still reach the floor.
+        assert!(segment_can_contribute(full(0.0, 20.0), Some(10.0), false));
+        assert!(
+            segment_can_contribute(full(0.0, 10.0), Some(10.0), false),
+            "a tie must be kept — the doc-id tie-break can still win"
+        );
+        assert!(
+            !segment_can_contribute(full(0.0, 9.0), Some(10.0), false),
+            "a maximum strictly below the floor cannot contribute"
+        );
+
+        // Ascending: keep when the minimum can still reach the floor.
+        assert!(segment_can_contribute(full(5.0, 20.0), Some(10.0), true));
+        assert!(
+            segment_can_contribute(full(10.0, 20.0), Some(10.0), true),
+            "a tie must be kept"
+        );
+        assert!(
+            !segment_can_contribute(full(11.0, 20.0), Some(10.0), true),
+            "a minimum strictly above the floor cannot contribute"
+        );
+
+        // Nulls sort greatest: they block descending pruning outright,
+        // but cannot improve an ascending segment's best key.
+        assert!(
+            segment_can_contribute(with_nulls(0.0, 9.0), Some(10.0), false),
+            "a segment that may hold a Null outranks everything descending"
+        );
+        assert!(
+            !segment_can_contribute(with_nulls(11.0, 20.0), Some(10.0), true),
+            "Nulls are worst ascending, so they do not save the segment"
+        );
+    }
+
+    /// #944 Phase B: the two-wave split serializes the lead segment, so
+    /// it must only be taken when the ranges could actually prune
+    /// something. Uniformly-ranged segments — the shape of any sort
+    /// field uncorrelated with commit boundaries — must report "no
+    /// pruning possible" so the caller keeps the fully parallel fan-out.
+    #[test]
+    fn pruning_is_possible_only_when_ranges_permit_it() {
+        let full = |min: f64, max: f64| {
+            Some(SegmentSortRange {
+                min,
+                max,
+                covers_every_doc: true,
+            })
+        };
+        let with_nulls = |min: f64, max: f64| {
+            Some(SegmentSortRange {
+                min,
+                max,
+                covers_every_doc: false,
+            })
+        };
+
+        // Every segment spans the same range: whatever floor the lead
+        // produces, no other segment is provably worse.
+        let uniform = vec![full(0.0, 100.0), full(0.0, 100.0), full(0.0, 100.0)];
+        assert!(
+            !pruning_is_possible(&uniform, 0, true),
+            "uniform ranges can never prune ascending"
+        );
+        assert!(
+            !pruning_is_possible(&uniform, 0, false),
+            "uniform ranges can never prune descending"
+        );
+
+        // Disjoint ranges: the lead's extreme already excludes the rest.
+        let disjoint = vec![full(0.0, 9.0), full(10.0, 19.0), full(20.0, 29.0)];
+        assert!(
+            pruning_is_possible(&disjoint, 2, false),
+            "descending, the newest segment's minimum excludes the older ones"
+        );
+        assert!(
+            pruning_is_possible(&disjoint, 0, true),
+            "ascending, the oldest segment's maximum excludes the newer ones"
+        );
+
+        // Partial overlap still permits pruning: should the lead fill
+        // its top-K entirely at its own extreme, the floor reaches that
+        // extreme and excludes the lower-ranged segment.
+        let overlapping = vec![full(0.0, 30.0), full(10.0, 40.0)];
+        assert!(pruning_is_possible(&overlapping, 1, false));
+        assert!(pruning_is_possible(&overlapping, 0, true));
+
+        // Sharing the lead's extreme, however, is decisive: no floor the
+        // lead can produce ever excludes such a segment.
+        assert!(!pruning_is_possible(
+            &[full(0.0, 40.0), full(10.0, 40.0)],
+            1,
+            false
+        ));
+        assert!(!pruning_is_possible(
+            &[full(0.0, 30.0), full(0.0, 40.0)],
+            0,
+            true
+        ));
+
+        // An unknown lead range yields no floor at all.
+        let unknown_lead = vec![None, full(10.0, 19.0)];
+        assert!(!pruning_is_possible(&unknown_lead, 0, false));
+        // An unknown range elsewhere is simply never prunable.
+        let unknown_other = vec![full(20.0, 29.0), None];
+        assert!(!pruning_is_possible(&unknown_other, 0, false));
+
+        // Descending, a segment that may hold a `Null` blocks pruning
+        // even though its range lies entirely below the lead's.
+        let nullable = vec![full(20.0, 29.0), with_nulls(0.0, 9.0)];
+        assert!(!pruning_is_possible(&nullable, 0, false));
+        assert!(
+            pruning_is_possible(&nullable, 1, true),
+            "ascending, Nulls are worst, so the range still bounds the segment"
+        );
+
+        // A lone segment has nothing to prune.
+        assert!(!pruning_is_possible(&[full(0.0, 9.0)], 0, false));
+    }
+
+    /// #944 Phase B: on a real multi-segment index whose commits carry
+    /// disjoint value ranges, the ranges read from the BKD headers must
+    /// actually be disjoint and the predicate must prune the older
+    /// segments against the newest one's floor. The end-to-end tests
+    /// only prove results are unchanged — which they would be with
+    /// pruning disabled too — so this pins that pruning really fires.
+    #[test]
+    fn disjoint_segments_are_pruned_against_the_lead_floor() {
+        use crate::lexical::index::inverted::writer::{
+            InvertedIndexWriter, InvertedIndexWriterConfig,
+        };
+        use crate::lexical::writer::LexicalIndexWriter;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut writer =
+            InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+        // Three commits, values strictly increasing: [0..4), [10..14), [20..24).
+        for group in 0..3u64 {
+            for offset in 0..4u64 {
+                writer
+                    .add_document(
+                        crate::Document::builder()
+                            .add_integer("popularity", (group * 10 + offset) as i64)
+                            .build(),
+                    )
+                    .unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        let reader = writer.build_reader().unwrap();
+        let inverted = reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .unwrap();
+        let segments = inverted.segment_readers().to_vec();
+        assert_eq!(segments.len(), 3);
+
+        let ranges: Vec<Option<SegmentSortRange>> = segments
+            .iter()
+            .map(|seg| segment_sort_range(seg, "popularity"))
+            .collect();
+        for (i, r) in ranges.iter().enumerate() {
+            let r = r.unwrap_or_else(|| panic!("segment {i} must expose a range"));
+            assert_eq!(r.min, (i as f64) * 10.0);
+            assert_eq!(r.max, (i as f64) * 10.0 + 3.0);
+            assert!(r.covers_every_doc, "every doc carries the field");
+        }
+
+        // Descending: the newest segment leads and its lowest value (20)
+        // becomes the floor once it fills a top-4.
+        let lead = best_segment_index(&ranges, false).unwrap();
+        assert_eq!(lead, 2, "the highest-valued segment must lead");
+        assert!(
+            pruning_is_possible(&ranges, lead, false),
+            "disjoint commits must opt into the two-wave split"
+        );
+        let floor = Some(20.0);
+        assert!(
+            !segment_can_contribute(ranges[0], floor, false)
+                && !segment_can_contribute(ranges[1], floor, false),
+            "older segments must be pruned against the lead floor"
+        );
+
+        // Ascending mirrors it: the oldest leads, its highest value (3)
+        // is the floor, and the newer segments are pruned.
+        let lead_asc = best_segment_index(&ranges, true).unwrap();
+        assert_eq!(lead_asc, 0);
+        let floor_asc = Some(3.0);
+        assert!(
+            !segment_can_contribute(ranges[1], floor_asc, true)
+                && !segment_can_contribute(ranges[2], floor_asc, true),
+            "newer segments must be pruned ascending"
+        );
+    }
+
+    /// #944 Phase B: the mirror case — commits whose sort values all
+    /// span the same range. Reading the real BKD headers must show the
+    /// ranges overlapping, so the search keeps the fully parallel
+    /// fan-out instead of paying for a serialized lead wave that could
+    /// never prune anything.
+    #[test]
+    fn uniform_segments_keep_the_parallel_fanout() {
+        use crate::lexical::index::inverted::writer::{
+            InvertedIndexWriter, InvertedIndexWriterConfig,
+        };
+        use crate::lexical::writer::LexicalIndexWriter;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut writer =
+            InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+        // Three commits, each spanning the identical range [0, 30].
+        for _ in 0..3 {
+            for offset in 0..4u64 {
+                writer
+                    .add_document(
+                        crate::Document::builder()
+                            .add_integer("popularity", (offset * 10) as i64)
+                            .build(),
+                    )
+                    .unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        let reader = writer.build_reader().unwrap();
+        let inverted = reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .unwrap();
+        let segments = inverted.segment_readers().to_vec();
+        assert_eq!(segments.len(), 3);
+
+        let ranges: Vec<Option<SegmentSortRange>> = segments
+            .iter()
+            .map(|seg| segment_sort_range(seg, "popularity"))
+            .collect();
+        for (i, r) in ranges.iter().enumerate() {
+            let r = r.unwrap_or_else(|| panic!("segment {i} must expose a range"));
+            assert_eq!((r.min, r.max), (0.0, 30.0));
+        }
+
+        for ascending in [true, false] {
+            let lead = best_segment_index(&ranges, ascending).unwrap();
+            assert!(
+                !pruning_is_possible(&ranges, lead, ascending),
+                "overlapping ranges must not opt into the two-wave split"
+            );
+        }
+    }
+
+    /// #944 Phase B: sort keys convert to point space exactly as the
+    /// writer indexed them; types that index no point are unprunable.
+    #[test]
+    fn sort_key_as_point_mirrors_the_writer() {
+        use crate::lexical::core::field::FieldValue;
+
+        assert_eq!(sort_key_as_point(&FieldValue::Int64(42)), Some(42.0));
+        assert_eq!(sort_key_as_point(&FieldValue::Float64(1.5)), Some(1.5));
+        let dt = chrono::DateTime::from_timestamp(1_600_000_000, 0).unwrap();
+        assert_eq!(
+            sort_key_as_point(&FieldValue::DateTime(dt)),
+            Some(1_600_000_000.0)
+        );
+
+        assert_eq!(sort_key_as_point(&FieldValue::Text("x".into())), None);
+        assert_eq!(sort_key_as_point(&FieldValue::Bool(true)), None);
+        assert_eq!(sort_key_as_point(&FieldValue::Null), None);
+    }
+
     /// #944 Phase A prerequisite: the per-segment view must forward
     /// DocValues access to its segment — with the trait defaults a
     /// per-segment `TopFieldCollector` would see every doc as `Null`.
@@ -1799,6 +2412,9 @@ mod tests {
         );
     }
 
+    /// PR-F follow-up #476 Phase 1: a non-`bmw_capable` collector
+    /// (here: `CountCollector`) must skip both the BMW fast path and
+    /// the per-segment fanout, so multi-segment count queries still
     /// hit the legacy aggregation path.
     #[test]
     fn per_segment_fanout_falls_back_for_count_collector() {
