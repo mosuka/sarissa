@@ -951,8 +951,8 @@ fn read_fvecs_unit_norm(
         assert_eq!(dim, expect_dim, "dim mismatch in {}", path.display());
         reader.read_exact(&mut vec_buf).expect("vec body");
         let mut v = Vec::with_capacity(dim);
-        for chunk in vec_buf.chunks_exact(4) {
-            v.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+        for chunk in vec_buf.as_chunks::<4>().0 {
+            v.push(f32::from_le_bytes(*chunk));
         }
         let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 0.0 {
