@@ -541,12 +541,9 @@ impl BackgroundScheduler {
                 Self::execute_merge_task(&segment_ids, segment_manager, merge_engine)
             }
 
-            TaskType::Compaction { segment_id, .. } => Self::execute_compaction_task(
-                &segment_id,
-                deletion_manager,
-                segment_manager,
-                merge_engine,
-            ),
+            TaskType::Compaction { segment_id, .. } => {
+                Self::execute_compaction_task(&segment_id, segment_manager, merge_engine)
+            }
 
             TaskType::Optimization {
                 target_segments,
@@ -668,7 +665,6 @@ impl BackgroundScheduler {
     /// Execute compaction task.
     fn execute_compaction_task(
         segment_id: &str,
-        deletion_manager: &DeletionManager,
         segment_manager: &SegmentManager,
         merge_engine: &MergeEngine,
     ) -> (TaskStatus, u64, u64, Option<String>) {
@@ -685,13 +681,12 @@ impl BackgroundScheduler {
             }
         };
 
-        // Create a merge task with just this segment
-        // The merge engine handles removal of deleted documents
-        // Reuse execute_merge_task logic by calling it directly?
-        // No, execute_merge_task takes a list of IDs.
-
-        let _deleted_count = deletion_manager.get_deleted_docs(segment_id).len() as u64;
-
+        // Compact by merging this segment with itself: the merge engine
+        // drops the deleted documents as it reconstructs.
+        //
+        // The deleted count used to be read here into a discarded binding,
+        // which built an entire `Vec<u64>` of ids — O(deletions) allocation
+        // for a value nothing looked at (#541).
         Self::execute_merge_task(&[segment_id.to_string()], segment_manager, merge_engine)
     }
 
