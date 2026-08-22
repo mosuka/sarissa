@@ -828,6 +828,108 @@ mod tests {
             .build()
     }
 
+    /// #1016 — a document written before the writer's automatic
+    /// `flush_segment` must still resolve by `_id` before commit.
+    ///
+    /// The flush empties the in-memory buffer, which used to be the only
+    /// thing the NRT lookup searched, so the document silently stopped
+    /// being findable — which is what made `get` return nothing and
+    /// `delete` do nothing for it.
+    #[test]
+    fn doc_written_before_auto_flush_still_resolves_by_id() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let store = LexicalStore::new(storage, LexicalIndexConfig::default()).unwrap();
+
+        // Past `max_buffered_docs` (10_000) so the writer auto-flushes.
+        //
+        // Resolve before every write, exactly as the ingest path does —
+        // `Engine::index_internal` runs `delete_documents_internal`, and so
+        // `find_doc_ids_by_term`, on every put (engine.rs:787). That warms
+        // the searcher cache well before the flush, which is the state the
+        // bug actually occurs in; a test that only resolves at the end gets
+        // a cold cache and a freshly built searcher, and would pass without
+        // the fix.
+        let total = 10_050u64;
+        for i in 0..total {
+            let id = format!("id{i:06}");
+            let _ = store.find_doc_ids_by_term("_id", &id).unwrap();
+            let doc = Document::builder()
+                .add_text("_id", &id)
+                .add_text("body", "alpha")
+                .build();
+            store.upsert_document(i + 1, doc).unwrap();
+        }
+
+        // No commit at any point.
+        let buffered = store.find_doc_ids_by_term("_id", "id010040").unwrap();
+        assert_eq!(buffered.len(), 1, "a buffered doc must resolve");
+
+        let flushed = store.find_doc_ids_by_term("_id", "id000000").unwrap();
+        assert_eq!(
+            flushed,
+            vec![1u64],
+            "a doc written before the automatic flush must still resolve"
+        );
+    }
+
+    /// #1016 — after an automatic flush, `_id` resolution must still
+    /// surface the flushed copy so a later upsert can supersede it.
+    ///
+    /// This is the mechanism behind the duplicate-document symptom.
+    /// `Engine::index_internal` implements upsert as "resolve the `_id` to
+    /// its existing internal ids, delete those, then write the new
+    /// version" (engine.rs:1065). When resolution silently returned
+    /// nothing, step one found no old version, nothing was deleted, and
+    /// the batch ended with two live copies of the same `_id`.
+    ///
+    /// `docs/src/laurus/deletions.md` states that "upsert deduplication
+    /// within an uncommitted batch is handled separately and is always
+    /// correct"; this pins that sentence.
+    #[test]
+    fn upsert_across_auto_flush_supersedes_the_flushed_version() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let store = LexicalStore::new(storage, LexicalIndexConfig::default()).unwrap();
+
+        // Resolve before every write, warming the searcher cache the way
+        // the real ingest path does (see the sibling test).
+        for i in 0..10_050u64 {
+            let id = format!("id{i:06}");
+            let _ = store.find_doc_ids_by_term("_id", &id).unwrap();
+            let doc = Document::builder()
+                .add_text("_id", &id)
+                .add_text("body", "alpha")
+                .build();
+            store.upsert_document(i + 1, doc).unwrap();
+        }
+
+        // Step 1 of the engine's upsert: resolve the existing copies. This
+        // is what used to come back empty.
+        let existing = store.find_doc_ids_by_term("_id", "id000000").unwrap();
+        assert_eq!(
+            existing,
+            vec![1u64],
+            "the flushed copy must be visible to the upsert that supersedes it"
+        );
+
+        // Steps 2 and 3: delete what was found, then write the new version
+        // under a fresh internal id.
+        for doc_id in &existing {
+            store.delete_document_by_internal_id(*doc_id).unwrap();
+        }
+        let replacement = Document::builder()
+            .add_text("_id", "id000000")
+            .add_text("body", "beta")
+            .build();
+        store.upsert_document(90_001, replacement).unwrap();
+
+        let after = store.find_doc_ids_by_term("_id", "id000000").unwrap();
+        assert_eq!(
+            after,
+            vec![90_001u64],
+            "only the new version may remain — no duplicate"
+        );
+    }
+
     #[test]
     fn test_search_engine_creation() {
         let temp_dir = TempDir::new().unwrap();

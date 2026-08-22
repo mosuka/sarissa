@@ -18,6 +18,7 @@ use crate::lexical::core::document::Document;
 use crate::lexical::core::field::FieldOption;
 use crate::lexical::index::inverted::IndexMetadata;
 use crate::lexical::index::inverted::core::posting::{Posting, TermPostingIndex};
+use crate::lexical::index::inverted::reader::SegmentReader;
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::structures::bkd_tree::BKDWriter;
 use crate::lexical::index::structures::dictionary::{TermDictionaryBuilder, TermInfo};
@@ -167,6 +168,25 @@ pub struct InvertedIndexWriter {
     /// Pending deletions that are not yet reflected in the reader (NRT).
     pending_deletions: std::collections::HashSet<u64>,
 
+    /// Readers for the segments this writer has flushed but not yet
+    /// committed (#1016).
+    ///
+    /// `flush_segment` empties the in-memory buffer, which is the only
+    /// thing [`Self::find_doc_ids_by_term`] used to search — so a
+    /// document written before an automatic flush stopped resolving by
+    /// `_id` until the next commit, silently breaking `get` and `delete`
+    /// for it. Keeping a reader per flushed segment lets the NRT lookup
+    /// follow the documents out of the buffer.
+    ///
+    /// This is deliberately **not** every persisted segment, only the
+    /// ones this writer produced since its last commit — normally none.
+    /// That is what makes probing them affordable on a path that runs
+    /// once per written document.
+    ///
+    /// [`SegmentReader::open`] is fully lazy, so registering one costs no
+    /// I/O; the files are opened only if a lookup actually reaches them.
+    flushed_segments: Vec<SegmentReader>,
+
     /// Cached `(segment_id, min_doc_id, max_doc_id)` for every committed
     /// segment, mirroring the `*.meta` files on storage (Issue #559 / #864).
     ///
@@ -290,6 +310,7 @@ impl InvertedIndexWriter {
             last_wal_seq: base_metadata.last_wal_seq,
             base_metadata,
             pending_deletions: std::collections::HashSet::new(),
+            flushed_segments: Vec::new(),
             segment_ranges,
             max_committed_doc_id,
             deletion_manager: None,
@@ -463,29 +484,64 @@ impl InvertedIndexWriter {
 
     /// Find all internal document IDs for a given term (field:value).
     ///
-    /// This searches both the in-memory buffer (uncommitted) and, in the future,
-    /// persisted segments (committed).
+    /// Searches everything this writer is responsible for that a shared
+    /// searcher cannot yet see: the in-memory buffer, and the segments
+    /// flushed since the last commit.
+    ///
+    /// The second half matters because `flush_segment` fires automatically
+    /// at `max_buffered_docs` and empties the buffer. Without it a document
+    /// written earlier in an uncommitted batch stopped resolving by `_id`,
+    /// which silently broke `get` and `delete` for it and let a later
+    /// document with the same `_id` fail to supersede it (#1016).
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Field to look the term up in.
+    /// * `term` - Term to look up.
+    ///
+    /// # Returns
+    ///
+    /// The matching document ids, or `None` when there are none.
     fn find_doc_ids_by_term(&self, field: &str, term: &str) -> Result<Option<Vec<u64>>> {
         let full_term = format!("{field}:{term}");
+        let mut seen = AHashSet::new();
+        let mut ids: Vec<u64> = Vec::new();
 
-        // 1. Check in-memory inverted index. The index may hold stale postings
-        // for docs removed since the last rebuild (deferred under #828), so keep
-        // only ids still in the live buffer; a same-id re-upsert can also leave
+        // 1. In-memory buffer. The index may hold stale postings for docs
+        // removed since the last rebuild (deferred under #828), so keep only
+        // ids still in the live buffer; a same-id re-upsert can also leave
         // two postings for one id, so dedup.
         if let Some(posting_list) = self.inverted_index.get_posting_list(&full_term) {
-            let mut seen = AHashSet::new();
-            let ids: Vec<u64> = posting_list
-                .postings
-                .iter()
-                .map(|p| p.doc_id)
-                .filter(|id| self.buffered_doc_ids.contains(id) && seen.insert(*id))
-                .collect();
-            if !ids.is_empty() {
-                return Ok(Some(ids));
+            ids.extend(
+                posting_list
+                    .postings
+                    .iter()
+                    .map(|p| p.doc_id)
+                    .filter(|id| self.buffered_doc_ids.contains(id) && seen.insert(*id)),
+            );
+        }
+
+        // 2. Segments flushed but not yet committed. Usually empty, in
+        // which case this loop costs nothing. Ids whose persisted copy has
+        // since been superseded are skipped — that is exactly what
+        // `pending_deletions` records.
+        for segment in &self.flushed_segments {
+            let Some(mut postings) = segment.postings(field, term)? else {
+                continue;
+            };
+            while postings.next()? {
+                let doc_id = postings.doc_id();
+                if !self.pending_deletions.contains(&doc_id) && seen.insert(doc_id) {
+                    ids.push(doc_id);
+                }
             }
         }
 
-        Ok(None)
+        if ids.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(ids))
+        }
     }
 
     /// Analyze a document into terms.
@@ -781,6 +837,15 @@ impl InvertedIndexWriter {
         // (Issue #559 / #864) so an overwrite of one of these docs later in
         // this writer's life resolves without rescanning storage.
         self.extend_segment_cache(&segment_name);
+
+        // Keep a reader over the segment just written so `_id` lookups
+        // survive the buffer being emptied below (#1016). Built from the
+        // same `SegmentInfo` the `.meta` was serialised from, and before
+        // the buffers that description is computed from are cleared.
+        self.flushed_segments.push(SegmentReader::open(
+            self.segment_info_for(&segment_name),
+            self.storage.clone(),
+        )?);
 
         // Clear buffers
         self.buffered_docs.clear();
@@ -1360,12 +1425,28 @@ impl InvertedIndexWriter {
             .push((segment_name.to_string(), min_id, max_id));
     }
 
-    /// Write segment metadata.
-    fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
+    /// Describe the segment about to be written from the current buffer.
+    ///
+    /// Shared by [`Self::write_segment_metadata`], which serialises it to
+    /// `<segment>.meta`, and [`Self::flush_segment`], which opens a
+    /// [`SegmentReader`] over the same description so NRT `_id` lookups
+    /// keep working after the buffer is cleared (#1016). Building it in
+    /// one place keeps the on-storage `.meta` and the in-memory reader
+    /// from describing the same segment differently — the same reason
+    /// [`Self::buffered_doc_id_range`] exists.
+    ///
+    /// Must be called **before** the buffers it summarises are cleared.
+    ///
+    /// # Arguments
+    ///
+    /// * `segment_name` - Name the segment's files are written under.
+    ///
+    /// # Returns
+    ///
+    /// The segment's metadata.
+    fn segment_info_for(&self, segment_name: &str) -> SegmentInfo {
         let (min_id, max_id) = self.buffered_doc_id_range();
-
-        // Create SegmentInfo
-        let info = SegmentInfo {
+        SegmentInfo {
             segment_id: segment_name.to_string(),
             doc_count: self.buffered_docs.len() as u64,
             min_doc_id: min_id,
@@ -1373,7 +1454,12 @@ impl InvertedIndexWriter {
             generation: self.current_segment as u64,
             has_deletions: false, // New segments initially have no deletions
             shard_id: self.config.shard_id,
-        };
+        }
+    }
+
+    /// Write segment metadata.
+    fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
+        let info = self.segment_info_for(segment_name);
 
         // Write as JSON for compatibility with InvertedIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
@@ -1409,6 +1495,12 @@ impl InvertedIndexWriter {
         // Write index metadata
         self.write_index_metadata()?;
         self.write_metadata_json()?;
+
+        // The committed searcher can serve these segments now, so stop
+        // carrying our own readers for them (#1016). `LexicalStore::commit`
+        // drops the cached searcher right after this, so the next one is
+        // rebuilt over the full committed set.
+        self.flushed_segments.clear();
 
         Ok(())
     }
@@ -1612,10 +1704,17 @@ impl InvertedIndexWriter {
             }
             // Track globally
             self.stats.deleted_count += deleted;
-        }
 
-        // Add to pending deletions for NRT visibility
-        self.pending_deletions.insert(doc_id);
+            // Record that this id's *persisted* copy is superseded, so an
+            // NRT `_id` lookup does not hand back the stale version.
+            //
+            // Scoped to the branch that actually deleted something. It used
+            // to run unconditionally, which flagged every freshly inserted
+            // document with its own id — nothing had been deleted, and the
+            // set is never cleared, so after an automatic flush the lookup
+            // discarded the document it was looking for (#1016).
+            self.pending_deletions.insert(doc_id);
+        }
 
         Ok(())
     }
@@ -1700,6 +1799,11 @@ impl InvertedIndexWriter {
         // `.meta` files for merged-away segments.
         self.deletion_manager = None;
         self.pending_meta_deletions.clear();
+        // The force-merge that prompted this replaced the files these
+        // readers were opened over, so they describe segments that no
+        // longer exist (#1016). `LexicalStore::optimize` drops the cached
+        // searcher at the same time, so the merged result stays reachable.
+        self.flushed_segments.clear();
         Ok(())
     }
 
