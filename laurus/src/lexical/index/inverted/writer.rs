@@ -900,9 +900,12 @@ impl InvertedIndexWriter {
             if let Some(posting_list) = self.inverted_index.get_posting_list(term) {
                 let start_offset = posting_writer.position();
 
-                // Write posting list (v2: includes on-disk multi-level
-                // skip table for O(log_8 N) `skip_to`, #503).
-                posting_list.encode_v2(&mut posting_writer)?;
+                // Write posting list (v3: on-disk multi-level skip table
+                // for O(log_8 N) `skip_to` (#503), and a weights section
+                // emitted only when some posting deviates from the 1.0
+                // default — which nothing in this writer does, so it is
+                // always omitted (#553)).
+                posting_list.encode_v3(&mut posting_writer)?;
 
                 let end_offset = posting_writer.position();
                 let length = end_offset - start_offset;

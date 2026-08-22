@@ -319,7 +319,15 @@ pub struct DecodedPostingList {
     pub doc_ids: Vec<u32>,
     /// Term frequencies. Parallel to `doc_ids` / `weights`.
     pub frequencies: Vec<u32>,
-    /// Per-document weights. Parallel to `doc_ids` / `frequencies`.
+    /// Per-document weights. Parallel to `doc_ids` / `frequencies`, or
+    /// **empty**, which means every weight is the `1.0` default.
+    ///
+    /// The empty form is what a v3 segment produces when it omitted
+    /// Section 3, and what reader paths that do not consume weights
+    /// leave behind. Consumers must therefore not assume
+    /// `weights.len() == doc_ids.len()`;
+    /// [`Self::into_posting_list`] expands the empty form on demand
+    /// (#553).
     pub weights: Vec<f32>,
     /// Optional per-posting positions sidecar. `None` when **no** posting in
     /// this list carries position data (the common case for boolean / BM25
@@ -402,11 +410,21 @@ impl DecodedPostingList {
             None => Box::new(std::iter::repeat_with(|| None).take(n)),
         };
 
+        // An empty `weights` means "all 1.0" — the v3 decoder leaves it
+        // empty when the segment omitted Section 3 (#553). Zipping it
+        // directly would truncate the result to zero postings, so expand
+        // it lazily here, exactly as `positions: None` is expanded above.
+        let weights_iter: Box<dyn Iterator<Item = f32>> = if self.weights.is_empty() {
+            Box::new(std::iter::repeat_n(1.0, n))
+        } else {
+            Box::new(self.weights.into_iter())
+        };
+
         let postings: Vec<Posting> = self
             .doc_ids
             .into_iter()
             .zip(self.frequencies)
-            .zip(self.weights)
+            .zip(weights_iter)
             .zip(positions_iter)
             .map(|(((did, freq), w), pos)| Posting {
                 doc_id: did as u64,
@@ -422,6 +440,54 @@ impl DecodedPostingList {
             total_frequency: self.total_frequency,
             doc_frequency: self.doc_frequency,
         }
+    }
+}
+
+/// On-disk version of a single posting-list payload.
+///
+/// The versions form a ladder: each adds one capability and keeps
+/// everything before it. Carrying the version as a type rather than as a
+/// pair of booleans keeps "what does v2 contain?" answerable in one
+/// place, which matters because the axes are independent — v3 differs
+/// from v2 only in the weights section, and from v1 in both.
+///
+/// Which version a segment is in is not recorded in the payload itself.
+/// It comes from the sibling `.dict` file's header, the only
+/// segment-level file carrying a magic and a version (#503).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PostingFormat {
+    /// The original layout: no on-disk skip table (readers rebuild it
+    /// from `doc_ids`), weights always present.
+    V1,
+    /// Adds the multi-level skip table between the header and Section 1
+    /// (#503).
+    V2,
+    /// Adds the `any_weights` header byte and makes Section 3
+    /// conditional on it (#553).
+    V3,
+}
+
+impl PostingFormat {
+    /// Whether the payload carries a multi-level skip table between the
+    /// header and Section 1.
+    ///
+    /// # Returns
+    ///
+    /// `true` for v2 and later.
+    fn has_skip_levels(self) -> bool {
+        matches!(self, Self::V2 | Self::V3)
+    }
+
+    /// Whether the header carries the `any_weights` byte that gates
+    /// Section 3.
+    ///
+    /// # Returns
+    ///
+    /// `true` for v3 and later. When `false`, Section 3 is
+    /// unconditionally present, which is how v1 and v2 payloads are
+    /// read.
+    fn has_weight_flag(self) -> bool {
+        matches!(self, Self::V3)
     }
 }
 
@@ -576,11 +642,15 @@ impl PostingList {
     ///
     /// * `writer` - The structured output writer.
     pub fn encode<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
-        self.encode_header_and_payload(writer, /* with_skip_levels */ false)
+        self.encode_header_and_payload(writer, PostingFormat::V1)
     }
 
     /// Encode the posting list in v2 format, which adds a multi-level
     /// skip table after the header (#503).
+    ///
+    /// Superseded by [`Self::encode_v3`] for new segments; kept so that
+    /// v2 payloads can still be produced in round-trip and
+    /// backward-compatibility tests.
     ///
     /// The header and payload sections (doc_ids / frequencies / weights /
     /// positions) are byte-identical to [`Self::encode`]; the only
@@ -611,17 +681,74 @@ impl PostingList {
     ///
     /// * `writer` - The structured output writer.
     pub fn encode_v2<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
-        self.encode_header_and_payload(writer, /* with_skip_levels */ true)
+        self.encode_header_and_payload(writer, PostingFormat::V2)
     }
 
-    /// Shared encoder used by both [`Self::encode`] (v1) and
-    /// [`Self::encode_v2`]. The two only differ in whether the
-    /// **Skip levels** section is emitted between the header and
-    /// Section 1.
+    /// Encode the posting list in v3 format, which makes the weights
+    /// section optional (#553).
+    ///
+    /// v3 adds an `any_weights: u8` header byte immediately after
+    /// `any_positions`, mirroring how `any_positions` already gates
+    /// Section 4, and emits **Section 3 only when some posting carries a
+    /// weight other than `1.0`**:
+    ///
+    /// ```text
+    /// [term: string]
+    /// [total_frequency: varint]
+    /// [doc_frequency: varint]
+    /// [posting_count N: varint]
+    /// [any_positions: u8]
+    /// [any_weights: u8]                       (new in v3)
+    ///
+    /// // Skip levels — unchanged from v2
+    /// [num_skip_levels: u8]
+    /// repeat num_skip_levels times:
+    ///   [level_len: varint] [doc_id: u32] * level_len
+    ///
+    /// // Sections 1 and 2 — unchanged from v1/v2
+    ///
+    /// // Section 3: weights — only when any_weights == 1
+    /// repeat N times: [weight: f32]
+    ///
+    /// // Section 4: positions — only when any_positions == 1
+    /// ```
+    ///
+    /// Every posting the writer produces carries the default weight of
+    /// `1.0`, so in practice Section 3 disappears entirely and the list
+    /// shrinks by `4N - 1` bytes: four per posting, less the one header
+    /// byte per list.
+    ///
+    /// The saving is not paid for with a lossy format. A non-`1.0`
+    /// weight still round-trips exactly, because it flips `any_weights`
+    /// and brings Section 3 back.
+    ///
+    /// Which decoder a reader must use is gated by the sibling `.dict`
+    /// file's version, not by anything in this payload — see
+    /// [`BlockTermDictionary::posting_format_version`](crate::lexical::index::structures::dictionary::BlockTermDictionary::posting_format_version).
+    ///
+    /// # Arguments
+    ///
+    /// * `writer` - The structured output writer.
+    pub fn encode_v3<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
+        self.encode_header_and_payload(writer, PostingFormat::V3)
+    }
+
+    /// Shared encoder for every on-disk version.
+    ///
+    /// The versions differ on two independent axes, both carried by
+    /// [`PostingFormat`]: whether the **Skip levels** section is emitted
+    /// between the header and Section 1 (v2 onward), and whether the
+    /// **weights** section is gated by an `any_weights` header byte
+    /// rather than written unconditionally (v3 onward).
+    ///
+    /// # Arguments
+    ///
+    /// * `writer` - The structured output writer.
+    /// * `format` - The on-disk version to emit.
     fn encode_header_and_payload<W: StorageOutput>(
         &self,
         writer: &mut StructWriter<W>,
-        with_skip_levels: bool,
+        format: PostingFormat,
     ) -> Result<()> {
         writer.write_string(&self.term)?;
         writer.write_varint(self.total_frequency)?;
@@ -633,7 +760,15 @@ impl PostingList {
         let any_positions = self.postings.iter().any(|p| p.positions.is_some());
         writer.write_u8(u8::from(any_positions))?;
 
-        if with_skip_levels {
+        // v3 onward: one byte per posting *list* buys the right to drop
+        // four bytes per *posting*. Written even when N is 0 so the
+        // decoder's header read stays fixed-width.
+        let any_weights = format.has_weight_flag() && self.postings.iter().any(|p| p.weight != 1.0);
+        if format.has_weight_flag() {
+            writer.write_u8(u8::from(any_weights))?;
+        }
+
+        if format.has_skip_levels() {
             // Build the skip table from the in-memory postings. The
             // doc_ids we send through `build_skip_levels` must match
             // the ones the bit-packer is about to emit — we already
@@ -724,9 +859,13 @@ impl PostingList {
             writer.write_varint(freq as u64)?;
         }
 
-        // Section 3: weights (raw f32).
-        for posting in &self.postings {
-            writer.write_f32(posting.weight)?;
+        // Section 3: weights (raw f32). v1/v2 always carry it; v3 emits
+        // it only when some posting deviates from the 1.0 default, which
+        // no writer in this crate ever does (#553).
+        if !format.has_weight_flag() || any_weights {
+            for posting in &self.postings {
+                writer.write_f32(posting.weight)?;
+            }
         }
 
         // Section 4: positions (only when at least one posting carries them).
@@ -765,7 +904,7 @@ impl PostingList {
     /// * `reader` - The structured input reader positioned at a posting-list
     ///   header.
     pub fn decode_soa<R: StorageInput>(reader: &mut StructReader<R>) -> Result<DecodedPostingList> {
-        Self::decode_soa_inner(reader, /* with_skip_levels */ false)
+        Self::decode_soa_inner(reader, PostingFormat::V1)
     }
 
     /// Decode a posting list previously written by [`Self::encode_v2`]
@@ -780,16 +919,48 @@ impl PostingList {
     pub fn decode_soa_v2<R: StorageInput>(
         reader: &mut StructReader<R>,
     ) -> Result<DecodedPostingList> {
-        Self::decode_soa_inner(reader, /* with_skip_levels */ true)
+        Self::decode_soa_inner(reader, PostingFormat::V2)
     }
 
-    /// Shared decoder used by both [`Self::decode_soa`] (v1) and
-    /// [`Self::decode_soa_v2`]. The two only differ in whether the
-    /// **Skip levels** section is consumed from the input stream; v1
-    /// rebuilds the skip table from `doc_ids` at the end instead.
+    /// Decode a posting list previously written by [`Self::encode_v3`]
+    /// (#553).
+    ///
+    /// When the segment omitted Section 3 — the ordinary case, since
+    /// every weight is `1.0` — the returned
+    /// [`DecodedPostingList::weights`] is left **empty** rather than
+    /// filled with `n` copies of `1.0`. Materialising them would add an
+    /// allocation to the read path to represent exactly the information
+    /// the format just finished not storing. Empty therefore means
+    /// "all `1.0`", and
+    /// [`DecodedPostingList::into_posting_list`] expands it on demand.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The structured input reader positioned at a v3
+    ///   posting-list header.
+    pub fn decode_soa_v3<R: StorageInput>(
+        reader: &mut StructReader<R>,
+    ) -> Result<DecodedPostingList> {
+        Self::decode_soa_inner(reader, PostingFormat::V3)
+    }
+
+    /// Shared decoder for every on-disk version.
+    ///
+    /// The versions differ on two independent axes, both carried by
+    /// [`PostingFormat`]: whether the **Skip levels** section is
+    /// consumed from the input stream (v2 onward; v1 rebuilds the table
+    /// from `doc_ids` at the end instead), and whether the **weights**
+    /// section is gated by an `any_weights` header byte rather than
+    /// always present (v3 onward).
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The structured input reader positioned at a
+    ///   posting-list header.
+    /// * `format` - The on-disk version the stream is known to be in.
     fn decode_soa_inner<R: StorageInput>(
         reader: &mut StructReader<R>,
-        with_skip_levels: bool,
+        format: PostingFormat,
     ) -> Result<DecodedPostingList> {
         let term = reader.read_string()?;
         let total_frequency = reader.read_varint()?;
@@ -797,11 +968,19 @@ impl PostingList {
         let n = reader.read_varint()? as usize;
         let any_positions = reader.read_u8()? != 0;
 
+        // v3 onward: does Section 3 exist at all? Older versions always
+        // wrote it, so they read as if the flag were set (#553).
+        let any_weights = if format.has_weight_flag() {
+            reader.read_u8()? != 0
+        } else {
+            true
+        };
+
         // v2-only section: multi-level skip table. Always present (even
         // for short posting lists where `num_skip_levels = 0`), so the
         // byte layout stays deterministic.
         let mut disk_skip_levels: Vec<Vec<u32>> = Vec::new();
-        if with_skip_levels {
+        if format.has_skip_levels() {
             let num_levels = reader.read_u8()? as usize;
             disk_skip_levels.reserve(num_levels);
             for _ in 0..num_levels {
@@ -881,10 +1060,15 @@ impl PostingList {
             frequencies.push(reader.read_varint()? as u32);
         }
 
-        // Section 3: weights.
-        let mut weights: Vec<f32> = Vec::with_capacity(n);
-        for _ in 0..n {
-            weights.push(reader.read_f32()?);
+        // Section 3: weights — absent in v3 when every weight is the
+        // 1.0 default. Left empty rather than expanded, so the common
+        // case costs no allocation; empty means all-1.0 (#553).
+        let mut weights: Vec<f32> = Vec::new();
+        if any_weights {
+            weights.reserve_exact(n);
+            for _ in 0..n {
+                weights.push(reader.read_f32()?);
+            }
         }
 
         // Section 4: positions (only materialised when at least one posting
@@ -918,7 +1102,7 @@ impl PostingList {
         // do not, so build the table from the decoded `doc_ids` at load
         // time. The build cost is paid once per segment open, not per
         // query, so the fallback path stays cheap.
-        let skip_levels = if with_skip_levels {
+        let skip_levels = if format.has_skip_levels() {
             disk_skip_levels
         } else {
             build_skip_levels(&doc_ids)
@@ -960,6 +1144,25 @@ impl PostingList {
     ///   posting-list header.
     pub fn decode_v2<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
         Ok(Self::decode_soa_v2(reader)?.into_posting_list())
+    }
+
+    /// Decode a posting list previously written by [`Self::encode_v3`]
+    /// into AoS form (#553).
+    ///
+    /// A v3 segment that omitted Section 3 yields postings whose
+    /// `weight` is `1.0`, reconstructed from the empty-weights
+    /// convention rather than read from disk.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The structured input reader positioned at a v3
+    ///   posting-list header.
+    ///
+    /// # Returns
+    ///
+    /// The decoded posting list.
+    pub fn decode_v3<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
+        Ok(Self::decode_soa_v3(reader)?.into_posting_list())
     }
 }
 
@@ -1147,10 +1350,15 @@ impl TermPostingIndex {
 
     /// On-disk version of the [`TermPostingIndex`] format used by
     /// [`Self::write_to_storage`]. Version 2 introduces the
-    /// multi-level skip table per posting list (#503); v1 segments
-    /// remain readable via [`Self::read_from_storage`]'s back-compat
-    /// branch.
-    const ON_DISK_VERSION: u32 = 2;
+    /// multi-level skip table per posting list (#503); version 3 makes
+    /// the per-posting weights section conditional (#553). v1 and v2
+    /// containers remain readable via [`Self::read_from_storage`]'s
+    /// back-compat branches.
+    ///
+    /// Note that this `INVX` container is **not** what gates production
+    /// segment reads — those dispatch on the sibling `.dict` header. See
+    /// [`BlockTermDictionary::posting_format_version`](crate::lexical::index::structures::dictionary::BlockTermDictionary::posting_format_version).
+    const ON_DISK_VERSION: u32 = 3;
 
     /// Write the inverted index to storage.
     pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
@@ -1165,9 +1373,10 @@ impl TermPostingIndex {
         let mut sorted_terms: Vec<_> = self.terms.iter().collect();
         sorted_terms.sort_by_key(|(term, _)| *term);
 
-        // v2: every posting list carries an on-disk skip table.
+        // v3: every posting list carries an on-disk skip table, and
+        // omits its weights section unless some weight is not 1.0.
         for (_, posting_list) in sorted_terms {
-            posting_list.encode_v2(writer)?;
+            posting_list.encode_v3(writer)?;
         }
 
         Ok(())
@@ -1182,7 +1391,7 @@ impl TermPostingIndex {
         }
 
         let version = reader.read_u32()?;
-        if version != 1 && version != 2 {
+        if !matches!(version, 1..=3) {
             return Err(LaurusError::index(format!(
                 "Unsupported index version: {version}"
             )));
@@ -1196,12 +1405,18 @@ impl TermPostingIndex {
 
         // Dispatch posting-list decode by on-disk version. v1 segments
         // do not carry skip levels; the SoA decoder rebuilds them at
-        // load time (#503 back-compat fallback).
+        // load time (#503 back-compat fallback). v3 additionally gates
+        // the weights section on a header byte (#553).
+        //
+        // Matched exactly rather than with an ordered comparison: a
+        // `>=` here would hand a newer payload to an older decoder,
+        // which misreads the added header byte as the next field and
+        // corrupts silently instead of failing.
         for _ in 0..posting_list_count {
-            let posting_list = if version == 1 {
-                PostingList::decode(reader)?
-            } else {
-                PostingList::decode_v2(reader)?
+            let posting_list = match version {
+                1 => PostingList::decode(reader)?,
+                2 => PostingList::decode_v2(reader)?,
+                _ => PostingList::decode_v3(reader)?,
             };
             terms.insert(posting_list.term.clone(), posting_list);
         }
@@ -1990,6 +2205,370 @@ mod tests {
             let got = loaded.get_posting_list(term).expect("term loaded");
             assert_eq!(got.postings.len(), want.postings.len(), "term={term}");
         }
+    }
+
+    /// #553 — the deterministic size gate. Dropping the always-1.0
+    /// weights section must shrink a v3 payload by exactly `4N - 1`
+    /// bytes against v2: four bytes per posting recovered, less the one
+    /// `any_weights` header byte per list.
+    ///
+    /// An exact assertion rather than "v3 is smaller" — an exact number
+    /// fails loudly if the header or a section silently changes size,
+    /// which is the whole point of gating a format change on bytes.
+    #[test]
+    fn v3_omits_weight_section_saving_exactly_four_bytes_per_posting() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        // N = 0 is the one case where v3 is *larger*: there are no
+        // weights to drop but the flag byte is still written, so the
+        // header stays fixed-width. Asserted rather than skipped.
+        {
+            let empty = PostingList::new("empty".to_string());
+            let measure = |path: &str, v3: bool| -> u64 {
+                let output = storage.create_output(path).unwrap();
+                let mut writer = StructWriter::new(output);
+                if v3 {
+                    empty.encode_v3(&mut writer).unwrap();
+                } else {
+                    empty.encode_v2(&mut writer).unwrap();
+                }
+                let len = writer.position();
+                writer.close().unwrap();
+                len
+            };
+            assert_eq!(
+                measure("v3_empty.bin", true) - measure("v2_empty.bin", false),
+                1,
+                "an empty list pays the flag byte and recovers nothing"
+            );
+        }
+
+        for n in [1usize, 7, 128, 300] {
+            let mut list = PostingList::new("sizes".to_string());
+            for i in 0..n {
+                list.add_posting(Posting::with_frequency(i as u64 * 3, (i % 5) as u32 + 1));
+            }
+
+            let encode_to = |path: &str, v3: bool| -> u64 {
+                let output = storage.create_output(path).unwrap();
+                let mut writer = StructWriter::new(output);
+                if v3 {
+                    list.encode_v3(&mut writer).unwrap();
+                } else {
+                    list.encode_v2(&mut writer).unwrap();
+                }
+                let len = writer.position();
+                writer.close().unwrap();
+                len
+            };
+
+            let len_v2 = encode_to(&format!("v2_{n}.bin"), false);
+            let len_v3 = encode_to(&format!("v3_{n}.bin"), true);
+
+            assert_eq!(
+                len_v2 - len_v3,
+                (4 * n - 1) as u64,
+                "n={n}: expected v3 to save exactly 4N-1 bytes (v2={len_v2}, v3={len_v3})"
+            );
+        }
+    }
+
+    /// #553 — the ordinary case: every weight is the 1.0 default, so
+    /// Section 3 is absent on disk and the decoder leaves `weights`
+    /// empty rather than materialising N copies of 1.0.
+    ///
+    /// The AoS view must still report 1.0 for every posting, which is
+    /// what proves the empty vec is a representation of all-1.0 and not
+    /// a dropped section.
+    #[test]
+    fn v3_round_trip_without_weights_reports_all_ones() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 260;
+        let mut original = PostingList::new("plain".to_string());
+        for i in 0..n {
+            original.add_posting(Posting::with_frequency(i as u64 * 2, (i % 7) as u32 + 1));
+        }
+
+        let path = "v3_plain.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            original.encode_v3(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let decoded = PostingList::decode_soa_v3(&mut reader).unwrap();
+
+        assert_eq!(decoded.len(), n);
+        assert!(
+            decoded.weights.is_empty(),
+            "Section 3 must be absent, leaving weights empty; got {} entries",
+            decoded.weights.len()
+        );
+        for (i, posting) in original.postings.iter().enumerate() {
+            assert_eq!(decoded.doc_ids[i], posting.doc_id as u32, "doc at {i}");
+            assert_eq!(decoded.frequencies[i], posting.frequency, "freq at {i}");
+        }
+
+        // The AoS reassembly expands the empty vec back to 1.0 — this is
+        // the assertion that would fail on a naive `.zip(self.weights)`,
+        // which truncates to zero postings.
+        let aos = decoded.into_posting_list();
+        assert_eq!(aos.postings.len(), n, "empty weights must not truncate");
+        assert!(aos.postings.iter().all(|p| p.weight == 1.0));
+    }
+
+    /// #553 — the saving must not be bought with silent data loss. One
+    /// non-1.0 weight flips `any_weights`, brings Section 3 back, and
+    /// every value must round-trip bit-exactly.
+    #[test]
+    fn v3_round_trip_preserves_non_default_weights_exactly() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        // Past the 128-posting bit-packed block boundary, so Section 3
+        // is exercised alongside a full block plus a varint tail rather
+        // than only in the small-list path.
+        let n: usize = 300;
+        let mut original = PostingList::new("weighted".to_string());
+        for i in 0..n {
+            original.add_posting(Posting::with_frequency(i as u64, 1).with_weight(match i {
+                17 => 0.25,
+                200 => 2.5,
+                _ => 1.0,
+            }));
+        }
+
+        let path = "v3_weighted.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            original.encode_v3(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let decoded = PostingList::decode_soa_v3(&mut reader).unwrap();
+
+        assert_eq!(
+            decoded.weights.len(),
+            n,
+            "a single non-1.0 weight must bring Section 3 back"
+        );
+        for (i, posting) in original.postings.iter().enumerate() {
+            assert_eq!(decoded.weights[i], posting.weight, "weight at {i}");
+        }
+        assert_eq!(decoded.weights[17], 0.25);
+        assert_eq!(decoded.weights[200], 2.5);
+
+        // The AoS wrapper is a separate code path from the SoA decode
+        // above and must carry the same values through.
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let aos = PostingList::decode_v3(&mut reader).unwrap();
+        assert_eq!(aos.postings.len(), n);
+        for (got, want) in aos.postings.iter().zip(original.postings.iter()) {
+            assert_eq!(got.doc_id, want.doc_id);
+            assert_eq!(got.frequency, want.frequency);
+            assert_eq!(got.weight, want.weight);
+        }
+    }
+
+    /// #553 — an empty `weights` on a non-empty `DecodedPostingList`
+    /// must expand to all-1.0 rather than truncating the result. Pins
+    /// the convention directly, independent of any encoder.
+    #[test]
+    fn into_posting_list_treats_empty_weights_as_all_ones() {
+        let decoded = DecodedPostingList {
+            term: "convention".to_string(),
+            doc_ids: vec![1, 4, 9],
+            frequencies: vec![2, 1, 3],
+            weights: Vec::new(),
+            positions: None,
+            skip_levels: Vec::new(),
+            total_frequency: 6,
+            doc_frequency: 3,
+        };
+
+        let list = decoded.into_posting_list();
+        assert_eq!(list.postings.len(), 3, "empty weights must not truncate");
+        assert!(list.postings.iter().all(|p| p.weight == 1.0));
+        assert_eq!(
+            list.postings.iter().map(|p| p.doc_id).collect::<Vec<_>>(),
+            vec![1, 4, 9]
+        );
+    }
+
+    /// #553 — a v2 payload must keep decoding as v2 after v3 exists,
+    /// **and the two formats must be genuinely distinct**.
+    ///
+    /// A plain `encode_v2` → `decode_soa_v2` round trip would prove
+    /// neither: both sides could drift together and it would stay green.
+    /// So this also feeds the same v2 bytes to the *v3* decoder and
+    /// requires that to fail or disagree. That is precisely the hazard
+    /// the exact-match dispatch guards — an ordered comparison would
+    /// hand a payload to the wrong decoder, and if the two formats were
+    /// somehow interchangeable this test would be worthless.
+    #[test]
+    fn v2_payload_decodes_as_v2_and_not_as_v3() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 200;
+        let mut original = PostingList::new("v2_pin".to_string());
+        for i in 0..n {
+            original.add_posting(Posting::with_frequency(i as u64 * 5, (i % 3) as u32 + 1));
+        }
+
+        let path = "v2_pin.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            original.encode_v2(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+
+        // Correct decoder: full fidelity, Section 3 present.
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let decoded = PostingList::decode_soa_v2(&mut reader).unwrap();
+
+        assert_eq!(decoded.len(), n);
+        assert_eq!(
+            decoded.weights.len(),
+            n,
+            "v2 always carries Section 3, regardless of the values"
+        );
+        assert!(decoded.weights.iter().all(|&w| w == 1.0));
+        for (i, posting) in original.postings.iter().enumerate() {
+            assert_eq!(decoded.doc_ids[i], posting.doc_id as u32, "doc at {i}");
+            assert_eq!(decoded.frequencies[i], posting.frequency, "freq at {i}");
+        }
+
+        // Wrong decoder: v3 reads an `any_weights` byte that v2 never
+        // wrote, so every field after the header shifts. It must not
+        // quietly reproduce the correct list.
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        match PostingList::decode_soa_v3(&mut reader) {
+            Err(_) => {}
+            Ok(mis) => {
+                assert!(
+                    mis.doc_ids != decoded.doc_ids || mis.frequencies != decoded.frequencies,
+                    "v2 and v3 payloads must not be interchangeable, or the \
+                     version dispatch guards nothing"
+                );
+            }
+        }
+    }
+
+    /// #553 — `TermPostingIndex` must dispatch on the exact version.
+    ///
+    /// A hand-synthesized v2 container and the v3 container the writer
+    /// now emits must both load. An ordered `>=` dispatch would send the
+    /// v3 bytes to the v2 decoder, which reads the `any_weights` byte as
+    /// the skip-level count and corrupts the list without erroring —
+    /// so this asserts on decoded content, not merely on success.
+    #[test]
+    fn term_posting_index_dispatches_v2_and_v3_exactly() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        let mut original = TermPostingIndex::new();
+        original.add_document(
+            1,
+            vec![
+                ("hello".to_string(), 2, Some(vec![0, 5])),
+                ("world".to_string(), 1, Some(vec![1])),
+            ],
+        );
+        original.add_document(
+            2,
+            vec![
+                ("hello".to_string(), 1, Some(vec![2])),
+                ("rust".to_string(), 3, Some(vec![0, 3, 6])),
+            ],
+        );
+
+        let check = |loaded: &TermPostingIndex, label: &str| {
+            assert_eq!(loaded.doc_count(), original.doc_count(), "{label}");
+            assert_eq!(loaded.term_count(), original.term_count(), "{label}");
+            for term in ["hello", "world", "rust"] {
+                let want = original.get_posting_list(term).expect("term exists");
+                let got = loaded
+                    .get_posting_list(term)
+                    .unwrap_or_else(|| panic!("{label}: term {term} missing"));
+                assert_eq!(got.postings.len(), want.postings.len(), "{label} {term}");
+                for (g, w) in got.postings.iter().zip(want.postings.iter()) {
+                    assert_eq!(g.doc_id, w.doc_id, "{label} {term}");
+                    assert_eq!(g.frequency, w.frequency, "{label} {term}");
+                    assert_eq!(g.weight, w.weight, "{label} {term}");
+                    assert_eq!(g.positions, w.positions, "{label} {term}");
+                }
+            }
+        };
+
+        // Hand-written v2 container (write_to_storage now emits v3).
+        let v2_path = "tpi_v2.bin";
+        {
+            let output = storage.create_output(v2_path).unwrap();
+            let mut writer = StructWriter::new(output);
+            writer.write_u32(0x494E5658).unwrap(); // "INVX"
+            writer.write_u32(2).unwrap();
+            writer.write_varint(original.doc_count()).unwrap();
+            writer.write_varint(original.term_count()).unwrap();
+            writer.write_varint(3).unwrap();
+            let mut terms: Vec<_> = original.terms.iter().collect();
+            terms.sort_by_key(|(t, _)| *t);
+            for (_, posting_list) in terms {
+                posting_list.encode_v2(&mut writer).unwrap();
+            }
+            writer.close().unwrap();
+        }
+        let input = storage.open_input(v2_path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        check(
+            &TermPostingIndex::read_from_storage(&mut reader).unwrap(),
+            "v2",
+        );
+
+        // v3 container, straight from the current writer.
+        let v3_path = "tpi_v3.bin";
+        {
+            let output = storage.create_output(v3_path).unwrap();
+            let mut writer = StructWriter::new(output);
+            original.write_to_storage(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+        let input = storage.open_input(v3_path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        check(
+            &TermPostingIndex::read_from_storage(&mut reader).unwrap(),
+            "v3",
+        );
+    }
+
+    /// #553 — an unknown future version must be rejected, not guessed
+    /// at. This is what keeps the exact-match dispatch honest.
+    #[test]
+    fn term_posting_index_rejects_unknown_version() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let path = "tpi_v99.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            writer.write_u32(0x494E5658).unwrap();
+            writer.write_u32(99).unwrap();
+            writer.write_varint(0u64).unwrap();
+            writer.write_varint(0u64).unwrap();
+            writer.write_varint(0u64).unwrap();
+            writer.close().unwrap();
+        }
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let err = TermPostingIndex::read_from_storage(&mut reader).unwrap_err();
+        assert!(
+            err.to_string().contains("Unsupported index version: 99"),
+            "unexpected error: {err}"
+        );
     }
 
     /// Encoding a doc_id beyond `u32::MAX` must fail with a clear error so we

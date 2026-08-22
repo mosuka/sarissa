@@ -226,7 +226,14 @@ pub struct BlockTermDictionary {
     /// the posting lists, but it is the only segment-level file with a
     /// magic + version, so its version implies the format used by the
     /// sibling `.post` file. `1` = legacy (no on-disk skip levels);
-    /// `2` = multi-level skip table embedded per posting list.
+    /// `2` = multi-level skip table embedded per posting list (#503);
+    /// `3` = the weights section is gated by an `any_weights` header
+    /// byte and omitted when every weight is `1.0` (#553).
+    ///
+    /// Because this drives which decoder `SegmentReader::postings`
+    /// selects, bumping the posting format **requires** bumping this
+    /// version in the same change — otherwise new payloads are handed to
+    /// an old decoder and misparse without erroring.
     posting_format_version: u32,
 }
 
@@ -356,11 +363,11 @@ impl BlockTermDictionary {
 
     /// Read the dictionary from storage.
     ///
-    /// Format (v1 `LTDD` layout):
+    /// Format (`LTDD` layout):
     ///
     /// ```text
     /// [magic:              u32 = 0x4C544444 "LTDD"]
-    /// [version:            u32 = 1]
+    /// [version:            u32 = 1 | 2 | 3]
     /// [fst_bytes_len:      u32]
     /// [fst_bytes:          u8 × fst_bytes_len]
     /// [block_section_len:  u32]
@@ -389,7 +396,7 @@ impl BlockTermDictionary {
         }
 
         let version = reader.read_u32()?;
-        if version != 1 && version != 2 {
+        if !matches!(version, 1..=3) {
             return Err(LaurusError::index(format!(
                 "Unsupported BlockTermDictionary version: {version}"
             )));
@@ -436,14 +443,20 @@ impl BlockTermDictionary {
         self.posting_format_version
     }
 
-    /// Write the dictionary to storage in the v2 `LTDD` layout.
+    /// Write the dictionary to storage in the v3 `LTDD` layout.
     /// See [`Self::read_from_storage`] for the byte layout.
     pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
         writer.write_u32(MAGIC_LTDD)?;
-        // v2 (#503): every sibling `.post` file uses the v2 posting list
-        // format with an on-disk multi-level skip table. v1 dictionaries
-        // remain readable for backward compat via `read_from_storage`.
-        writer.write_u32(2)?; // version
+        // Stamp the version this dictionary actually carries rather than
+        // a literal. Fresh builds set it to the current format in
+        // `build()`; a dictionary loaded from disk keeps whatever its
+        // segment was written with, so re-serialising one can never
+        // claim a newer format than its sibling `.post` file holds
+        // (#553).
+        //
+        // v1 = no on-disk skip levels; v2 = skip table per posting list
+        // (#503); v3 = weights section gated by `any_weights` (#553).
+        writer.write_u32(self.posting_format_version)?;
 
         let fst_bytes = self.fst.as_fst().as_inner();
         writer.write_u32(
@@ -549,7 +562,7 @@ impl TermDictionaryBuilder {
                 total_term_count: 0,
                 block_count: 0,
                 // Fresh builds always emit the latest format (#503).
-                posting_format_version: 2,
+                posting_format_version: 3,
             });
         }
 
@@ -625,7 +638,7 @@ impl TermDictionaryBuilder {
             total_term_count,
             block_count,
             // Fresh builds always emit the latest format (#503).
-            posting_format_version: 2,
+            posting_format_version: 3,
         })
     }
 
@@ -712,6 +725,170 @@ mod tests {
         let dict = builder.build().unwrap();
         assert_eq!(dict.len(), 1);
         assert!(dict.get("test").is_some());
+    }
+
+    // ----- Posting format version (#553) -----
+
+    /// Copy a dictionary file, overwriting only its `version` header
+    /// field.
+    ///
+    /// Everything after the header is version-independent, so a body
+    /// written by the current code with an older stamp is byte-identical
+    /// to what that older release produced — which is what makes this a
+    /// genuine backward-compatibility fixture rather than a re-encoding.
+    /// The trailing CRC is not recomputed because `read_from_storage`
+    /// does not verify it (checksum validation is opt-in via
+    /// `StructReader::verify_checksum`).
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - Storage holding both files.
+    /// * `src` - Path of the file to copy.
+    /// * `dst` - Path to write the restamped copy to.
+    /// * `version` - Version number to stamp.
+    fn stamp_version(storage: &Arc<MemoryStorage>, src: &str, dst: &str, version: u32) {
+        use std::io::{Read, Write};
+
+        let mut bytes = Vec::new();
+        {
+            let mut input = storage.open_input(src).unwrap();
+            input.read_to_end(&mut bytes).unwrap();
+        }
+        // [magic: u32][version: u32], little-endian per `StructWriter`.
+        bytes[4..8].copy_from_slice(&version.to_le_bytes());
+        {
+            let mut output = storage.create_output(dst).unwrap();
+            output.write_all(&bytes).unwrap();
+            output.flush_and_sync().unwrap();
+            output.close().unwrap();
+        }
+    }
+
+    /// #553 — the `.dict` header version is what tells the reader which
+    /// `.post` decoder to use, so a fresh build must stamp the current
+    /// version and a round trip must carry it back unchanged.
+    ///
+    /// Nothing asserted this value before, which is how the two version
+    /// gates could have drifted apart unnoticed.
+    #[test]
+    fn fresh_dictionary_stamps_and_round_trips_posting_format_v3() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut builder = TermDictionaryBuilder::new();
+        builder.add_term("alpha".to_string(), create_test_term_info(0));
+        builder.add_term("beta".to_string(), create_test_term_info(100));
+        let dict = builder.build().unwrap();
+
+        assert_eq!(
+            dict.posting_format_version(),
+            3,
+            "fresh builds must emit the current posting format"
+        );
+
+        let path = "dict_v3.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            dict.write_to_storage(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let loaded = BlockTermDictionary::read_from_storage(&mut reader).unwrap();
+
+        assert_eq!(loaded.posting_format_version(), 3);
+        assert!(loaded.get("alpha").is_some());
+        assert!(loaded.get("beta").is_some());
+    }
+
+    /// #553 — an existing v2 dictionary must keep loading and must keep
+    /// reporting **2**, so its sibling `.post` file is decoded with the
+    /// v2 decoder rather than the v3 one.
+    ///
+    /// This is the backward-compatibility guarantee for every index
+    /// written before this change. `index-interop` CI cannot cover it —
+    /// both of its jobs build the same commit, so it tests platforms,
+    /// not versions.
+    #[test]
+    fn v2_dictionary_still_loads_and_reports_v2() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut builder = TermDictionaryBuilder::new();
+        builder.add_term("gamma".to_string(), create_test_term_info(0));
+        let dict = builder.build().unwrap();
+
+        // Rewrite the version field in place: everything after the
+        // header is version-independent, so a v3 body with a v2 stamp is
+        // byte-identical to what the previous release produced.
+        let path = "dict_v2.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            dict.write_to_storage(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+        let patched = "dict_v2_patched.bin";
+        stamp_version(&storage, path, patched, 2);
+
+        let input = storage.open_input(patched).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let loaded = BlockTermDictionary::read_from_storage(&mut reader).unwrap();
+
+        assert_eq!(
+            loaded.posting_format_version(),
+            2,
+            "a v2 dictionary must not be silently promoted to v3"
+        );
+        assert!(loaded.get("gamma").is_some());
+
+        // Re-serialising it must keep the v2 stamp. Writing a literal
+        // here instead of the carried version would tell the reader to
+        // use the v3 posting decoder on a sibling `.post` file that is
+        // still v2 — a silent misparse, and the reason
+        // `write_to_storage` stamps `self.posting_format_version`.
+        let rewritten = "dict_v2_rewritten.bin";
+        {
+            let output = storage.create_output(rewritten).unwrap();
+            let mut writer = StructWriter::new(output);
+            loaded.write_to_storage(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+        let input = storage.open_input(rewritten).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let again = BlockTermDictionary::read_from_storage(&mut reader).unwrap();
+        assert_eq!(
+            again.posting_format_version(),
+            2,
+            "re-serialising a v2 dictionary must not promote it to v3"
+        );
+    }
+
+    /// #553 — an unknown version must be rejected rather than assumed
+    /// compatible, which is what keeps the exact-match dispatch in
+    /// `SegmentReader::postings` sound.
+    #[test]
+    fn unknown_dictionary_version_is_rejected() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut builder = TermDictionaryBuilder::new();
+        builder.add_term("delta".to_string(), create_test_term_info(0));
+        let dict = builder.build().unwrap();
+
+        let path = "dict_v99_src.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            dict.write_to_storage(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+        let patched = "dict_v99.bin";
+        stamp_version(&storage, path, patched, 99);
+
+        let input = storage.open_input(patched).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let err = BlockTermDictionary::read_from_storage(&mut reader).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Unsupported BlockTermDictionary version"),
+            "unexpected error: {err}"
+        );
     }
 
     // ----- BlockTermDictionary tests (#487 PR1) -----
