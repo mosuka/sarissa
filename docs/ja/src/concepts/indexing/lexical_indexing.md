@@ -65,13 +65,55 @@ Posting List の各エントリには以下の情報が含まれます。
 | Document ID | 内部 `u64` 識別子 |
 | Term Frequency | そのドキュメント内でタームが出現する回数 |
 | Positions（オプション） | ドキュメント内でタームが出現する位置（フレーズクエリに必要） |
-| Weight | このポスティングのスコアウェイト |
+| Weight | このポスティングのスコアウェイト。既定値は `1.0` で、Laurus が書き出すポスティングは常にこの値を持つ。リスト内のすべてのウェイトが `1.0` の場合、ウェイトセクションはディスクから完全に省かれる（v3） |
+
+### On-Disk Posting レイアウト
+
+Posting list は **structure-of-arrays** レイアウトで保存され、各フィールドが
+それぞれ連続したセクションに書かれます。ドキュメント ID とターム頻度は
+固定長の **128 整数ブロック**単位でビットパックされ（ドキュメント ID は
+Frame-of-Reference + ソート済みデルタ）、端数の末尾ブロックは varint に
+フォールバックします。これは Tantivy および Lucene 9 が採用する on-disk
+形式と同じで、[`bitpacking`](https://crates.io/crates/bitpacking) クレートに
+よる SIMD デコードが効きます。
+
+```text
+[term, total_frequency, doc_frequency, posting_count N, any_positions, any_weights]
+[Skip levels              — v2 以降: num_levels + レベルごと (len + u32 doc_ids)]
+[Section 1: doc_ids       — N/128 ビットパックブロック + varint 末尾]
+[Section 2: frequencies   — N/128 ビットパックブロック + varint 末尾]
+[Section 3: weights       — N 個の生 f32（any_weights == 1 のときのみ）]
+[Section 4: positions     — ポスティングごとのフラグ + varint デルタ（存在する場合のみ）]
+```
+
+2 つのヘッダフラグが 2 つの省略可能セクションを制御します。`any_positions` は
+従来から Section 4 を制御しており、`any_weights` は **v3** で追加され、同じ形で
+Section 3 を制御します。Laurus が書き出すポスティングは常に既定値 `1.0` の
+ウェイトを持つため、writer が生成するセグメントでは Section 3 が常に省かれ、
+posting list は v2 と比べて `4N - 1` バイト小さくなります ── ポスティング
+あたり 4 バイトの削減から、リストあたり 1 バイトのフラグを差し引いた値です。
+10 億ポスティングでは、書き込み・読み出し・キャッシュのいずれもしなくて
+済むバイト数が約 4 GB になります。
+
+この削減によって形式が lossy になることはありません。`1.0` 以外のウェイトが
+1 つでもあればフラグが立って Section 3 が復活し、すべての値が厳密に往復します。
+
+セグメント内のドキュメント ID は `u32` に収まる必要があります。`u32::MAX` を
+超える値のエンコードは、ビットパックされたセグメントを黙って破損させないよう、
+明確なエラーで即座に失敗します。
+
+デコーダは SoA ネイティブの高速パス（`PostingList::decode_soa`）を提供し、
+中間的な `Vec<Posting>` の再構築を挟まずに `doc_id` と `frequency` の
+parallel な `Vec<u32>` スライスをディスクから直接生成します。クエリ
+イテレータはこのスライスを保持するため、`next()` は 40 バイトの `Posting`
+構造体をストライドせず、密なスライス上で `u32` カーソルを 1 つ進めるだけで
+済みます。
 
 ### Multi-Level Skip Table
 
 `N ≥ 8` ポスティングを持つ posting list はヘッダ直後に
-Lucene-90 互換のマルチレベルスキップテーブル（v2 フォーマット）を
-持ちます。各レベルは `doc_ids` 上の固定ストライド窓の "末尾 doc id" を
+Lucene-90 互換のマルチレベルスキップテーブル（v2 フォーマットで導入され、
+v3 でも変更なし）を持ちます。各レベルは `doc_ids` 上の固定ストライド窓の "末尾 doc id" を
 保持し、レベル 0 は `SKIP_INTERVAL = 8` ポスティングごとに 1 エントリ、
 レベル 1 は `8²`、トップレベルは 1 エントリに収束するまで重ねます。
 
@@ -83,9 +125,12 @@ Lucene-90 互換のマルチレベルスキップテーブル（v2 フォーマ�
 `O(N / block_size)` ウォークと比べて大幅に少なくなります。
 
 スキップテーブルは Lucene 9 / Tantivy と同様に posting list の
-ファイル内に同居させ、別ファイル化はしません。スキップテーブルが
-on-disk に保存されていない v1 形式のセグメントもそのまま読めます ──
-SoA デコーダがロード時に `doc_ids` から再構築します。
+ファイル内に同居させ、別ファイル化はしません。古いセグメントもそのまま
+読めます ── スキップテーブルを on-disk に持たない v1 形式は SoA デコーダが
+ロード時に `doc_ids` から再構築し、v2 形式は無条件のウェイトセクションを
+そのまま読みます。どのデコーダを使うかは、マジックとバージョン番号を持つ
+唯一のセグメント単位ファイルである `.dict` のバージョンで決まるため、
+posting のペイロード自体を推測的に読む必要はありません。
 
 ### Term Dictionary の 2 層構造
 
@@ -93,7 +138,7 @@ SoA デコーダがロード時に `doc_ids` から再構築します。
 それぞれの最適化目標を分離しています。
 
 - **ディスク層** — `.dict` ファイルは Lucene `BlockTreeTermsWriter`
-  風のブロックツリーレイアウト（マジック `LTDD`、スキーマ v1）。
+  風のブロックツリーレイアウト（マジック `LTDD`、スキーマ v3）。
   100k ユニーク 5-10 バイトタームのコーパスで `.dict` は ~12.5
   バイト/ターム と、旧 parallel-array 形式比 **約 70% 削減**
 - **メモリ層** — build / load 時に `AHashMap<term, ordinal>` 索引、
@@ -184,7 +229,7 @@ graph TB
 
 | ファイル拡張子 | 内容 |
 | :--- | :--- |
-| `.dict` | Term Dictionary。v1 `LTDD` ブロックツリーレイアウト（FST + 128 ターム単位の front-coded ブロック + bit-packed `TermInfo`）。セグメント open 時に `AHashMap` バックの in-memory クエリ層へ展開 |
+| `.dict` | Term Dictionary。v3 `LTDD` ブロックツリーレイアウト（FST + 128 ターム単位の front-coded ブロック + bit-packed `TermInfo`）。セグメント open 時に `AHashMap` バックの in-memory クエリ層へ展開 |
 | `.post` | Posting Lists（ドキュメント ID、ターム頻度、位置情報） |
 | `.bkd` | 数値・日付・`Geo`（2D）・`Geo3d`（3D ECEF）フィールドの [BKD ツリー](../bkd_tree.md) データ |
 | `.docs` | 格納されたフィールド値（元のドキュメント内容） |

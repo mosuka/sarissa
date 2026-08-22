@@ -1152,20 +1152,26 @@ impl SegmentReader {
             // Decode the posting list in SoA-native form to skip the
             // intermediate `Vec<Posting>` reassembly and keep the iterator
             // backed by parallel `Vec<u32>` slices. Dispatch by on-disk
-            // posting format version (#503): v2 segments carry the
-            // multi-level skip table inline; v1 segments rebuild it from
-            // `doc_ids` at load time inside `decode_soa`.
+            // posting format version: v2 segments carry the multi-level
+            // skip table inline (#503) while v1 segments rebuild it from
+            // `doc_ids` at load time inside `decode_soa`; v3 additionally
+            // gates the weights section on a header byte (#553).
+            //
+            // Matched exactly rather than with an ordered comparison. A
+            // `>=` would route a newer payload into an older decoder,
+            // which reads the added header byte as the next field and
+            // corrupts the list silently instead of failing.
             let posting_format = self
                 .term_dictionary
                 .read()
                 .unwrap()
                 .as_ref()
                 .map(|dict| dict.posting_format_version())
-                .unwrap_or(2);
-            let decoded = if posting_format >= 2 {
-                PostingList::decode_soa_v2(&mut reader)?
-            } else {
-                PostingList::decode_soa(&mut reader)?
+                .unwrap_or(3);
+            let decoded = match posting_format {
+                1 => PostingList::decode_soa(&mut reader)?,
+                2 => PostingList::decode_soa_v2(&mut reader)?,
+                _ => PostingList::decode_soa_v3(&mut reader)?,
             };
             let filtered = self.filter_deleted_soa(decoded)?;
 
@@ -2439,6 +2445,101 @@ impl crate::lexical::reader::PostingIterator for MergedPostingIterator {
 mod tests {
     use super::*;
     use crate::lexical::reader::PostingIterator;
+
+    /// #553 — the production decoder selector, end to end.
+    ///
+    /// `SegmentReader::postings` is the only place that chooses a
+    /// posting decoder for a real segment, and it had **no test at all**
+    /// before this change — which is how the `posting_format >= 2`
+    /// ordered comparison could have survived a format bump and silently
+    /// misparsed v3 payloads.
+    ///
+    /// This drives the whole production path: `InvertedIndexWriter`
+    /// writes a real segment (v3 postings + a v3 dictionary), and the
+    /// reader dispatches on the dictionary version to decode it back.
+    /// The unit tests around `encode_v3` / `decode_soa_v3` never touch
+    /// this wiring.
+    #[test]
+    fn segment_reader_decodes_postings_written_by_the_writer() {
+        use crate::lexical::index::inverted::writer::{
+            InvertedIndexWriter, InvertedIndexWriterConfig,
+        };
+        use crate::lexical::writer::LexicalIndexWriter;
+        use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut writer =
+            InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+
+        // Enough documents to push the term past the bit-packed block
+        // boundary, so the decode exercises full blocks plus a tail.
+        let doc_count = 200u64;
+        for i in 0..doc_count {
+            writer
+                .add_document(
+                    crate::Document::builder()
+                        .add_text("body", if i % 2 == 0 { "alpha beta" } else { "alpha" })
+                        .build(),
+                )
+                .unwrap();
+        }
+        writer.commit().unwrap();
+
+        let reader = writer.build_reader().unwrap();
+        let inverted = reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .unwrap();
+        let segment = inverted.segment_readers()[0].clone();
+        let segment = segment.read().unwrap();
+
+        // The segment the writer just produced must be stamped v3, or
+        // the dispatch below is not testing what it claims to.
+        let dict = segment
+            .term_dictionary()
+            .unwrap()
+            .expect("segment must have a term dictionary");
+        assert_eq!(
+            dict.posting_format_version(),
+            3,
+            "the writer must produce v3 segments"
+        );
+
+        // "alpha" is in every document; "beta" in the even ones.
+        let mut iter = segment
+            .postings("body", "alpha")
+            .unwrap()
+            .expect("alpha must have postings");
+        // `doc_id()` is only valid after a `next()` that returned true,
+        // so the iterator starts positioned before the first posting.
+        let mut seen = Vec::new();
+        while iter.next().unwrap() {
+            seen.push(iter.doc_id());
+        }
+        assert_eq!(
+            seen.len(),
+            doc_count as usize,
+            "every document contains 'alpha'"
+        );
+        assert!(
+            seen.windows(2).all(|w| w[0] < w[1]),
+            "doc ids must come back strictly ascending"
+        );
+
+        let mut iter = segment
+            .postings("body", "beta")
+            .unwrap()
+            .expect("beta must have postings");
+        let mut even = Vec::new();
+        while iter.next().unwrap() {
+            even.push(iter.doc_id());
+        }
+        assert_eq!(
+            even.len(),
+            (doc_count / 2) as usize,
+            "'beta' is only in the even documents"
+        );
+    }
 
     #[test]
     fn test_advanced_posting_iterator() {

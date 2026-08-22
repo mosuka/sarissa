@@ -65,7 +65,7 @@ Each entry in a posting list contains:
 | Document ID | Internal `u64` identifier (per-segment value must fit in `u32`) |
 | Term Frequency | How many times the term appears in this document |
 | Positions (optional) | Where in the document the term appears (needed for phrase queries) |
-| Weight | Score weight for this posting |
+| Weight | Score weight for this posting. Defaults to `1.0`, which is what every posting written by Laurus carries; a list in which every weight is `1.0` omits the weights section from disk entirely (v3) |
 
 ### On-Disk Posting Layout
 
@@ -78,13 +78,25 @@ yields fast SIMD-accelerated decoding through the
 [`bitpacking`](https://crates.io/crates/bitpacking) crate.
 
 ```text
-[term, total_frequency, doc_frequency, posting_count N, any_positions]
-[Skip levels              — v2 only: num_levels + per-level (len + u32 doc_ids)]
+[term, total_frequency, doc_frequency, posting_count N, any_positions, any_weights]
+[Skip levels              — v2 onward: num_levels + per-level (len + u32 doc_ids)]
 [Section 1: doc_ids       — N/128 bit-packed blocks + varint tail]
 [Section 2: frequencies   — N/128 bit-packed blocks + varint tail]
-[Section 3: weights       — N raw f32 values]
+[Section 3: weights       — N raw f32 values (only when any_weights == 1)]
 [Section 4: positions     — per-posting flag + varint deltas (only if any)]
 ```
+
+Two header flags gate the two optional sections. `any_positions` has always
+gated Section 4; `any_weights` was added in **v3** and gates Section 3 the
+same way. Because every posting Laurus writes carries the default weight of
+`1.0`, Section 3 is absent from every segment the writer produces, and a
+posting list is `4N - 1` bytes smaller than its v2 equivalent — four bytes
+recovered per posting, less the one flag byte per list. At a billion
+postings that is roughly 4 GB that no longer has to be written, read, or
+cached.
+
+The saving does not make the format lossy: a single weight other than `1.0`
+sets the flag, restores Section 3, and every value round-trips exactly.
 
 Per-segment doc IDs must fit in `u32`. Encoding a value beyond `u32::MAX`
 fails fast with a clear error to prevent silent corruption of the
@@ -99,8 +111,9 @@ over a dense slice instead of striding across a 40-byte `Posting` struct.
 ### Multi-Level Skip Table
 
 A posting list of `N ≥ 8` postings carries a Lucene-90-style
-multi-level skip table immediately after the header (v2 format,
-introduced for `skip_to` performance on seek-heavy workloads).
+multi-level skip table immediately after the header (introduced in
+the v2 format for `skip_to` performance on seek-heavy workloads, and
+unchanged in v3).
 Each level stores the "last doc id" of a fixed-stride window over
 `doc_ids`; level 0 has one entry per `SKIP_INTERVAL = 8` postings,
 level 1 covers `8²` postings, and so on until the top level
@@ -115,9 +128,13 @@ is `O(log_8 N + SKIP_INTERVAL)` per call — for `N = 1 M` that is
 single-level `block_cache` paid before.
 
 The table is co-located with the posting list rather than stored in a
-separate file, matching Lucene 9 / Tantivy. Segments written in the
-legacy v1 format (without the on-disk skip table) remain readable —
-the SoA decoder rebuilds the table from `doc_ids` at load time.
+separate file, matching Lucene 9 / Tantivy. Older segments remain
+readable: v1 segments (without the on-disk skip table) have it rebuilt
+from `doc_ids` at load time, and v2 segments are read with their
+unconditional weights section intact. Which decoder applies is
+determined by the sibling `.dict` file's version — the only
+segment-level file carrying a magic and a version number — so the
+posting payload itself never has to be probed.
 
 ### Term Dictionary Storage Layers
 
@@ -126,7 +143,7 @@ on-disk compactness from in-memory query speed:
 
 - **Disk layer** — the `.dict` file uses a Lucene
   `BlockTreeTermsWriter`-style block-tree layout (magic `LTDD`,
-  schema v1). This produces a compact file: at 100k unique 5-10 byte
+  schema v3). This produces a compact file: at 100k unique 5-10 byte
   terms a `.dict` is ~12.5 bytes / term, roughly **70 % smaller** than
   the prior parallel-array on-disk format.
 - **In-memory query layer** — at build / load time the dictionary
@@ -221,7 +238,7 @@ graph TB
 
 | File Extension | Contents |
 | :--- | :--- |
-| `.dict` | Term dictionary in the v1 `LTDD` block-tree layout (FST over per-block representative terms + 128-term blocks of front-coded term bytes + bit-packed `TermInfo`). Loaded into an `AHashMap`-backed in-memory query layer at segment open. |
+| `.dict` | Term dictionary in the v3 `LTDD` block-tree layout (FST over per-block representative terms + 128-term blocks of front-coded term bytes + bit-packed `TermInfo`). Loaded into an `AHashMap`-backed in-memory query layer at segment open. |
 | `.post` | Posting lists (document IDs, term frequencies, positions) |
 | `.bkd` | [BKD tree](../bkd_tree.md) data for numeric, date, `Geo` (2D), and `Geo3d` (3D ECEF) fields |
 | `.docs` | Stored field values (the original document content) |
