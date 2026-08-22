@@ -214,6 +214,25 @@ impl DeletionBitmap {
         docs.iter().collect()
     }
 
+    /// Consume this bitmap and hand over its deleted-id set directly.
+    ///
+    /// Unlike [`Self::get_deleted_docs`], which collects the ids into a
+    /// `Vec<u64>`, this moves the underlying `RoaringTreemap` out — no
+    /// clone, no intermediate allocation. Use it when the caller only
+    /// needs membership tests and a count, which the treemap answers
+    /// directly and far more compactly (#541).
+    ///
+    /// # Returns
+    ///
+    /// The owned set of deleted document IDs.
+    pub fn into_deleted_docs(self) -> RoaringTreemap {
+        // A poisoned lock still holds a valid bitmap — only a writer
+        // panicked — so recover rather than propagate.
+        self.deleted_docs
+            .into_inner()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Get an approximate memory usage of this deletion tracker in bytes.
     ///
     /// The estimate includes the struct itself, the segment ID string buffer,

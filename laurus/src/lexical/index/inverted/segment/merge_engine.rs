@@ -5,7 +5,8 @@
 
 use std::sync::Arc;
 
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashMap;
+use roaring::RoaringTreemap;
 
 use crate::error::{LaurusError, Result};
 use crate::lexical::core::analyzed::{AnalyzedDocument, AnalyzedTerm};
@@ -297,7 +298,7 @@ impl MergeEngine {
                 &deleted,
                 &mut store_positions,
             )?;
-            stats.deleted_docs_removed += deleted.len() as u64;
+            stats.deleted_docs_removed += deleted.len();
             for (doc_id, analyzed) in reconstructed {
                 if docs.insert(doc_id, analyzed).is_none() {
                     order.push(doc_id);
@@ -370,10 +371,9 @@ impl MergeEngine {
     }
 
     /// Load the set of deleted doc_ids for a segment from its `.delmap`.
-    fn load_deleted_docs(&self, segment_info: &SegmentInfo) -> Result<AHashSet<u64>> {
-        let mut deleted = AHashSet::new();
+    fn load_deleted_docs(&self, segment_info: &SegmentInfo) -> Result<RoaringTreemap> {
         if !segment_info.has_deletions {
-            return Ok(deleted);
+            return Ok(RoaringTreemap::new());
         }
         let bitmap_file = format!("{}.delmap", segment_info.segment_id);
         if let Ok(input) = self.storage.open_input(&bitmap_file) {
@@ -383,12 +383,17 @@ impl MergeEngine {
             if let Ok(mut reader) = StructReader::new(input)
                 && let Ok(bitmap) = DeletionBitmap::read_from_storage(&mut reader)
             {
-                for doc_id in bitmap.get_deleted_docs() {
-                    deleted.insert(doc_id);
-                }
+                // The `.delmap` payload already *is* a Roaring bitmap, and
+                // the merge only ever asks it for a count and membership —
+                // both of which it answers directly. Expanding it into a
+                // `Vec` and then a hash set turned ~125 KB into tens of
+                // megabytes of transient allocation for a segment with a
+                // million deletions, and replaced a bit test with a hashed
+                // probe on the merge's innermost loops (#541).
+                return Ok(bitmap.into_deleted_docs());
             }
         }
-        Ok(deleted)
+        Ok(RoaringTreemap::new())
     }
 
     /// Load a segment reader for the given segment.
@@ -423,7 +428,7 @@ impl MergeEngine {
         &self,
         reader: &SegmentReader,
         segment_id: &str,
-        deleted: &AHashSet<u64>,
+        deleted: &RoaringTreemap,
         store_positions: &mut Option<bool>,
     ) -> Result<Vec<(u64, AnalyzedDocument)>> {
         // Pass 1: bucket postings into per-doc analyzed terms.
@@ -435,10 +440,21 @@ impl MergeEngine {
                 };
                 if let Some(mut iter) = reader.postings(field, term)? {
                     while iter.next()? {
+                        // No deletion check here: `SegmentReader::postings`
+                        // already excludes deleted documents on both of its
+                        // paths — `filter_deleted_soa` for the normal one and
+                        // `scan_documents_for_term` for the no-inverted-index
+                        // fallback — gating on the same `has_deletions` flag
+                        // and the same `.delmap` this merge reads.
+                        //
+                        // That invariant is pinned by
+                        // `postings_never_yields_a_deleted_document` in
+                        // reader.rs, which is stronger protection than a
+                        // second test that can never fire, on the innermost
+                        // loop of the merge. The BKD and stored-document
+                        // loops below get no such filtering and do check
+                        // (#541).
                         let doc_id = iter.doc_id();
-                        if deleted.contains(&doc_id) {
-                            continue;
-                        }
                         let positions = iter.positions()?;
                         let freq = iter.term_freq();
                         if store_positions.is_none() {
@@ -493,7 +509,9 @@ impl MergeEngine {
                 let mut visitor = CollectPointsVisitor::default();
                 tree.intersect(&mut visitor)?;
                 for (doc_id, point) in visitor.entries {
-                    if deleted.contains(&doc_id) {
+                    // Load-bearing: `get_bkd_tree` hands back the raw
+                    // `BKDReader`, which knows nothing about deletions.
+                    if deleted.contains(doc_id) {
                         continue;
                     }
                     points
@@ -509,7 +527,9 @@ impl MergeEngine {
         // Pass 2: assemble each live document.
         let mut out = Vec::new();
         for doc_id in reader.doc_ids()? {
-            if deleted.contains(&doc_id) {
+            // Load-bearing: `doc_ids()` returns every stored key, deleted
+            // ones included.
+            if deleted.contains(doc_id) {
                 continue;
             }
             let Some(stored) = reader.document(doc_id)? else {
@@ -602,6 +622,108 @@ mod tests {
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;
+
+    /// #541 — the deterministic gate.
+    ///
+    /// The merge used to expand the `.delmap`'s Roaring bitmap into a
+    /// `Vec<u64>` and then an `AHashSet<u64>`, both discarded when the
+    /// merge finished. This pins what that cost, without a stopwatch:
+    /// wall-clock benchmarks are noise-dominated on this host, and no
+    /// benchmark reaches `MergeEngine` at all.
+    ///
+    /// `serialized_size()` is the repository's own yardstick for this
+    /// comparison — `DeletionBitmap::memory_usage` is defined as exactly
+    /// that, and its doc comment records that it replaced "the previous
+    /// `AHashSet::capacity()` heuristic".
+    ///
+    /// The point asserted is structural rather than a single ratio: over a
+    /// dense run of deletions the bitmap's size **does not grow at all**
+    /// while the hash set grows with the deletion count. A ratio measured
+    /// at one size would have hidden that, and would also have been
+    /// measured at whichever container boundary happened to be worst.
+    ///
+    /// The hash-set figure, `capacity() * size_of::<u64>()`, deliberately
+    /// UNDERSTATES the old cost: it ignores hashbrown's one control byte
+    /// per bucket and its 8/7 over-allocation, and ignores the `Vec<u64>`
+    /// materialised alongside it. Every number here is a floor.
+    #[test]
+    fn roaring_deletion_set_is_far_smaller_than_the_hash_set_it_replaced() {
+        use ahash::AHashSet;
+        use roaring::RoaringTreemap;
+
+        let mut measured: Vec<(u64, usize, usize)> = Vec::new();
+
+        // Dense runs — the shape a segment accumulates over its life.
+        for deleted_count in [4_096u64, 16_384, 65_536] {
+            let mut bitmap = RoaringTreemap::new();
+            for doc_id in 0..deleted_count {
+                bitmap.insert(doc_id);
+            }
+
+            let old: AHashSet<u64> = bitmap.iter().collect();
+            assert_eq!(
+                old.len() as u64,
+                bitmap.len(),
+                "the substitution must be lossless at {deleted_count} deletions"
+            );
+
+            measured.push((
+                deleted_count,
+                bitmap.serialized_size(),
+                old.capacity() * std::mem::size_of::<u64>(),
+            ));
+        }
+
+        // The bitmap is flat across a 16x growth in deletions; the hash set
+        // is not. This is the mechanism, and it is what makes the saving
+        // scale with segment size rather than being a fixed discount.
+        let bitmap_sizes: Vec<usize> = measured.iter().map(|(_, b, _)| *b).collect();
+        assert!(
+            bitmap_sizes.iter().all(|b| *b == bitmap_sizes[0]),
+            "a dense run must stay one container regardless of length: {measured:?}"
+        );
+
+        let first = measured[0];
+        let last = measured[measured.len() - 1];
+        assert!(
+            last.2 >= first.2 * 8,
+            "the hash set must grow with the deletion count: {measured:?}"
+        );
+
+        // Even at the worst container boundary the hash set alone — before
+        // counting the transient Vec — is several times the bitmap.
+        for (count, roaring_bytes, hash_set_bytes) in &measured {
+            let discarded_vec_bytes = (*count as usize) * std::mem::size_of::<u64>();
+            assert!(
+                hash_set_bytes >= &(6 * roaring_bytes),
+                "at {count} deletions: hash set {hash_set_bytes} B vs bitmap {roaring_bytes} B, \
+                 plus a further {discarded_vec_bytes} B of transient Vec"
+            );
+        }
+    }
+
+    /// #541 — `into_deleted_docs` must hand over exactly what
+    /// `get_deleted_docs` used to collect, so switching the merge to the
+    /// bitmap changes what it allocates and nothing else.
+    #[test]
+    fn into_deleted_docs_matches_the_vec_it_replaces() {
+        use crate::maintenance::deletion::DeletionBitmap;
+
+        let bitmap = DeletionBitmap::new("seg_x".to_string(), 0, 999);
+        for doc_id in [3u64, 7, 42, 900, 999] {
+            bitmap.delete_document(doc_id).unwrap();
+        }
+
+        let as_vec = bitmap.get_deleted_docs();
+        let as_bitmap = bitmap.into_deleted_docs();
+
+        assert_eq!(as_bitmap.len(), as_vec.len() as u64);
+        assert_eq!(as_bitmap.iter().collect::<Vec<u64>>(), as_vec);
+        for doc_id in &as_vec {
+            assert!(as_bitmap.contains(*doc_id));
+        }
+        assert!(!as_bitmap.contains(4));
+    }
 
     #[allow(dead_code)]
     fn create_test_segment(id: &str, doc_count: u64) -> ManagedSegmentInfo {

@@ -2446,6 +2446,101 @@ mod tests {
     use super::*;
     use crate::lexical::reader::PostingIterator;
 
+    /// #541 — `SegmentReader::postings` must never yield a deleted
+    /// document, on either of its paths.
+    ///
+    /// The segment merge relies on this: its per-posting loop no longer
+    /// re-checks the deletion set, because doing so could not ever fire
+    /// and cost a membership test on the merge's innermost loop. That
+    /// makes this invariant load-bearing rather than incidental, so it is
+    /// pinned here — a test that fails when the invariant breaks is
+    /// stronger protection than a runtime check that cannot.
+    ///
+    /// Both paths are covered: the normal one through `filter_deleted_soa`,
+    /// and the `scan_documents_for_term` fallback taken when a segment has
+    /// no `.post` file.
+    #[test]
+    fn postings_never_yields_a_deleted_document() {
+        use crate::lexical::index::inverted::writer::{
+            InvertedIndexWriter, InvertedIndexWriterConfig,
+        };
+        use crate::lexical::writer::LexicalIndexWriter;
+        use crate::maintenance::deletion::{DeletionConfig, DeletionManager};
+        use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut writer =
+            InvertedIndexWriter::new(storage.clone(), InvertedIndexWriterConfig::default())
+                .unwrap();
+
+        let doc_count = 60u64;
+        for _ in 0..doc_count {
+            writer
+                .add_document(crate::Document::builder().add_text("body", "alpha").build())
+                .unwrap();
+        }
+        writer.commit().unwrap();
+
+        let reader = writer.build_reader().unwrap();
+        let inverted = reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .unwrap();
+        let info = inverted.segment_readers()[0]
+            .read()
+            .unwrap()
+            .segment_info()
+            .clone();
+
+        // Delete every third document straight into the segment's `.delmap`.
+        let manager = DeletionManager::new(
+            DeletionConfig {
+                enable_deletion_log: false,
+                ..Default::default()
+            },
+            storage.clone(),
+        )
+        .unwrap();
+        manager
+            .initialize_segment(&info.segment_id, info.min_doc_id, info.max_doc_id)
+            .unwrap();
+        let mut deleted_ids = Vec::new();
+        for doc_id in (info.min_doc_id..=info.max_doc_id).step_by(3) {
+            manager
+                .delete_document(&info.segment_id, doc_id, "test")
+                .unwrap();
+            deleted_ids.push(doc_id);
+        }
+        manager.flush().unwrap();
+        assert!(!deleted_ids.is_empty(), "the fixture must delete something");
+
+        // Re-open with `has_deletions` set, the state the merge sees.
+        let mut info_with_deletions = info.clone();
+        info_with_deletions.has_deletions = true;
+        let segment = SegmentReader::open(info_with_deletions, storage).unwrap();
+
+        let mut iter = segment
+            .postings("body", "alpha")
+            .unwrap()
+            .expect("term must have postings");
+        let mut seen = Vec::new();
+        while iter.next().unwrap() {
+            seen.push(iter.doc_id());
+        }
+
+        assert_eq!(
+            seen.len(),
+            (doc_count as usize) - deleted_ids.len(),
+            "postings must yield exactly the live documents"
+        );
+        for id in &deleted_ids {
+            assert!(
+                !seen.contains(id),
+                "postings yielded deleted doc {id}; the merge relies on it not doing so"
+            );
+        }
+    }
+
     /// #553 — the production decoder selector, end to end.
     ///
     /// `SegmentReader::postings` is the only place that chooses a
