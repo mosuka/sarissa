@@ -349,6 +349,9 @@ impl SegmentManager {
                 generation,
                 has_deletions,
                 shard_id,
+                // This binary registry predates the published flag and is
+                // not on any live path; anything it describes is committed.
+                committed: true,
             };
 
             // Read management metadata
@@ -1108,6 +1111,7 @@ mod tests {
             generation: 1,
             has_deletions: false,
             shard_id: 0,
+            committed: true,
         }
     }
 

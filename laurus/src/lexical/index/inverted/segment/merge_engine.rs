@@ -345,6 +345,10 @@ impl MergeEngine {
             generation: 0,        // Will be assigned by segment manager
             has_deletions: false, // New merged segment has no deleted docs until updated
             shard_id: stats.shard_id,
+            // A merge consolidates already-published segments and its
+            // sources are deleted once it lands, so the result is published
+            // immediately (#1017).
+            committed: true,
         };
 
         // Calculate segment size
@@ -735,6 +739,7 @@ mod tests {
             generation: 1,
             has_deletions: false,
             shard_id: 0, // Added shard_id for test segments
+            committed: true,
         };
 
         ManagedSegmentInfo::new(segment_info)

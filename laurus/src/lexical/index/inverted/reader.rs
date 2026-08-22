@@ -2962,6 +2962,7 @@ mod tests {
             generation: 1,
             has_deletions: false,
             shard_id: 0,
+            committed: true,
         };
 
         assert_eq!(info.segment_id, "seg_000001");

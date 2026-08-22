@@ -49,14 +49,30 @@ async fn engine_past_auto_flush() -> laurus::Result<(Engine, Arc<dyn Storage>)> 
 
     // The flush must really have happened, or these tests prove nothing:
     // a segment `.meta` exists even though nothing has been committed.
-    let flushed = storage
+    let metas: Vec<String> = storage
         .list_files()?
-        .iter()
-        .any(|f| f.contains("segment_") && f.ends_with(".meta"));
+        .into_iter()
+        .filter(|f| f.contains("segment_") && f.ends_with(".meta"))
+        .collect();
     assert!(
-        flushed,
+        !metas.is_empty(),
         "automatic flush_segment must fire at max_buffered_docs"
     );
+
+    // And it must be written unpublished (#1017): the segment exists on
+    // storage, but nothing has committed it, so search must not see it. That
+    // is the invariant these NRT tests share a fixture with — they prove
+    // `_id` resolution still works precisely *because* the segment is
+    // invisible to the searcher.
+    for meta in &metas {
+        let mut input = storage.open_input(meta)?;
+        let mut json = String::new();
+        std::io::Read::read_to_string(&mut input, &mut json)?;
+        assert!(
+            json.contains("\"committed\": false"),
+            "a flushed-but-uncommitted segment must be unpublished; {meta} says: {json}"
+        );
+    }
 
     Ok((engine, storage))
 }
