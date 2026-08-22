@@ -17,9 +17,8 @@
 //! see such a segment cannot filter its deletions or its superseded upsert
 //! versions at all.
 //!
-//! These tests are `#[ignore]`d: they are the RED for the fix, kept green in
-//! CI so the reproduction stays a reviewable artifact rather than a claim.
-//! Run them with `cargo test -p laurus --test uncommitted_search_visibility_test -- --ignored`.
+//! These landed as `#[ignore]`d RED cases in #1020 and are un-ignored by the
+//! fix, so they now stand as the regression gate for the contract.
 
 use std::sync::Arc;
 
@@ -83,32 +82,30 @@ async fn engine_past_auto_flush() -> laurus::Result<(Engine, Arc<dyn Storage>)> 
     Ok((engine, storage))
 }
 
-/// Search for the term carried only by document 0.
-async fn search_zebra(engine: &Engine) -> laurus::Result<Vec<laurus::SearchResult>> {
+/// Search `body` for one term.
+async fn search_term(engine: &Engine, term: &str) -> laurus::Result<Vec<laurus::SearchResult>> {
     let request = SearchRequestBuilder::new()
         .lexical_query(LexicalSearchQuery::Obj(Box::new(TermQuery::new(
-            "body", "zebra",
+            "body", term,
         ))))
         .limit(10)
         .build();
     engine.search(request).await
 }
 
+/// Search for the term carried only by document 0.
+async fn search_zebra(engine: &Engine) -> laurus::Result<Vec<laurus::SearchResult>> {
+    search_term(engine, "zebra").await
+}
+
 /// Search for the term every other document carries.
 async fn search_alpha(engine: &Engine) -> laurus::Result<Vec<laurus::SearchResult>> {
-    let request = SearchRequestBuilder::new()
-        .lexical_query(LexicalSearchQuery::Obj(Box::new(TermQuery::new(
-            "body", "alpha",
-        ))))
-        .limit(10)
-        .build();
-    engine.search(request).await
+    search_term(engine, "alpha").await
 }
 
 /// A document written before the automatic flush must not be searchable
 /// until commit — with a **cold** searcher cache.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "RED for #1017; un-ignored by the fix"]
 async fn uncommitted_documents_are_invisible_to_search_cold_cache() -> laurus::Result<()> {
     let (engine, _storage) = engine_past_auto_flush().await?;
 
@@ -142,7 +139,6 @@ async fn uncommitted_documents_are_invisible_to_search_cold_cache() -> laurus::R
 /// A single-state test would prove nothing here, since the whole defect is
 /// that the answer depends on cache state.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "RED for #1017; un-ignored by the fix"]
 async fn uncommitted_documents_are_invisible_to_search_warm_cache() -> laurus::Result<()> {
     let (engine, _storage) = engine_past_auto_flush().await?;
 
@@ -171,7 +167,6 @@ async fn uncommitted_documents_are_invisible_to_search_warm_cache() -> laurus::R
 /// `.meta` still says `has_deletions: false` and its `.delmap` does not
 /// exist, so a searcher that can see the segment cannot filter it.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "RED for #1017; un-ignored by the fix"]
 async fn uncommitted_deletion_does_not_leave_a_live_hit() -> laurus::Result<()> {
     let (engine, _storage) = engine_past_auto_flush().await?;
 
@@ -198,13 +193,14 @@ async fn uncommitted_deletion_does_not_leave_a_live_hit() -> laurus::Result<()> 
 /// This is the sharpest symptom: two hits carrying the same external `_id`,
 /// one of them holding superseded field values.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "RED for #1017; un-ignored by the fix"]
 async fn uncommitted_upsert_does_not_duplicate_the_document() -> laurus::Result<()> {
     let (engine, _storage) = engine_past_auto_flush().await?;
 
-    // Supersede document 0: "zebra" becomes "alpha".
+    // Supersede document 0. The replacement gets its own distinctive term so
+    // the assertions below can target it exactly, rather than hoping it lands
+    // in the top-K of a term ten thousand documents share.
     let replacement = Document::builder()
-        .add_field("body", DataValue::Text("alpha".into()))
+        .add_field("body", DataValue::Text("quokka".into()))
         .build();
     engine.put_document("id000000", replacement).await?;
 
@@ -217,12 +213,19 @@ async fn uncommitted_upsert_does_not_duplicate_the_document() -> laurus::Result<
 
     engine.commit().await?;
 
-    let alpha = search_alpha(&engine).await?;
-    let dupes = alpha.iter().filter(|h| h.id == "id000000").count();
-    assert_eq!(
-        dupes, 1,
-        "exactly one live copy of an `_id` may exist, found {dupes}"
+    // The old version is gone and the new one is there, exactly once.
+    assert!(
+        search_zebra(&engine).await?.is_empty(),
+        "the superseded version must not come back at commit"
     );
+    let live = search_term(&engine, "quokka").await?;
+    assert_eq!(
+        live.len(),
+        1,
+        "exactly one live copy of an `_id` may exist, found {}",
+        live.len()
+    );
+    assert_eq!(live[0].id, "id000000");
 
     Ok(())
 }
@@ -231,7 +234,6 @@ async fn uncommitted_upsert_does_not_duplicate_the_document() -> laurus::Result<
 /// — `count` has an O(1) `term_doc_freq` shortcut with no documents to
 /// inspect — so the contract has to hold for them independently.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "RED for #1017; un-ignored by the fix"]
 async fn uncommitted_documents_are_invisible_to_count() -> laurus::Result<()> {
     let (engine, _storage) = engine_past_auto_flush().await?;
 

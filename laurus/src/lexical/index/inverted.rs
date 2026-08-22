@@ -258,8 +258,36 @@ impl InvertedIndex {
         }
     }
 
-    /// Load segment information from storage.
+    /// Load the segments a reader may see, i.e. the published ones.
+    ///
+    /// The writer flushes a segment as soon as its buffer fills, so a
+    /// segment can be fully written while its documents are not committed.
+    /// Skipping those here is what makes the documented contract hold —
+    /// documents become searchable only after `commit()` — instead of
+    /// depending on whether a searcher happened to be built in between
+    /// (#1017).
+    ///
+    /// # Returns
+    ///
+    /// Published segments, ordered by generation.
     fn load_segments(&self) -> Result<Vec<SegmentInfo>> {
+        let mut segments = self.scan_segment_metas()?;
+        segments.retain(|s| s.committed);
+        segments.sort_by_key(|s| s.generation);
+        Ok(segments)
+    }
+
+    /// Read every segment `.meta` on storage, published or not.
+    ///
+    /// Generation numbering must come from this rather than from
+    /// [`Self::load_segments`]: a merge that numbered itself from the
+    /// published set alone could collide with a segment that is flushed but
+    /// not yet committed (#1017).
+    ///
+    /// # Returns
+    ///
+    /// Every segment described on storage, in directory order.
+    fn scan_segment_metas(&self) -> Result<Vec<SegmentInfo>> {
         let files = self.storage.list_files()?;
         let mut segments = Vec::new();
 
@@ -281,7 +309,6 @@ impl InvertedIndex {
             }
         }
 
-        segments.sort_by_key(|s| s.generation);
         Ok(segments)
     }
 
@@ -300,9 +327,10 @@ impl InvertedIndex {
             // Zero or one segment: nothing to compact.
             return Ok(());
         }
-        // The merged segment must sort as the newest, so its generation is one
-        // past the highest source generation.
-        let next_generation = segments.iter().map(|s| s.generation).max().unwrap_or(0) + 1;
+        // The merged segment must sort as the newest, so its generation is
+        // one past the highest on storage — including segments flushed but
+        // not yet published, which a merge must not collide with (#1017).
+        let next_generation = self.next_generation()?;
         self.merge_segment_set(&segments, next_generation)
     }
 
@@ -335,8 +363,27 @@ impl InvertedIndex {
         let take = (self.config.merge_factor as usize).clamp(2, segments.len());
         let subset: Vec<SegmentInfo> = by_size.into_iter().take(take).map(|(s, _)| s).collect();
 
-        let next_generation = segments.iter().map(|s| s.generation).max().unwrap_or(0) + 1;
+        let next_generation = self.next_generation()?;
         self.merge_segment_set(&subset, next_generation)
+    }
+
+    /// One past the highest generation on storage.
+    ///
+    /// Derived from every `.meta`, not just the published ones: a merge that
+    /// numbered itself from the visible set alone could collide with a
+    /// segment that is flushed but not yet committed (#1017).
+    ///
+    /// # Returns
+    ///
+    /// The generation a newly merged segment should take.
+    fn next_generation(&self) -> Result<u64> {
+        Ok(self
+            .scan_segment_metas()?
+            .iter()
+            .map(|s| s.generation)
+            .max()
+            .unwrap_or(0)
+            + 1)
     }
 
     /// Merge a set of source segments into a single new segment.

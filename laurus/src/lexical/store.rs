@@ -345,16 +345,27 @@ impl LexicalStore {
         // stale segment cache while the merge deletes those segments, marking
         // deletions in ghost segments (lost dedup / duplicate versions).
         let mut writer_guard = self.writer_cache.lock();
-        // Persist any deletion state still buffered in the live writer BEFORE
-        // the merge (Issue #875): the merge engine consumes deletions from the
-        // on-disk `.delmap` files, so unflushed deletions would be resurrected
-        // into the merged segment — and then silently discarded when the
-        // writer's deletion manager is dropped by `invalidate_segment_cache`
-        // below, with the next commit's WAL truncation making the loss
-        // permanent. Flushing first makes the merge see them; failing here
-        // aborts the optimize with the writer state intact.
+        // Commit the live writer BEFORE the merge (#1017).
+        //
+        // The merge consumes the published segments, so a segment flushed but
+        // not yet committed would sit outside it — while
+        // `invalidate_segment_cache` below still drops the writer's NRT
+        // readers for it. That is exactly the #1016 failure mode: `get` and
+        // `delete` silently stop finding those documents and an upsert leaves
+        // a duplicate. Committing first means no unpublished segment exists
+        // and the question does not arise.
+        //
+        // It also subsumes the older `flush_deletions` call this replaces
+        // (Issue #875): the merge engine reads deletions from the on-disk
+        // `.delmap` files, so unflushed ones would be resurrected into the
+        // merged segment and then discarded with the writer's deletion
+        // manager. `commit` flushes them as part of its ladder.
+        //
+        // Failing here aborts the optimize with the writer state intact,
+        // which is the same contract as before. Lucene's `forceMerge`
+        // likewise operates on a flushed writer.
         if let Some(writer) = writer_guard.as_mut() {
-            writer.flush_deletions()?;
+            writer.commit()?;
         }
         let merge_result = self.index.optimize();
         // The force-merge replaces committed segments (and their deletion

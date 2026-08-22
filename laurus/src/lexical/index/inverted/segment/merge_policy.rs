@@ -420,6 +420,7 @@ mod tests {
             generation: 1,
             has_deletions: false,
             shard_id: 0,
+            committed: true,
         };
 
         let mut managed_info = ManagedSegmentInfo::new(segment_info);

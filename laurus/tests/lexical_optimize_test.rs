@@ -85,3 +85,70 @@ fn optimize_force_merges_segments_into_one() {
     assert_eq!(segment_count(&storage), 1, "re-optimize is a no-op");
     assert_eq!(hits(&store, "body", "lorem"), before);
 }
+
+/// #1017 — `optimize()` with a flushed-but-uncommitted segment in flight.
+///
+/// Segment discovery now skips unpublished segments, so a force-merge sees
+/// only committed ones. That would have left an unpublished segment outside
+/// the merge while `invalidate_segment_cache` still dropped the writer's NRT
+/// readers for it — reintroducing #1016, where `get` and `delete` silently
+/// stop finding those documents and an upsert leaves a duplicate.
+///
+/// `optimize()` therefore commits the live writer first. This pins that: the
+/// in-flight documents survive the optimize, resolve by `_id`, and end up in
+/// the merged segment rather than being stranded.
+#[test]
+fn optimize_commits_uncommitted_documents_instead_of_stranding_them() {
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let store = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
+
+    // Two committed segments, so the force-merge has something to do.
+    for i in 0..2u64 {
+        store
+            .upsert_document(
+                i + 1,
+                Document::builder()
+                    .add_text("_id", format!("committed{i}"))
+                    .add_text("title", "committed")
+                    .add_text("body", "lorem ipsum")
+                    .build(),
+            )
+            .unwrap();
+        store.commit().unwrap();
+    }
+
+    // A third document left uncommitted in the live writer.
+    store
+        .upsert_document(
+            99,
+            Document::builder()
+                .add_text("_id", "inflight")
+                .add_text("title", "inflight")
+                .add_text("body", "lorem ipsum")
+                .build(),
+        )
+        .unwrap();
+
+    store.optimize().unwrap();
+
+    // The in-flight document must not have been stranded by the merge:
+    // optimize commits first, so it is published and searchable afterwards.
+    assert_eq!(
+        hits(&store, "title", "inflight"),
+        1,
+        "an uncommitted document must survive optimize, not be stranded by it"
+    );
+    assert_eq!(
+        hits(&store, "_id", "inflight"),
+        1,
+        "and it must still resolve by `_id`, exactly once"
+    );
+
+    // And everything ended up in one merged segment.
+    assert_eq!(
+        segment_count(&storage),
+        1,
+        "optimize must leave one segment"
+    );
+    assert_eq!(hits(&store, "body", "lorem"), 3);
+}

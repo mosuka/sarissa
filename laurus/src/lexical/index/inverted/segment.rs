@@ -33,6 +33,32 @@ pub struct SegmentInfo {
 
     /// Shard ID for this segment.
     pub shard_id: u16,
+
+    /// Whether a commit has published this segment (#1017).
+    ///
+    /// The writer flushes a segment as soon as its buffer fills, long
+    /// before the commit that makes those documents durable, so a segment
+    /// can exist on storage while its contents are not yet part of the
+    /// index a reader should see. Segment discovery skips anything that is
+    /// not published, which is what makes the documented contract —
+    /// documents become searchable only after `commit()` — hold regardless
+    /// of whether a searcher happened to be built in between.
+    ///
+    /// Defaults to `true` when absent so that segments written before this
+    /// field existed keep reading back as visible. That is correct: they
+    /// were published the instant they were written, under the old rules.
+    #[serde(default = "committed_default")]
+    pub committed: bool,
+}
+
+/// Serde default for [`SegmentInfo::committed`] (#1017).
+///
+/// # Returns
+///
+/// `true`, so a `.meta` written before this field existed reads back as a
+/// published segment.
+fn committed_default() -> bool {
+    true
 }
 
 pub mod manager;
