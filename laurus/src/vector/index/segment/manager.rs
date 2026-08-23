@@ -21,9 +21,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::RwLock;
 
-use crate::error::{LaurusError, Result};
+use crate::error::Result;
 use crate::storage::Storage;
-use crate::storage::structured::{StructReader, StructWriter};
+use crate::storage::manifest as manifest_io;
 
 use super::merge_policy::MergePolicy;
 
@@ -253,46 +253,32 @@ impl SegmentManager {
     }
 
     fn load_state(&self) -> Result<()> {
-        let mut reader = match self.storage.open_input(MANIFEST_FILE) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
+        // The versioned form is length-prefixed JSON with a CRC-32 trailer;
+        // the legacy form is a bare pretty-printed JSON array written in
+        // place, with no framing and no checksum. The loader tells them apart
+        // and a checksum mismatch is a hard error rather than a silent empty
+        // start (#1022).
+        let Some((payload, format)) =
+            manifest_io::load_checksummed(self.storage.as_ref(), MANIFEST_FILE, None)?
+        else {
+            return Ok(());
         };
 
-        let mut content = Vec::new();
-        reader.read_to_end(&mut content)?;
-        // If empty file, ignore
-        if content.is_empty() {
-            return Ok(());
-        }
-
-        // Legacy format: a bare pretty-printed JSON array written in place
-        // (no framing, no checksum). Detect it by the leading byte and keep
-        // reading it; the next save upgrades to the versioned format.
-        let first = content
-            .iter()
-            .copied()
-            .find(|b| !b.is_ascii_whitespace())
-            .unwrap_or(0);
-        let (segments_info, next_id, wal_seq) = if first == b'[' {
-            let segments: Vec<ManagedSegmentInfo> = serde_json::from_slice(&content)?;
-            (segments, 0, 0)
-        } else {
-            // Versioned format: length-prefixed JSON + CRC-32 trailer
-            // (the StructWriter/StructReader framing).
-            let reader = self.storage.open_input(MANIFEST_FILE)?;
-            let mut struct_reader = StructReader::new(reader)?;
-            let json = struct_reader.read_bytes()?;
-            if !struct_reader.verify_checksum()? {
-                return Err(LaurusError::index(
-                    "segments.json checksum mismatch — manifest is corrupted",
-                ));
+        let (segments_info, next_id, wal_seq) = match format {
+            manifest_io::ManifestFormat::Legacy => {
+                // Pre-versioning manifests carried only the segment list; the
+                // next save upgrades the file.
+                let segments: Vec<ManagedSegmentInfo> = serde_json::from_slice(&payload)?;
+                (segments, 0, 0)
             }
-            let manifest: SegmentManifest = serde_json::from_slice(&json)?;
-            (
-                manifest.segments,
-                manifest.next_segment_id,
-                manifest.last_wal_seq,
-            )
+            manifest_io::ManifestFormat::Checksummed => {
+                let manifest: SegmentManifest = serde_json::from_slice(&payload)?;
+                (
+                    manifest.segments,
+                    manifest.next_segment_id,
+                    manifest.last_wal_seq,
+                )
+            }
         };
 
         let mut segments = self.segments.write();
@@ -358,21 +344,9 @@ impl SegmentManager {
             last_wal_seq: self.last_wal_seq.load(Ordering::Acquire),
             segments: segments.to_vec(),
         };
-        let json = serde_json::to_vec(&manifest)
-            .map_err(|e| LaurusError::index(format!("failed to serialize manifest: {e}")))?;
-
-        // `write_bytes` records the payload's CRC-32 and `close` writes it as
-        // the file trailer; the reader verifies it via `verify_checksum`.
-        let output = self.storage.create_output(MANIFEST_TMP_FILE)?;
-        let mut writer = StructWriter::new(output);
-        writer.write_bytes(&json)?;
-        writer.close()?;
-
-        self.storage.rename_file(MANIFEST_TMP_FILE, MANIFEST_FILE)?;
-        // Make the rename durable/visible (directory metadata) before the
-        // caller treats the new manifest as published.
-        self.storage.sync()?;
-        Ok(())
+        // temp + CRC-32 trailer + rename + sync, shared with every other
+        // control file in the tree (#1022).
+        manifest_io::save_checksummed_json(self.storage.as_ref(), MANIFEST_FILE, None, &manifest)
     }
 
     /// Persist the current manifest state.

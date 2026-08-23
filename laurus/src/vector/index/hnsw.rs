@@ -18,6 +18,7 @@ use crate::embedding::embedder::Embedder;
 use crate::error::{LaurusError, Result};
 use crate::maintenance::deletion::DeletionBitmap;
 use crate::storage::Storage;
+use crate::storage::manifest as manifest_io;
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::vector::index::config::HnswIndexConfig;
 use crate::vector::index::hnsw::searcher::HnswSearcher;
@@ -188,19 +189,17 @@ impl HnswIndex {
             .map_err(|e| LaurusError::index(format!("Failed to serialize metadata: {e}")))?;
         drop(metadata);
 
-        // CRC-frame the JSON via StructWriter (Issue #786) and write it to a
-        // temp file, then atomically rename into place (Issue #784): a crash
-        // mid-write leaves the previous metadata intact, and a corrupted file
-        // is rejected on load.
-        let output = self.storage.create_output("metadata.json.tmp")?;
-        let mut writer = StructWriter::new(output);
-        writer.write_u32(METADATA_MAGIC)?;
-        writer.write_bytes(metadata_json.as_bytes())?;
-        writer.close()?;
-        self.storage
-            .rename_file("metadata.json.tmp", "metadata.json")?;
-
-        Ok(())
+        // temp + CRC-32 trailer + rename + sync (#784/#786, shared since
+        // #1022): a crash mid-write leaves the previous metadata intact, and
+        // a corrupted file is rejected on load. The shared helper also syncs
+        // after the rename, which this call site used to omit — without it a
+        // crash can lose the rename itself.
+        manifest_io::save_checksummed(
+            self.storage.as_ref(),
+            "metadata.json",
+            Some(METADATA_MAGIC),
+            metadata_json.as_bytes(),
+        )
     }
 
     /// Read metadata from storage.
@@ -209,26 +208,15 @@ impl HnswIndex {
     /// falling back to the legacy raw-JSON format for pre-existing files so old
     /// indexes keep loading.
     fn read_metadata(storage: &dyn Storage, _: &str) -> Result<IndexMetadata> {
-        let input = storage.open_input("metadata.json")?;
-        let mut reader = StructReader::new(input)?;
-        if let Ok(magic) = reader.read_u32()
-            && magic == METADATA_MAGIC
-        {
-            let bytes = reader.read_bytes()?;
-            if !reader.verify_checksum()? {
-                return Err(LaurusError::index(
-                    "metadata.json checksum mismatch: file is corrupted",
-                ));
-            }
-            return serde_json::from_slice(&bytes)
-                .map_err(|e| LaurusError::index(format!("Failed to deserialize metadata: {e}")));
+        let loaded = manifest_io::load_checksummed_json::<IndexMetadata>(
+            storage,
+            "metadata.json",
+            Some(METADATA_MAGIC),
+        )?;
+        match loaded {
+            Some((metadata, _format)) => Ok(metadata),
+            None => Err(LaurusError::index("metadata.json is missing or empty")),
         }
-
-        // Legacy raw-JSON metadata (written before Issue #786): reopen and read
-        // directly.
-        let input = storage.open_input("metadata.json")?;
-        serde_json::from_reader(input)
-            .map_err(|e| LaurusError::index(format!("Failed to deserialize metadata: {e}")))
     }
 
     /// Update metadata.
