@@ -1578,13 +1578,14 @@ impl InvertedIndexWriter {
         meta.generation += 1; // Increment generation
         meta.last_wal_seq = self.last_wal_seq;
 
-        let metadata_json = serde_json::to_string_pretty(&meta)
-            .map_err(|e| LaurusError::index(format!("Failed to serialize metadata: {e}")))?;
-
-        let mut output = self.storage.create_output("metadata.json")?;
-        std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
-        output.close()?;
-        Ok(())
+        // Atomic and checksummed (#1023): a torn write here would leave the
+        // index unopenable, not merely lose a counter.
+        crate::storage::manifest::save_checksummed_json(
+            self.storage.as_ref(),
+            "metadata.json",
+            None,
+            &meta,
+        )
     }
 
     /// Rollback all pending changes.

@@ -216,7 +216,13 @@ fn commit_writes_delmap_before_metadata_checkpoint() {
 
     let created = recording.created.lock().unwrap().clone();
     let delmap_pos = created.iter().position(|f| f.ends_with(".delmap"));
-    let checkpoint_pos = created.iter().position(|f| f == "metadata.json");
+    // `metadata.json` is published atomically since #1023, so what the
+    // recorder sees created is the staging file. The ordering invariant this
+    // test exists for is unchanged — only the name of the file that carries
+    // the checkpoint into place.
+    let checkpoint_pos = created
+        .iter()
+        .position(|f| f == "metadata.json" || f == "metadata.json.tmp");
     assert!(
         delmap_pos.is_some(),
         "the deletion-flush commit must write a .delmap, got: {created:?}"
