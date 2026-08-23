@@ -206,8 +206,9 @@ impl WasmSynonymGraphFilter {
 /// await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
 /// const f = await loadDictionaryFiles("ipadic");
 /// const ja = JapaneseAnalyzer.fromBytes(
-///   f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
-///   f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal"
+///   f.metadata, f.dictTrie, f.dictValsIdx, f.dictVals,
+///   f.dictWordsIdx, f.dictWords, f.matrixMtx, f.charDef, f.unk,
+///   "normal"
 /// );
 /// const schema = new Schema();
 /// schema.addAnalyzer("ja-ipadic", ja);
@@ -223,7 +224,7 @@ pub struct WasmJapaneseAnalyzer {
 impl WasmJapaneseAnalyzer {
     /// Build a Japanese analyzer from raw dictionary byte arrays.
     ///
-    /// The eight byte arrays must come from a built Lindera dictionary
+    /// The nine byte arrays must come from a built Lindera dictionary
     /// directory (e.g. `lindera-ipadic-X.Y.Z.zip` extracted to OPFS).
     /// A trailing `mode` argument (default `"normal"`) selects the
     /// Lindera segmentation mode.
@@ -231,7 +232,8 @@ impl WasmJapaneseAnalyzer {
     /// # Arguments
     ///
     /// * `metadata` - `metadata.json`
-    /// * `dict_da` - `dict.da` (Double-Array Trie)
+    /// * `dict_trie` - `dict.trie` (prefix trie)
+    /// * `dict_vals_idx` - `dict.valsidx`
     /// * `dict_vals` - `dict.vals`
     /// * `dict_words_idx` - `dict.wordsidx`
     /// * `dict_words` - `dict.words`
@@ -248,7 +250,8 @@ impl WasmJapaneseAnalyzer {
     #[allow(clippy::too_many_arguments)]
     pub fn from_bytes(
         metadata: &[u8],
-        dict_da: &[u8],
+        dict_trie: &[u8],
+        dict_vals_idx: &[u8],
         dict_vals: &[u8],
         dict_words_idx: &[u8],
         dict_words: &[u8],
@@ -261,7 +264,8 @@ impl WasmJapaneseAnalyzer {
         let analyzer = JapaneseAnalyzer::from_bytes(
             mode_str,
             metadata,
-            dict_da,
+            dict_trie,
+            dict_vals_idx,
             dict_vals,
             dict_words_idx,
             dict_words,

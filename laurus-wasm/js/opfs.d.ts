@@ -12,8 +12,10 @@
 export interface DictionaryFiles {
   /** Contents of metadata.json */
   metadata: Uint8Array;
-  /** Contents of dict.da (Double-Array Trie) */
-  dictDa: Uint8Array;
+  /** Contents of dict.trie (prefix trie) */
+  dictTrie: Uint8Array;
+  /** Contents of dict.valsidx (per-surface value index) */
+  dictValsIdx: Uint8Array;
   /** Contents of dict.vals (word value data) */
   dictVals: Uint8Array;
   /** Contents of dict.wordsidx (word details index) */

@@ -78,7 +78,7 @@ laurus = { workspace = true, default-features = false }
 
 ### 日本語形態素解析
 
-ブラウザ WASM にはファイルシステムが無いため、`{ "language": "japanese", "dict": "/path/to/ipadic" }` の標準アナライザープリセットは利用できません。`laurus-wasm` は [`src/analysis.rs`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/src/analysis.rs) で `JapaneseAnalyzer.fromBytes(...)` を公開しており、Lindera IPADIC 辞書アーカイブを実行時に OPFS へ取得し、Lindera が必要とする 8 つの生バイト配列を読み出してアナライザーに渡せます：
+ブラウザ WASM にはファイルシステムが無いため、`{ "language": "japanese", "dict": "/path/to/ipadic" }` の標準アナライザープリセットは利用できません。`laurus-wasm` は [`src/analysis.rs`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/src/analysis.rs) で `JapaneseAnalyzer.fromBytes(...)` を公開しており、Lindera IPADIC 辞書アーカイブを実行時に OPFS へ取得し、Lindera が必要とする 9 つの生バイト配列を読み出してアナライザーに渡せます：
 
 ```javascript
 import { JapaneseAnalyzer, Schema } from "laurus-wasm";
@@ -87,8 +87,8 @@ import { downloadDictionary, loadDictionaryFiles } from "laurus-wasm/opfs";
 await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
 const f = await loadDictionaryFiles("ipadic");
 const ja = JapaneseAnalyzer.fromBytes(
-  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
-  f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
+  f.metadata, f.dictTrie, f.dictValsIdx, f.dictVals,
+  f.dictWordsIdx, f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
 );
 
 const schema = new Schema();

@@ -147,7 +147,8 @@ export async function buildJapaneseAnalyzer({ mode = 'normal' } = {}) {
   const files = await loadDictionaryFiles(DICT_NAME);
   return JapaneseAnalyzer.fromBytes(
     files.metadata,
-    files.dictDa,
+    files.dictTrie,
+    files.dictValsIdx,
     files.dictVals,
     files.dictWordsIdx,
     files.dictWords,

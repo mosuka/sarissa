@@ -8,15 +8,16 @@
  * filesystem-based dictionary loading is not available.
  *
  * The dictionary archive format and OPFS layout follow the Lindera
- * convention: a zip containing the eight files
- * `metadata.json`, `dict.da`, `dict.vals`, `dict.wordsidx`,
- * `dict.words`, `matrix.mtx`, `char_def.bin`, `unk.bin`. Files are
- * placed under `laurus/dictionaries/<name>/` within OPFS.
+ * convention: a zip containing the nine files
+ * `metadata.json`, `dict.trie`, `dict.valsidx`, `dict.vals`,
+ * `dict.wordsidx`, `dict.words`, `matrix.mtx`, `char_def.bin`,
+ * `unk.bin`. Files are placed under `laurus/dictionaries/<name>/`
+ * within OPFS.
  *
- * The binary dictionary format is tied to the Lindera (and its
- * daachorse dependency) version compiled into the WASM binary, so a
- * cached dictionary can become unreadable after the site updates its
- * Lindera version. To let callers detect this, `downloadDictionary()`
+ * The binary dictionary format is tied to the Lindera version compiled
+ * into the WASM binary -- both the file set and the encoding of each
+ * file change across releases -- so a cached dictionary can become
+ * unreadable after the site updates its Lindera version. To let callers detect this, `downloadDictionary()`
  * accepts a `version` string that is stored alongside the dictionary
  * files and can be read back with `getDictionaryVersion()`.
  *
@@ -26,7 +27,8 @@
 /** Dictionary file names that make up a built Lindera dictionary. */
 const DICTIONARY_FILES = [
   "metadata.json",
-  "dict.da",
+  "dict.trie",
+  "dict.valsidx",
   "dict.vals",
   "dict.wordsidx",
   "dict.words",
@@ -176,10 +178,10 @@ async function extractZip(zipBuffer) {
 /**
  * Downloads a dictionary archive, extracts it, and stores the files in OPFS.
  *
- * The archive should be a zip containing the eight Lindera dictionary
- * files (`metadata.json`, `dict.da`, `dict.vals`, `dict.wordsidx`,
- * `dict.words`, `matrix.mtx`, `char_def.bin`, `unk.bin`), optionally
- * nested in a subdirectory.
+ * The archive should be a zip containing the nine Lindera dictionary
+ * files (`metadata.json`, `dict.trie`, `dict.valsidx`, `dict.vals`,
+ * `dict.wordsidx`, `dict.words`, `matrix.mtx`, `char_def.bin`,
+ * `unk.bin`), optionally nested in a subdirectory.
  *
  * @param {string} url - URL of the dictionary zip archive.
  * @param {string} name - Name to store the dictionary under (e.g., "ipadic").
@@ -344,7 +346,8 @@ export async function loadDictionaryFiles(name) {
 
   return {
     metadata: await readFile("metadata.json"),
-    dictDa: await readFile("dict.da"),
+    dictTrie: await readFile("dict.trie"),
+    dictValsIdx: await readFile("dict.valsidx"),
     dictVals: await readFile("dict.vals"),
     dictWordsIdx: await readFile("dict.wordsidx"),
     dictWords: await readFile("dict.words"),

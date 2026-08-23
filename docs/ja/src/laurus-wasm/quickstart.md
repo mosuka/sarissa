@@ -95,11 +95,11 @@ if (
   });
 }
 
-// 2. 8 つのコンポーネントファイルを読み出して analyzer を構築する。
+// 2. 9 つのコンポーネントファイルを読み出して analyzer を構築する。
 const f = await loadDictionaryFiles("ipadic");
 const ja = JapaneseAnalyzer.fromBytes(
-  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
-  f.dictWords, f.matrixMtx, f.charDef, f.unk,
+  f.metadata, f.dictTrie, f.dictValsIdx, f.dictVals,
+  f.dictWordsIdx, f.dictWords, f.matrixMtx, f.charDef, f.unk,
   "normal",
 );
 
