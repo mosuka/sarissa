@@ -92,6 +92,12 @@ impl Default for InvertedIndexWriterConfig {
 #[derive(Debug, Clone)]
 pub struct WriterStats {
     /// Number of documents added.
+    ///
+    /// For a writer that maintains the index's shared metadata (built via
+    /// `InvertedIndex::writer`), this is the delta **since the last
+    /// successful commit**: applying it to the shared metadata consumes it
+    /// (#1023). For a stand-alone writer (built via
+    /// [`InvertedIndexWriter::new`]) it is a lifetime total.
     pub docs_added: u64,
     /// Number of unique terms indexed.
     pub unique_terms: u64,
@@ -102,6 +108,9 @@ pub struct WriterStats {
     /// Number of segments created.
     pub segments_created: u32,
     /// Number of deleted documents (from persisted segments).
+    ///
+    /// Delta-since-last-commit for a metadata-maintaining writer, lifetime
+    /// total for a stand-alone one — see [`WriterStats::docs_added`].
     pub deleted_count: u64,
 }
 
@@ -159,8 +168,19 @@ pub struct InvertedIndexWriter {
     /// Writer statistics.
     stats: WriterStats,
 
-    /// Base metadata read at startup.
-    base_metadata: IndexMetadata,
+    /// Shared handle to the index's authoritative metadata (#1023).
+    ///
+    /// `Some` only for writers built by
+    /// [`InvertedIndex::writer`](crate::lexical::index::inverted::InvertedIndex),
+    /// via [`Self::with_shared_metadata`]: at commit the writer applies its
+    /// per-commit deltas under this lock and persists a snapshot of it.
+    /// Writers built through [`Self::new`] — the merge engine's internal
+    /// replay writer, direct constructions in tests — carry `None` and never
+    /// touch `metadata.json`. This replaces the old frozen `base_metadata`
+    /// snapshot, whose stale base silently reverted any interleaved write
+    /// (and whose failed read was silently defaulted, wiping the WAL
+    /// checkpoint on the next commit).
+    metadata: Option<Arc<parking_lot::RwLock<IndexMetadata>>>,
 
     /// Last processed WAL sequence number.
     last_wal_seq: u64,
@@ -260,7 +280,46 @@ impl std::fmt::Debug for InvertedIndexWriter {
 
 impl InvertedIndexWriter {
     /// Create a new inverted index writer (schema-less mode).
+    ///
+    /// A writer built this way has no handle to an index's metadata and
+    /// therefore never writes `metadata.json` (#1023) — this is what keeps
+    /// the merge engine's internal replay writer (and every direct test
+    /// construction) from competing with the index over the control file.
+    /// Writers that should maintain the metadata are built by
+    /// [`InvertedIndex::writer`](crate::lexical::index::inverted::InvertedIndex)
+    /// through [`Self::with_shared_metadata`].
     pub fn new(storage: Arc<dyn Storage>, config: InvertedIndexWriterConfig) -> Result<Self> {
+        Self::build(storage, config, None)
+    }
+
+    /// Create a writer that maintains the index's shared metadata (#1023).
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - The storage backend to write to.
+    /// * `config` - The writer configuration.
+    /// * `metadata` - Handle to the owning index's authoritative metadata;
+    ///   the writer applies its per-commit deltas to it and persists a
+    ///   snapshot at every commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if recovering writer state from storage fails.
+    pub(crate) fn with_shared_metadata(
+        storage: Arc<dyn Storage>,
+        config: InvertedIndexWriterConfig,
+        metadata: Arc<parking_lot::RwLock<IndexMetadata>>,
+    ) -> Result<Self> {
+        Self::build(storage, config, Some(metadata))
+    }
+
+    /// Shared constructor body behind [`Self::new`] and
+    /// [`Self::with_shared_metadata`].
+    fn build(
+        storage: Arc<dyn Storage>,
+        config: InvertedIndexWriterConfig,
+        metadata: Option<Arc<parking_lot::RwLock<IndexMetadata>>>,
+    ) -> Result<Self> {
         // Recover state from existing segments. The same scan also seeds the
         // segment-range cache (Issue #559 / #864), so the cache is warm from
         // birth at no extra I/O.
@@ -295,10 +354,12 @@ impl InvertedIndexWriter {
         let initial_segment_name = format!("{}_{:06}", config.segment_prefix, current_segment);
         let doc_values_writer = DocValuesWriter::new(storage.clone(), initial_segment_name);
 
-        // Read existing metadata or use default
-        let base_metadata =
-            crate::lexical::index::inverted::InvertedIndex::read_metadata(storage.as_ref())
-                .unwrap_or_else(|_| IndexMetadata::default());
+        // The WAL checkpoint starts at the shared authority's current value;
+        // a handle-less writer has no checkpoint to maintain. The old code
+        // read `metadata.json` here and silently defaulted on failure, which
+        // turned a transient read error into a durable checkpoint wipe at
+        // the next commit (#1023).
+        let last_wal_seq = metadata.as_ref().map_or(0, |m| m.read().last_wal_seq);
 
         Ok(InvertedIndexWriter {
             storage,
@@ -319,8 +380,8 @@ impl InvertedIndexWriter {
                 segments_created: 0,
                 deleted_count: 0,
             },
-            last_wal_seq: base_metadata.last_wal_seq,
-            base_metadata,
+            last_wal_seq,
+            metadata,
             pending_deletions: std::collections::HashSet::new(),
             flushed_segments: Vec::new(),
             pending_publish: Vec::new(),
@@ -1569,14 +1630,46 @@ impl InvertedIndexWriter {
         Ok(())
     }
 
-    /// Write metadata.json (used by InvertedIndex).
-    fn write_metadata_json(&self) -> Result<()> {
-        let mut meta = self.base_metadata.clone();
-        meta.doc_count += self.stats.docs_added;
-        meta.deleted_count += self.stats.deleted_count;
-        meta.modified = crate::util::time::now_secs();
-        meta.generation += 1; // Increment generation
-        meta.last_wal_seq = self.last_wal_seq;
+    /// Apply this commit's deltas to the shared metadata and persist it.
+    ///
+    /// A handle-less writer (built via [`Self::new`]) returns `Ok(())`
+    /// without touching anything: an `Err` here would be swallowed by
+    /// `Drop`'s `let _ = self.close()` at exactly the call site this guard
+    /// protects — the merge engine's internal replay writer.
+    ///
+    /// The deltas are applied under the lock and CONSUMED (reset) only
+    /// after the persist succeeds, inside this method, because `Drop` runs
+    /// the whole commit ladder a second time after every explicit
+    /// [`Self::commit`] — a delta applied twice would double every count.
+    /// On a failed persist the deltas survive for the retry, matching the
+    /// crash contract of the rest of the ladder: the lock then runs ahead
+    /// of the file by exactly this commit, and the retry re-snapshots the
+    /// same converged state rather than re-applying the delta.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serializing or persisting the snapshot fails.
+    fn write_metadata_json(&mut self) -> Result<()> {
+        let Some(handle) = &self.metadata else {
+            return Ok(());
+        };
+
+        // Apply deltas under the lock, snapshot, and RELEASE before I/O:
+        // `parking_lot::RwLock` is not reentrant and the `Debug` impls read
+        // this lock, so holding it across a failing write would deadlock
+        // the moment an error path formatted the index or store.
+        let snapshot = {
+            let mut meta = handle.write();
+            meta.doc_count += self.stats.docs_added;
+            meta.deleted_count += self.stats.deleted_count;
+            meta.modified = crate::util::time::now_secs();
+            meta.generation += 1;
+            // Monotonic: the writer's local value can only be at or ahead
+            // of the shared one (it was seeded from it and only ever raised
+            // by `set_last_wal_seq`), but `max` makes the invariant local.
+            meta.last_wal_seq = meta.last_wal_seq.max(self.last_wal_seq);
+            meta.clone()
+        };
 
         // Atomic and checksummed (#1023): a torn write here would leave the
         // index unopenable, not merely lose a counter.
@@ -1584,8 +1677,14 @@ impl InvertedIndexWriter {
             self.storage.as_ref(),
             "metadata.json",
             None,
-            &meta,
-        )
+            &snapshot,
+        )?;
+
+        // Consume the applied deltas so the next commit — including the
+        // implicit one `Drop` runs — starts from zero.
+        self.stats.docs_added = 0;
+        self.stats.deleted_count = 0;
+        Ok(())
     }
 
     /// Rollback all pending changes.

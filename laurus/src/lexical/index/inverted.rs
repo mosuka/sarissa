@@ -131,7 +131,13 @@ pub struct InvertedIndex {
     closed: AtomicBool,
 
     /// Index metadata (thread-safe).
-    metadata: RwLock<IndexMetadata>,
+    ///
+    /// This in-memory copy is the AUTHORITY over `metadata.json` (#1023):
+    /// the handle is cloned into every writer this index constructs (see
+    /// [`Self::writer`]), which applies its per-commit deltas under this
+    /// lock and persists a snapshot of it. Nothing re-reads the file into
+    /// this lock after `open`, so disk can never clobber fresher state.
+    metadata: Arc<RwLock<IndexMetadata>>,
 }
 
 impl std::fmt::Debug for InvertedIndex {
@@ -155,7 +161,7 @@ impl InvertedIndex {
             config,
             extra_fields: RwLock::new(HashMap::new()),
             closed: AtomicBool::new(false),
-            metadata: RwLock::new(metadata),
+            metadata: Arc::new(RwLock::new(metadata)),
         };
 
         index.write_metadata()?;
@@ -175,7 +181,7 @@ impl InvertedIndex {
             config,
             extra_fields: RwLock::new(HashMap::new()),
             closed: AtomicBool::new(false),
-            metadata: RwLock::new(metadata),
+            metadata: Arc::new(RwLock::new(metadata)),
         })
     }
 
@@ -240,16 +246,6 @@ impl InvertedIndex {
         }
 
         self.write_metadata()
-    }
-
-    /// Update the document count in the index metadata.
-    pub fn update_doc_count(&self, additional_docs: u64) -> Result<()> {
-        self.check_closed()?;
-        {
-            let mut metadata = self.metadata.write();
-            metadata.doc_count += additional_docs;
-        }
-        self.update_metadata()
     }
 
     /// Check if the index is closed.
@@ -513,6 +509,12 @@ impl InvertedIndex {
 
     /// Returns the last WAL (Write-Ahead Log) sequence number recorded in the index metadata.
     ///
+    /// Also exposed through the [`LexicalIndex`] trait (#1023): before that
+    /// override existed, calls through `Box<dyn LexicalIndex>` resolved to
+    /// the trait default `0`, making the checkpoint invisible to
+    /// [`LexicalStore`](crate::lexical::store::LexicalStore) and
+    /// `Engine::recover`.
+    ///
     /// # Returns
     ///
     /// The last WAL sequence number as a `u64`.
@@ -583,7 +585,16 @@ impl LexicalIndex for InvertedIndex {
             fields,
             ..Default::default()
         };
-        let writer = InvertedIndexWriter::new(self.storage.clone(), writer_config)?;
+        // Hand the writer the shared metadata handle (#1023). This is the
+        // ONLY constructor that does: writers built through the public
+        // `InvertedIndexWriter::new` — the merge engine's internal replay
+        // writer included — get no handle and therefore cannot touch
+        // `metadata.json` at all.
+        let writer = InvertedIndexWriter::with_shared_metadata(
+            self.storage.clone(),
+            writer_config,
+            Arc::clone(&self.metadata),
+        )?;
         Ok(Box::new(writer))
     }
 
@@ -627,10 +638,23 @@ impl LexicalIndex for InvertedIndex {
     }
 
     fn refresh(&self) -> Result<()> {
+        // Deliberately does NOT re-read `metadata.json` (#1023): the
+        // in-memory copy is the authority — every writer this index hands
+        // out applies its commit deltas directly to the shared lock, so the
+        // lock is always at least as fresh as the file. Re-reading used to
+        // be how `LexicalStore::commit` picked up the writer's values, and
+        // it was also how the merge engine's inflated counts were laundered
+        // back into memory.
         self.check_closed()?;
-        let metadata = Self::read_metadata(self.storage.as_ref())?;
-        *self.metadata.write() = metadata;
         Ok(())
+    }
+
+    fn last_wal_seq(&self) -> u64 {
+        InvertedIndex::last_wal_seq(self)
+    }
+
+    fn set_last_wal_seq(&self, seq: u64) -> Result<()> {
+        InvertedIndex::set_last_wal_seq(self, seq)
     }
 
     fn searcher(&self) -> Result<Box<dyn LexicalSearcher>> {

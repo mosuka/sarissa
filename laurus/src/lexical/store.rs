@@ -292,6 +292,10 @@ impl LexicalStore {
         // Sync again afterwards so any merge output is durable/visible.
         self.index.maybe_merge()?;
         self.index.storage().sync()?;
+        // For `InvertedIndex` this is a no-op (#1023): the writer applied
+        // its commit deltas straight to the index's shared metadata, so
+        // there is nothing fresher on disk. Kept for other `LexicalIndex`
+        // implementations whose refresh does real work.
         self.index.refresh()?;
         drop(writer_guard);
         *self.searcher_cache.write() = None;

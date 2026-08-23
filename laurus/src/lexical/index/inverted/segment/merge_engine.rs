@@ -325,6 +325,12 @@ impl MergeEngine {
             max_buffer_memory: usize::MAX,
             ..Default::default()
         };
+        // Deliberately `new`, not `with_shared_metadata` (#1023): this
+        // writer exists only to replay documents into the merged segment.
+        // With no metadata handle, its implicit Drop-commit at the end of
+        // this function cannot touch `metadata.json` — the historical bug
+        // here re-added the whole merged output to `doc_count` on every
+        // merge, compounding on each auto-merging commit.
         let mut writer = InvertedIndexWriter::new(self.storage.clone(), writer_config)?;
         for doc_id in &order {
             if let Some(analyzed) = docs.remove(doc_id) {

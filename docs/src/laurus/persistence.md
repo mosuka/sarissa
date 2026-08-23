@@ -218,6 +218,14 @@ checkpoint — the sequence number of the last WAL record it has materialized �
 recovery can skip already-applied records. The persisted `last_wal_seq` lives in
 the store's on-disk metadata and is written **only** during the store's commit.
 
+The lexical control file (`metadata.json`) has a **single authority**: the
+in-memory copy owned by the index. The writer the store commits through holds a
+shared handle to it, applies its per-commit deltas (documents added, documents
+deleted, the WAL checkpoint) under that lock, and persists a snapshot — so no
+code path can overwrite the file from a stale copy, and internal writers (such
+as the merge engine's segment-replay writer) have no handle and cannot touch
+the file at all.
+
 The commit ladder is:
 
 1. **`flush_wal()`** — force the WAL durable (the hard barrier). Under `Group`
