@@ -656,6 +656,16 @@ impl Storage for FileStorage {
     fn rename_file(&self, old_name: &str, new_name: &str) -> Result<()> {
         self.check_closed()?;
 
+        // Evict both names' mappings (#1031). The destination's cached bytes
+        // are pre-rename content that `is_mmap_file_unchanged`'s size +
+        // whole-second-mtime probe cannot tell apart from the new file, so
+        // without this every later `open_input` serves stale data. The
+        // source's mapping would point at a path that no longer exists. On
+        // Windows this also releases the file locks before the rename,
+        // mirroring `create_output` and `delete_file` (Issue #508).
+        self.evict_mmap(old_name);
+        self.evict_mmap(new_name);
+
         let old_path = self.file_path(old_name);
         let new_path = self.file_path(new_name);
 
@@ -1580,5 +1590,63 @@ mod tests {
 
         assert_eq!(buffer1, buffer2);
         assert_eq!(buffer1, b"Clone me!");
+    }
+    /// #1031: `rename_file` must evict the mmap cache for the destination.
+    ///
+    /// #1028 switched the `metadata.json` writers to the atomic tmp+rename
+    /// path, which removed the eviction `create_output`'s truncate used to
+    /// perform. With the old mapping cached and the rewrite keeping the same
+    /// byte length and whole-second mtime, `is_mmap_file_unchanged` judges
+    /// the cache fresh and every later `open_input` serves pre-rename bytes.
+    ///
+    /// The mtime is pinned explicitly so the test cannot pass by luck when
+    /// the two writes straddle a second boundary.
+    #[test]
+    fn test_rename_file_evicts_destination_mmap() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = FileStorageConfig::new(temp_dir.path());
+        config.use_mmap = true;
+        let storage = FileStorage::new(temp_dir.path(), config).unwrap();
+
+        // Write the original content and cache its mapping.
+        let mut output = storage.create_output("manifest.json").unwrap();
+        output.write_all(b"OLD-CONTENT").unwrap();
+        output.close().unwrap();
+        let mut buf = Vec::new();
+        storage
+            .open_input("manifest.json")
+            .unwrap()
+            .read_to_end(&mut buf)
+            .unwrap();
+        assert_eq!(buf, b"OLD-CONTENT");
+
+        let path = temp_dir.path().join("manifest.json");
+        let cached_mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        // Rewrite through the atomic tmp+rename path with the SAME length.
+        let mut output = storage.create_output("manifest.json.tmp").unwrap();
+        output.write_all(b"NEW-CONTENT").unwrap();
+        output.close().unwrap();
+        storage
+            .rename_file("manifest.json.tmp", "manifest.json")
+            .unwrap();
+
+        // Pin the mtime to the cached mapping's, exactly reproducing a
+        // same-length same-second rewrite.
+        let file = File::options().write(true).open(&path).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(cached_mtime))
+            .unwrap();
+        drop(file);
+
+        let mut buf = Vec::new();
+        storage
+            .open_input("manifest.json")
+            .unwrap()
+            .read_to_end(&mut buf)
+            .unwrap();
+        assert_eq!(
+            buf, b"NEW-CONTENT",
+            "open_input after rename_file must see the renamed content, not the stale mapping"
+        );
     }
 }
