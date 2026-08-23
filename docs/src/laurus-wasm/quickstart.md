@@ -95,11 +95,11 @@ if (
   });
 }
 
-// 2. Read the eight component files back and construct the analyzer.
+// 2. Read the nine component files back and construct the analyzer.
 const f = await loadDictionaryFiles("ipadic");
 const ja = JapaneseAnalyzer.fromBytes(
-  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
-  f.dictWords, f.matrixMtx, f.charDef, f.unk,
+  f.metadata, f.dictTrie, f.dictValsIdx, f.dictVals,
+  f.dictWordsIdx, f.dictWords, f.matrixMtx, f.charDef, f.unk,
   "normal",
 );
 

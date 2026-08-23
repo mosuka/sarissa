@@ -148,7 +148,9 @@ impl LinderaTokenizer {
     ///
     /// * `mode_str` - Segmentation mode: `"normal"` or `"decompose"`.
     /// * `metadata` - Contents of `metadata.json`.
-    /// * `dict_da` - Contents of `dict.da` (Double-Array Trie).
+    /// * `dict_trie` - Contents of `dict.trie` (prefix trie).
+    /// * `dict_vals_idx` - Contents of `dict.valsidx` (prefix sum from
+    ///   a surface ordinal to its run of `dict.vals` records).
     /// * `dict_vals` - Contents of `dict.vals` (word value data).
     /// * `dict_words_idx` - Contents of `dict.wordsidx` (word details
     ///   index).
@@ -171,7 +173,8 @@ impl LinderaTokenizer {
     pub fn from_bytes(
         mode_str: &str,
         metadata: &[u8],
-        dict_da: &[u8],
+        dict_trie: &[u8],
+        dict_vals_idx: &[u8],
         dict_vals: &[u8],
         dict_words_idx: &[u8],
         dict_words: &[u8],
@@ -185,24 +188,23 @@ impl LinderaTokenizer {
         use lindera_dictionary::dictionary::character_definition::CharacterDefinition;
         use lindera_dictionary::dictionary::connection_cost_matrix::ConnectionCostMatrix;
         use lindera_dictionary::dictionary::metadata::Metadata;
-        use lindera_dictionary::dictionary::prefix_dictionary::{DaTrust, PrefixDictionary};
+        use lindera_dictionary::dictionary::prefix_dictionary::PrefixDictionary;
         use lindera_dictionary::dictionary::unknown_dictionary::UnknownDictionary;
 
         let mode = Mode::from_str(mode_str)
             .map_err(|e| LaurusError::analysis(format!("Invalid mode '{}': {}", mode_str, e)))?;
         let meta = Metadata::load(metadata)
             .map_err(|e| LaurusError::analysis(format!("Failed to load metadata: {}", e)))?;
-        // `DaTrust::Trusted` is reserved for byte-exact `include_bytes!` output
-        // of lindera's own build pipeline; these bytes come from the caller
-        // (e.g. a user-supplied dictionary read from disk or the wasm embed),
-        // so they must go through the validating deserialization path.
+        // `PrefixDictionary::load` validates the trie header and the
+        // `dict.valsidx` record alignment before the bytes are walked, so
+        // caller-supplied dictionaries (a user dictionary read from disk,
+        // the wasm OPFS cache) cannot make later lookups read out of bounds.
         let prefix_dictionary = PrefixDictionary::load(
-            dict_da.to_vec(),
+            dict_trie.to_vec(),
+            dict_vals_idx.to_vec(),
             dict_vals.to_vec(),
             dict_words_idx.to_vec(),
             dict_words.to_vec(),
-            true,
-            DaTrust::Untrusted,
         )
         .map_err(|e| LaurusError::analysis(format!("Failed to load prefix dictionary: {}", e)))?;
         let connection_cost_matrix = ConnectionCostMatrix::load(matrix_mtx.to_vec())
@@ -397,12 +399,74 @@ mod tests {
         assert_eq!(tokenizer.name(), "lindera");
     }
 
+    /// Minimal dictionary source files, mirroring the fixture used by
+    /// `lindera-dictionary`'s own builder tests: the mandatory DEFAULT
+    /// character category plus KANJI, one unknown-word entry per category,
+    /// a two-word lexicon and a 1x1 connection cost matrix.
+    #[cfg(feature = "native")]
+    const TEST_CHAR_DEF: &str = "DEFAULT 0 1 0\nKANJI 0 0 2\n0x4E00..0x9FFF KANJI\n";
+    #[cfg(feature = "native")]
+    const TEST_UNK_DEF: &str = "DEFAULT,0,0,0,補助記号,一般,*,*,*,*,*,*,*\n\
+         KANJI,0,0,0,名詞,一般,*,*,*,*,*,*,*\n";
+    #[cfg(feature = "native")]
+    const TEST_LEX_CSV: &str = "日本,0,0,100,名詞,固有名詞,地域,国,*,*,日本,ニッポン,ニッポン\n\
+         本,0,0,200,名詞,一般,*,*,*,*,本,ホン,ホン\n";
+    #[cfg(feature = "native")]
+    const TEST_MATRIX_DEF: &str = "1 1\n0 0 0\n";
+
+    /// A dictionary built by Lindera's own builder must round-trip through
+    /// [`LinderaTokenizer::from_bytes`] and segment text.
+    ///
+    /// The component files are positional, so this pins the mapping between
+    /// each on-disk artifact and its `from_bytes` argument: passing them in
+    /// the wrong order (for instance swapping `dict.trie` and `dict.valsidx`)
+    /// fails here, where the error-path tests below cannot see it.
+    #[cfg(feature = "native")]
+    #[test]
+    fn test_from_bytes_round_trips_a_built_dictionary() {
+        use std::fs;
+
+        use lindera_dictionary::builder::DictionaryBuilder;
+        use lindera_dictionary::dictionary::metadata::Metadata;
+
+        let input = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        fs::write(input.path().join("char.def"), TEST_CHAR_DEF).unwrap();
+        fs::write(input.path().join("unk.def"), TEST_UNK_DEF).unwrap();
+        fs::write(input.path().join("lex.csv"), TEST_LEX_CSV).unwrap();
+        fs::write(input.path().join("matrix.def"), TEST_MATRIX_DEF).unwrap();
+
+        DictionaryBuilder::new(Metadata::default())
+            .build_dictionary(input.path(), output.path())
+            .expect("building the fixture dictionary should succeed");
+
+        let read = |name: &str| fs::read(output.path().join(name)).unwrap();
+        let tokenizer = LinderaTokenizer::from_bytes(
+            "normal",
+            &read("metadata.json"),
+            &read("dict.trie"),
+            &read("dict.valsidx"),
+            &read("dict.vals"),
+            &read("dict.wordsidx"),
+            &read("dict.words"),
+            &read("matrix.mtx"),
+            &read("char_def.bin"),
+            &read("unk.bin"),
+        )
+        .expect("a freshly built dictionary should load from bytes");
+
+        let tokens: Vec<Token> = tokenizer.tokenize("日本").unwrap().collect();
+        let texts: Vec<&str> = tokens.iter().map(|t| t.text.as_ref()).collect();
+        assert_eq!(texts, vec!["日本"]);
+    }
+
     #[test]
     fn test_from_bytes_invalid_metadata_errors() {
         let empty: &[u8] = &[];
         let result = LinderaTokenizer::from_bytes(
             "normal",
             b"not valid json".as_slice(),
+            empty,
             empty,
             empty,
             empty,
@@ -427,6 +491,7 @@ mod tests {
         let result = LinderaTokenizer::from_bytes(
             "not-a-mode",
             b"{}".as_slice(),
+            empty,
             empty,
             empty,
             empty,

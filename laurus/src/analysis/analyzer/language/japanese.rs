@@ -126,9 +126,10 @@ impl JapaneseAnalyzer {
     ///
     /// * `mode_str` - Lindera segmentation mode: `"normal"` or
     ///   `"decompose"`.
-    /// * `metadata` / `dict_da` / `dict_vals` / `dict_words_idx` /
-    ///   `dict_words` / `matrix_mtx` / `char_def` / `unk` - the eight
-    ///   files that make up a built Lindera dictionary directory.
+    /// * `metadata` / `dict_trie` / `dict_vals_idx` / `dict_vals` /
+    ///   `dict_words_idx` / `dict_words` / `matrix_mtx` / `char_def` /
+    ///   `unk` - the nine files that make up a built Lindera dictionary
+    ///   directory.
     ///
     /// # Errors
     ///
@@ -138,7 +139,8 @@ impl JapaneseAnalyzer {
     pub fn from_bytes(
         mode_str: &str,
         metadata: &[u8],
-        dict_da: &[u8],
+        dict_trie: &[u8],
+        dict_vals_idx: &[u8],
         dict_vals: &[u8],
         dict_words_idx: &[u8],
         dict_words: &[u8],
@@ -149,7 +151,8 @@ impl JapaneseAnalyzer {
         let tokenizer = Arc::new(LinderaTokenizer::from_bytes(
             mode_str,
             metadata,
-            dict_da,
+            dict_trie,
+            dict_vals_idx,
             dict_vals,
             dict_words_idx,
             dict_words,

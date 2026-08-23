@@ -350,7 +350,7 @@ or the name of a runtime analyzer registered via `addAnalyzer()`.
 
 For Japanese morphological analysis, build a `JapaneseAnalyzer` from
 raw IPADIC bytes and register it with `addAnalyzer()` first; see
-[`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dictda--mode)
+[`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dicttrie--mode)
 and [`addAnalyzer`](#addanalyzername-analyzer) below.
 
 #### `addIntegerField(name, stored?, indexed?, multiValued?)`
@@ -436,7 +436,7 @@ parameter-less built-in names and before `schema.analyzers` definitions
 when text fields reference an analyzer by name.
 
 Currently only `JapaneseAnalyzer` instances built via
-[`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dictda--mode)
+[`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dicttrie--mode)
 are accepted here. The runtime registry is the only practical way to use
 the Japanese analyzer in browser WASM, where the
 `{ "language": "japanese", "dict": ... }` preset cannot resolve a
@@ -449,8 +449,8 @@ import { downloadDictionary, loadDictionaryFiles } from "laurus-wasm/opfs";
 await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
 const f = await loadDictionaryFiles("ipadic");
 const ja = JapaneseAnalyzer.fromBytes(
-  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
-  f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
+  f.metadata, f.dictTrie, f.dictValsIdx, f.dictVals,
+  f.dictWordsIdx, f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
 );
 
 const schema = new Schema();
@@ -533,10 +533,10 @@ bytes. Browser WASM has no real filesystem, so the standard
 `{ "language": "japanese", "dict": "/path/to/ipadic" }` preset cannot
 be used. Instead, fetch a Lindera dictionary archive (typically
 `lindera-ipadic-X.Y.Z.zip`), store it in OPFS via the
-[OPFS helpers](#opfs-helpers), and pass the eight component byte
+[OPFS helpers](#opfs-helpers), and pass the nine component byte
 arrays to `JapaneseAnalyzer.fromBytes`.
 
-#### `JapaneseAnalyzer.fromBytes(metadata, dictDa, ..., mode?)`
+#### `JapaneseAnalyzer.fromBytes(metadata, dictTrie, ..., mode?)`
 
 Static factory that builds an analyzer from raw IPADIC bytes.
 
@@ -545,7 +545,8 @@ Arguments (all `Uint8Array` except `mode`):
 | Argument | Source file |
 | ---- | ---- |
 | `metadata` | `metadata.json` |
-| `dictDa` | `dict.da` (Double-Array Trie) |
+| `dictTrie` | `dict.trie` (prefix trie) |
+| `dictValsIdx` | `dict.valsidx` |
 | `dictVals` | `dict.vals` |
 | `dictWordsIdx` | `dict.wordsidx` |
 | `dictWords` | `dict.words` |
@@ -563,8 +564,8 @@ import { loadDictionaryFiles } from "laurus-wasm/opfs";
 
 const f = await loadDictionaryFiles("ipadic");
 const ja = JapaneseAnalyzer.fromBytes(
-  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
-  f.dictWords, f.matrixMtx, f.charDef, f.unk,
+  f.metadata, f.dictTrie, f.dictValsIdx, f.dictVals,
+  f.dictWordsIdx, f.dictWords, f.matrixMtx, f.charDef, f.unk,
   "normal",
 );
 ```
@@ -593,9 +594,9 @@ import {
 
 | Function | Description |
 | ---- | ---- |
-| `downloadDictionary(url, name, options?)` | Fetch a `.zip`, decompress with the Web `DecompressionStream` API, and store the eight Lindera files under `laurus/dictionaries/<name>/` in OPFS. `options.onProgress({ phase, loaded?, total? })` reports progress. `options.version` stores a version stamp next to the files (see below). |
+| `downloadDictionary(url, name, options?)` | Fetch a `.zip`, decompress with the Web `DecompressionStream` API, and store the nine Lindera files under `laurus/dictionaries/<name>/` in OPFS. `options.onProgress({ phase, loaded?, total? })` reports progress. `options.version` stores a version stamp next to the files (see below). |
 | `getDictionaryVersion(name)` | Return the version stamp stored by `downloadDictionary`, or `null` if the dictionary or its stamp does not exist. |
-| `loadDictionaryFiles(name)` | Read the eight files back as a `{ metadata, dictDa, dictVals, dictWordsIdx, dictWords, matrixMtx, charDef, unk }` object suitable for `JapaneseAnalyzer.fromBytes`. |
+| `loadDictionaryFiles(name)` | Read the nine files back as a `{ metadata, dictTrie, dictValsIdx, dictVals, dictWordsIdx, dictWords, matrixMtx, charDef, unk }` object suitable for `JapaneseAnalyzer.fromBytes`. |
 | `hasDictionary(name)` | `true` if the dictionary directory exists in OPFS. |
 | `listDictionaries()` | Return an array of stored dictionary names. |
 | `removeDictionary(name)` | Delete the dictionary directory. |

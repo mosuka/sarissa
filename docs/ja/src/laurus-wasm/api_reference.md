@@ -354,7 +354,7 @@ for (let i = 0; i < 10000; i++) {
 
 日本語の形態素解析を行う場合は、まず `JapaneseAnalyzer` を IPADIC の
 バイト列から構築し、`addAnalyzer()` で登録してください。
-[`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dictda--mode)
+[`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dicttrie--mode)
 と [`addAnalyzer`](#addanalyzername-analyzer) を参照。
 
 #### `addIntegerField(name, stored?, indexed?, multiValued?)`
@@ -431,7 +431,7 @@ IVF ベクトルインデックスフィールドを追加します。
 フィールドが `Named` 形式で analyzer を参照するときに、組込名や
 `schema.analyzers` 定義よりも先に解決されます。
 
-現状は [`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dictda--mode)
+現状は [`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dicttrie--mode)
 で構築した `JapaneseAnalyzer` のみ受け付けます。ブラウザ WASM では
 `{ "language": "japanese", "dict": ... }` プリセットがファイルシステム
 パスを解決できないため、ランタイムレジストリ経由が日本語 analyzer を
@@ -444,8 +444,8 @@ import { downloadDictionary, loadDictionaryFiles } from "laurus-wasm/opfs";
 await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
 const f = await loadDictionaryFiles("ipadic");
 const ja = JapaneseAnalyzer.fromBytes(
-  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
-  f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
+  f.metadata, f.dictTrie, f.dictValsIdx, f.dictVals,
+  f.dictWordsIdx, f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
 );
 
 const schema = new Schema();
@@ -523,10 +523,10 @@ Lindera 辞書のバイト列から構築する日本語形態素解析 analyzer
 `{ "language": "japanese", "dict": "/path/to/ipadic" }` プリセットは
 利用できません。代わりに Lindera 辞書アーカイブ（典型的には
 `lindera-ipadic-X.Y.Z.zip`）を取得して [OPFS ヘルパ](#opfs-ヘルパ) で
-OPFS に保存し、8 つのコンポーネントバイト配列を
+OPFS に保存し、9 つのコンポーネントバイト配列を
 `JapaneseAnalyzer.fromBytes` に渡してください。
 
-#### `JapaneseAnalyzer.fromBytes(metadata, dictDa, ..., mode?)`
+#### `JapaneseAnalyzer.fromBytes(metadata, dictTrie, ..., mode?)`
 
 IPADIC のバイト列から analyzer を構築する static ファクトリ。
 
@@ -535,7 +535,8 @@ IPADIC のバイト列から analyzer を構築する static ファクトリ。
 | 引数 | 対応するファイル |
 | ---- | ---- |
 | `metadata` | `metadata.json` |
-| `dictDa` | `dict.da`（Double-Array Trie） |
+| `dictTrie` | `dict.trie`（prefix trie） |
+| `dictValsIdx` | `dict.valsidx` |
 | `dictVals` | `dict.vals` |
 | `dictWordsIdx` | `dict.wordsidx` |
 | `dictWords` | `dict.words` |
@@ -553,8 +554,8 @@ import { loadDictionaryFiles } from "laurus-wasm/opfs";
 
 const f = await loadDictionaryFiles("ipadic");
 const ja = JapaneseAnalyzer.fromBytes(
-  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
-  f.dictWords, f.matrixMtx, f.charDef, f.unk,
+  f.metadata, f.dictTrie, f.dictValsIdx, f.dictVals,
+  f.dictWordsIdx, f.dictWords, f.matrixMtx, f.charDef, f.unk,
   "normal",
 );
 ```
@@ -582,9 +583,9 @@ import {
 
 | 関数 | 説明 |
 | ---- | ---- |
-| `downloadDictionary(url, name, options?)` | `.zip` を fetch し、Web の `DecompressionStream` API で展開して、Lindera 8 ファイルを OPFS の `laurus/dictionaries/<name>/` 配下に保存します。`options.onProgress({ phase, loaded?, total? })` で進捗通知を受け取れます。`options.version` を渡すとファイルと並べてバージョンスタンプを保存します（下記参照）。 |
+| `downloadDictionary(url, name, options?)` | `.zip` を fetch し、Web の `DecompressionStream` API で展開して、Lindera 9 ファイルを OPFS の `laurus/dictionaries/<name>/` 配下に保存します。`options.onProgress({ phase, loaded?, total? })` で進捗通知を受け取れます。`options.version` を渡すとファイルと並べてバージョンスタンプを保存します（下記参照）。 |
 | `getDictionaryVersion(name)` | `downloadDictionary` が保存したバージョンスタンプを返します。辞書またはスタンプが存在しない場合は `null` を返します。 |
-| `loadDictionaryFiles(name)` | 8 ファイルを `{ metadata, dictDa, dictVals, dictWordsIdx, dictWords, matrixMtx, charDef, unk }` オブジェクトとして読み出し、`JapaneseAnalyzer.fromBytes` にそのまま渡せる形にします。 |
+| `loadDictionaryFiles(name)` | 9 ファイルを `{ metadata, dictTrie, dictValsIdx, dictVals, dictWordsIdx, dictWords, matrixMtx, charDef, unk }` オブジェクトとして読み出し、`JapaneseAnalyzer.fromBytes` にそのまま渡せる形にします。 |
 | `hasDictionary(name)` | 辞書ディレクトリが OPFS にあれば `true`。 |
 | `listDictionaries()` | 保存済み辞書名の配列を返します。 |
 | `removeDictionary(name)` | 辞書ディレクトリを削除します。 |

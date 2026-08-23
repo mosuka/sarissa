@@ -78,7 +78,7 @@ fallbacks for parallelism.
 
 ### Japanese Morphological Analysis
 
-Browser WASM has no filesystem, so the standard `{ "language": "japanese", "dict": "/path/to/ipadic" }` analyzer preset cannot be used. `laurus-wasm` exposes `JapaneseAnalyzer.fromBytes(...)` (defined in [`src/analysis.rs`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/src/analysis.rs)) so that a Lindera IPADIC dictionary archive can be fetched into OPFS at runtime, read back as the eight raw byte arrays Lindera needs, and handed to the analyzer:
+Browser WASM has no filesystem, so the standard `{ "language": "japanese", "dict": "/path/to/ipadic" }` analyzer preset cannot be used. `laurus-wasm` exposes `JapaneseAnalyzer.fromBytes(...)` (defined in [`src/analysis.rs`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/src/analysis.rs)) so that a Lindera IPADIC dictionary archive can be fetched into OPFS at runtime, read back as the nine raw byte arrays Lindera needs, and handed to the analyzer:
 
 ```javascript
 import { JapaneseAnalyzer, Schema } from "laurus-wasm";
@@ -87,8 +87,8 @@ import { downloadDictionary, loadDictionaryFiles } from "laurus-wasm/opfs";
 await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
 const f = await loadDictionaryFiles("ipadic");
 const ja = JapaneseAnalyzer.fromBytes(
-  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
-  f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
+  f.metadata, f.dictTrie, f.dictValsIdx, f.dictVals,
+  f.dictWordsIdx, f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
 );
 
 const schema = new Schema();
