@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::data::Document;
 use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
+use crate::storage::manifest as manifest_io;
 use crate::storage::structured::{StructReader, StructWriter};
 
 /// Default capacity for the document LRU cache.
@@ -517,13 +518,14 @@ impl UnifiedDocumentStore {
     /// Returns [`LaurusError`] if the manifest file exists but cannot be read or
     /// deserialized.
     pub fn open(storage: Arc<dyn Storage>) -> Result<Self> {
-        if storage.file_exists(MANIFEST_FILE) {
-            let input = storage.open_input(MANIFEST_FILE)?;
-            let mut reader = StructReader::new(input)?;
-            let json = reader.read_bytes()?;
-            let manifest: StoreManifest = serde_json::from_slice(&json)
-                .map_err(|e| LaurusError::index(format!("failed to deserialize manifest: {e}")))?;
-
+        // The CRC-32 trailer this writes is now verified on the way back in
+        // (#1022): it used to be written and never checked, so a corrupted
+        // manifest was read as though it were valid.
+        if let Some((manifest, _format)) = manifest_io::load_checksummed_json::<StoreManifest>(
+            storage.as_ref(),
+            MANIFEST_FILE,
+            None,
+        )? {
             let mut next_doc_id = 1;
             for segment in &manifest.segments {
                 if segment.end_doc_id >= next_doc_id {
@@ -581,24 +583,11 @@ impl UnifiedDocumentStore {
             next_segment_id: self.next_segment_id,
         };
 
-        let json = serde_json::to_vec(&manifest)
-            .map_err(|e| LaurusError::index(format!("failed to serialize manifest: {e}")))?;
-
-        // Atomic write
-        let tmp_file = format!("{}.tmp", MANIFEST_FILE);
-        let output = self.storage.create_output(&tmp_file)?;
-        let mut writer = StructWriter::new(output);
-        writer.write_bytes(&json)?;
-        writer.close()?;
-
-        self.storage.rename_file(&tmp_file, MANIFEST_FILE)?;
-
-        // Sync storage to ensure directory metadata (new segment files, renamed
-        // manifest) is visible to subsequent reads. Critical on Windows where
-        // directory listings may be cached.
-        self.storage.sync()?;
-
-        Ok(())
+        // temp + CRC-32 trailer + rename + sync, shared with every other
+        // control file in the tree (#1022). The sync matters beyond
+        // durability here: on Windows a cached directory listing would hide
+        // the renamed manifest and the new segment files from later reads.
+        manifest_io::save_checksummed_json(self.storage.as_ref(), MANIFEST_FILE, None, &manifest)
     }
 
     /// Adds a document to the pending buffer and assigns it a new internal document ID.
