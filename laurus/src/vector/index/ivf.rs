@@ -18,6 +18,7 @@ use parking_lot::RwLock;
 use crate::embedding::embedder::Embedder;
 use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
+use crate::storage::manifest as manifest_io;
 use crate::vector::index::config::IvfIndexConfig;
 use crate::vector::index::ivf::searcher::IvfSearcher;
 use crate::vector::index::ivf::writer::IvfIndexWriter;
@@ -153,24 +154,25 @@ impl IvfIndex {
 
     /// Write metadata to storage.
     fn write_metadata(&self) -> Result<()> {
-        let metadata = self.metadata.read();
-        let metadata_json = serde_json::to_string_pretty(&*metadata)
-            .map_err(|e| LaurusError::index(format!("Failed to serialize metadata: {e}")))?;
-        drop(metadata);
+        // Atomic and checksummed, matching the HNSW path (#1023). Serialize
+        // under the lock, write outside it — holding a `parking_lot::RwLock`
+        // across I/O deadlocks as soon as an error path formats `self`.
+        let metadata_json = {
+            let metadata = self.metadata.read();
+            serde_json::to_vec(&*metadata)
+                .map_err(|e| LaurusError::index(format!("Failed to serialize metadata: {e}")))?
+        };
 
-        let mut output = self.storage.create_output("metadata.json")?;
-        std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
-        output.close()?;
-
-        Ok(())
+        manifest_io::save_checksummed(self.storage.as_ref(), "metadata.json", None, &metadata_json)
     }
 
     /// Read metadata from storage.
     fn read_metadata(storage: &dyn Storage, _: &str) -> Result<IndexMetadata> {
-        let input = storage.open_input("metadata.json")?;
-        let metadata: IndexMetadata = serde_json::from_reader(input)
-            .map_err(|e| LaurusError::index(format!("Failed to deserialize metadata: {e}")))?;
-        Ok(metadata)
+        // Verifies the checksum; pre-#1023 raw-JSON files still load.
+        match manifest_io::load_checksummed_json::<IndexMetadata>(storage, "metadata.json", None)? {
+            Some((metadata, _format)) => Ok(metadata),
+            None => Err(LaurusError::index("metadata.json is missing or empty")),
+        }
     }
 
     /// Update metadata.

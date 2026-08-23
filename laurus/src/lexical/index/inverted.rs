@@ -31,6 +31,7 @@ use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::storage::file::{FileStorage, FileStorageConfig};
+use crate::storage::manifest as manifest_io;
 
 pub(crate) mod bmw;
 pub mod core;
@@ -204,29 +205,31 @@ impl InvertedIndex {
     }
 
     /// Write metadata to storage.
+    ///
+    /// Atomic and checksummed (#1023). This file is what `open` gates on, so
+    /// a torn write does not lose a counter — it stops the whole engine from
+    /// opening, vector and document data included, with nothing to recreate
+    /// it. Serialization happens under the lock and the write outside it,
+    /// because holding a `parking_lot::RwLock` across I/O would deadlock the
+    /// moment an error path formatted `self`.
     fn write_metadata(&self) -> Result<()> {
-        let metadata = self.metadata.read();
-        let metadata_json = serde_json::to_string_pretty(&*metadata)
-            .map_err(|e| LaurusError::index(format!("Failed to serialize metadata: {e}")))?;
-        drop(metadata);
+        let metadata_json = {
+            let metadata = self.metadata.read();
+            serde_json::to_vec(&*metadata)
+                .map_err(|e| LaurusError::index(format!("Failed to serialize metadata: {e}")))?
+        };
 
-        let mut output = self.storage.create_output("metadata.json")?;
-        std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
-        output.close()?;
-
-        Ok(())
+        manifest_io::save_checksummed(self.storage.as_ref(), "metadata.json", None, &metadata_json)
     }
 
     /// Read metadata from storage.
     pub(crate) fn read_metadata(storage: &dyn Storage) -> Result<IndexMetadata> {
-        let mut input = storage.open_input("metadata.json")?;
-        let mut metadata_json = String::new();
-        Read::read_to_string(&mut input, &mut metadata_json)?;
-
-        let metadata: IndexMetadata = serde_json::from_str(&metadata_json)
-            .map_err(|e| LaurusError::index(format!("Failed to deserialize metadata: {e}")))?;
-
-        Ok(metadata)
+        // Verifies the checksum and refuses a corrupted file rather than
+        // reading it as valid; pre-#1023 raw-JSON files still load (#1023).
+        match manifest_io::load_checksummed_json::<IndexMetadata>(storage, "metadata.json", None)? {
+            Some((metadata, _format)) => Ok(metadata),
+            None => Err(LaurusError::index("metadata.json is missing or empty")),
+        }
     }
 
     /// Update metadata and write to storage.
