@@ -78,10 +78,13 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
         Ok(())
     }
 
-    /// Refresh the index metadata from storage.
+    /// Synchronize the index's in-memory state after external writes.
     ///
-    /// Should be called after external writes (e.g. by a Writer) to ensure
-    /// the index state (like document count) is up-to-date.
+    /// What this means is implementation-defined. For
+    /// [`InvertedIndex`](crate::lexical::index::inverted::InvertedIndex) it
+    /// is a no-op (#1023): its in-memory metadata is the authority — every
+    /// writer it hands out applies commit deltas directly to the shared
+    /// lock, so there is nothing fresher on disk to pick up.
     fn refresh(&self) -> Result<()> {
         Ok(())
     }

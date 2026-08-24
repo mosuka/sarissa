@@ -486,6 +486,37 @@ impl Engine {
         let mut applied = false;
         for record in records {
             if record.seq <= vector_last_seq && record.seq <= lexical_last_seq {
+                // Covered by both INDEX checkpoints — their replay can be
+                // skipped. Before the lexical checkpoint became real this
+                // branch was unreachable (the trait default pinned
+                // `lexical_last_seq` to 0), so both obligations below are
+                // new with #1023.
+                //
+                // The document store is NOT covered by the guard: it has no
+                // checkpoint of its own, and the commit ladder persists it
+                // AFTER the indexes — so a crash between those steps leaves
+                // both indexes checkpointed at N while the documents exist
+                // only in the WAL. Re-store the payload unconditionally;
+                // for a document that did reach disk this rewrites identical
+                // content, so it is idempotent. Deletes need nothing here:
+                // the document store never deletes — liveness is decided by
+                // the lexical index, which the checkpoint does cover.
+                if let LogEntry::Upsert {
+                    doc_id, document, ..
+                } = &record.entry
+                {
+                    let stored_doc = self.filter_stored_fields(document);
+                    self.log.store_document(*doc_id, stored_doc);
+                    // Persist the restored documents via the commit below,
+                    // exactly as a full replay would have.
+                    applied = true;
+                }
+                // Publish the high-water mark for skipped records too:
+                // without it a skip-everything recovery leaves `applied_seq`
+                // at its build-time 0, and the next commit's
+                // `truncate_retaining_after(0)` re-retains the whole dead
+                // WAL — breaking the post-commit empty-WAL invariant.
+                self.applied_seq.fetch_max(record.seq, Ordering::AcqRel);
                 continue;
             }
             applied = true;
