@@ -226,6 +226,23 @@ code path can overwrite the file from a stale copy, and internal writers (such
 as the merge engine's segment-replay writer) have no handle and cannot touch
 the file at all.
 
+Lexical segment **discovery** follows the same authority model through
+`segments.json`, an atomically replaced, checksummed manifest of the committed
+segment set. Publication is all-or-nothing: a commit adds every flushed
+segment in one manifest write, and a merge drops its sources and inserts the
+merged segment in one write. The in-memory copy mirrors the last
+*successfully persisted* manifest (a failed save leaves the pending state for
+the retry), so reader construction is a pure in-memory read — no directory
+listing, no per-segment metadata parse. Per-segment `.meta` files are still
+written as advisory duplicates during the transition, but discovery never
+reads them, and after a crash in a publication window the manifest — not the
+`.meta` set — is what wins: files the manifest does not list are reclaimed at
+the next open. Two consequences worth knowing: at most **one writing store
+instance per directory** is supported (concurrent instances would overwrite
+each other's manifest), and segments committed through a standalone
+`InvertedIndexWriter` into a directory owned by a manifest-bearing index are
+not registered with the manifest and will be reclaimed.
+
 The commit ladder is:
 
 1. **`flush_wal()`** — force the WAL durable (the hard barrier). Under `Group`

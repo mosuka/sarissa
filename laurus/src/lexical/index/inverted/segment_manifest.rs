@@ -43,11 +43,17 @@ pub(crate) const MANIFEST_FILE: &str = "segments.json";
 
 /// On-disk manifest version written by this build.
 ///
-/// Version 1 means "written while segment discovery still ran on the
-/// `.meta` scan" (#1021 PR 1). The discovery flip bumps this to 2, and the
-/// orphan sweep is gated on `>= 2` so a version-1 manifest is never used
-/// as a deletion warrant.
-pub(crate) const MANIFEST_VERSION: u32 = 1;
+/// Version 1 was written while segment discovery still ran on the `.meta`
+/// scan (#1021 PR 1) — those manifests were never the authority, so a
+/// loader treats them exactly like an absent manifest (rebuild from the
+/// committed-`.meta` scan) and never uses them as a deletion warrant.
+/// Version 2 means discovery reads the manifest and the orphan sweep may
+/// trust it.
+pub(crate) const MANIFEST_VERSION: u32 = 2;
+
+/// The first version whose manifest is authoritative for discovery and
+/// for the orphan sweep — see [`MANIFEST_VERSION`].
+pub(crate) const AUTHORITATIVE_VERSION: u32 = 2;
 
 /// Shared handle to the in-memory committed-segment set.
 pub(crate) type SharedSegmentManifest = Arc<RwLock<Vec<SegmentInfo>>>;
@@ -69,17 +75,20 @@ struct SegmentManifest {
 ///
 /// # Returns
 ///
-/// `Ok(Some(segments))` when the manifest exists, `Ok(None)` when it does
-/// not (a legacy index — the caller falls back to the `.meta` scan).
+/// `Ok(Some((version, segments)))` when the manifest exists, `Ok(None)`
+/// when it does not (a legacy index — the caller falls back to the
+/// `.meta` scan). Callers must treat a version below
+/// [`AUTHORITATIVE_VERSION`] like an absent manifest for discovery and
+/// sweeping purposes.
 ///
 /// # Errors
 ///
 /// Returns an error if the file exists but is corrupted (checksum
 /// mismatch) or fails to parse — a torn or damaged manifest must surface,
 /// not silently degrade to an empty segment set.
-pub(crate) fn load(storage: &dyn Storage) -> Result<Option<Vec<SegmentInfo>>> {
+pub(crate) fn load(storage: &dyn Storage) -> Result<Option<(u32, Vec<SegmentInfo>)>> {
     match manifest_io::load_checksummed_json::<SegmentManifest>(storage, MANIFEST_FILE, None)? {
-        Some((manifest, _format)) => Ok(Some(manifest.segments)),
+        Some((manifest, _format)) => Ok(Some((manifest.version, manifest.segments))),
         None => Ok(None),
     }
 }
@@ -179,7 +188,10 @@ mod tests {
 
         let segments = vec![seg("segment_000001", 1), seg("merged_2", 2)];
         save(&storage, &segments).unwrap();
-        assert_eq!(load(&storage).unwrap().unwrap(), segments);
+        assert_eq!(
+            load(&storage).unwrap().unwrap(),
+            (MANIFEST_VERSION, segments)
+        );
     }
 
     #[test]
@@ -192,6 +204,36 @@ mod tests {
 
         upsert_entry(&mut list, seg("segment_000002", 2));
         assert_eq!(list.len(), 2, "new id must append");
+    }
+
+    /// The merge-transition shape must be a delta against the LIVE list:
+    /// an entry added between computing a merge's sources and publishing
+    /// it survives. A snapshot replacement would silently drop it.
+    #[test]
+    fn publish_with_applies_deltas_to_the_live_list() {
+        let storage = MemoryStorage::new(MemoryStorageConfig::default());
+        let shared = RwLock::new(vec![seg("segment_000001", 1)]);
+
+        // A concurrent publication lands first.
+        publish_with(&storage, &shared, |list| {
+            upsert_entry(list, seg("segment_000002", 2));
+        })
+        .unwrap();
+
+        // The merge delta (computed when only segment_000001 existed)
+        // drops its source and inserts the merged segment.
+        publish_with(&storage, &shared, |list| {
+            list.retain(|s| s.segment_id != "segment_000001");
+            upsert_entry(list, seg("merged_3", 3));
+        })
+        .unwrap();
+
+        let ids: Vec<String> = shared.read().iter().map(|s| s.segment_id.clone()).collect();
+        assert_eq!(
+            ids,
+            vec!["segment_000002".to_string(), "merged_3".to_string()],
+            "the interleaved publication must survive the merge delta"
+        );
     }
 
     #[test]
