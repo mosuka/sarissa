@@ -1,0 +1,259 @@
+//! Atomic segment manifest for the lexical inverted index (#1021).
+//!
+//! `segments.json` is the single, atomically replaced record of the
+//! committed segment set — the counterpart of the vector side's
+//! `SegmentManager` manifest, built on the shared
+//! [`storage::manifest`](crate::storage::manifest) helpers (CRC-verified,
+//! written via temp + rename + directory sync).
+//!
+//! # Authority and the save-then-swap rule
+//!
+//! The in-memory copy (owned by
+//! [`InvertedIndex`](super::InvertedIndex), shared with its writer) is a
+//! mirror of the last **successfully persisted** manifest, never ahead of
+//! it. Every mutation goes through [`publish_with`]: build a candidate
+//! under the write guard, persist it, and only on success swap it into
+//! memory. This deliberately deviates from the vector manager's
+//! mutate-then-save: there, a failed save leaves memory ahead of disk,
+//! which is survivable when every later save rewrites the full list — but
+//! here a retried commit would find its pending state consumed, publish
+//! nothing, and still advance the WAL checkpoint, after which a reopen
+//! would neither replay nor discover the segments.
+//!
+//! The manifest lock is a **leaf**: nothing under its guard may construct
+//! readers, list storage, or take the index's metadata lock. The guard is
+//! intentionally held across the save so two racing mutators cannot
+//! publish manifests out of order (the same argument as
+//! `SegmentManager::save_state_locked`); this is safe only while no other
+//! code path — `Debug` impls included — blocks on this lock.
+
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+
+use crate::Result;
+use crate::storage::Storage;
+use crate::storage::manifest as manifest_io;
+
+use super::segment::SegmentInfo;
+
+/// Manifest file name inside the lexical storage namespace.
+pub(crate) const MANIFEST_FILE: &str = "segments.json";
+
+/// On-disk manifest version written by this build.
+///
+/// Version 1 means "written while segment discovery still ran on the
+/// `.meta` scan" (#1021 PR 1). The discovery flip bumps this to 2, and the
+/// orphan sweep is gated on `>= 2` so a version-1 manifest is never used
+/// as a deletion warrant.
+pub(crate) const MANIFEST_VERSION: u32 = 1;
+
+/// Shared handle to the in-memory committed-segment set.
+pub(crate) type SharedSegmentManifest = Arc<RwLock<Vec<SegmentInfo>>>;
+
+/// Serialized form of [`MANIFEST_FILE`].
+#[derive(Debug, Serialize, Deserialize)]
+struct SegmentManifest {
+    /// Format version — see [`MANIFEST_VERSION`].
+    version: u32,
+    /// The committed segments, in publication order.
+    segments: Vec<SegmentInfo>,
+}
+
+/// Load the manifest from `storage`.
+///
+/// # Arguments
+///
+/// * `storage` - The lexical index's storage.
+///
+/// # Returns
+///
+/// `Ok(Some(segments))` when the manifest exists, `Ok(None)` when it does
+/// not (a legacy index — the caller falls back to the `.meta` scan).
+///
+/// # Errors
+///
+/// Returns an error if the file exists but is corrupted (checksum
+/// mismatch) or fails to parse — a torn or damaged manifest must surface,
+/// not silently degrade to an empty segment set.
+pub(crate) fn load(storage: &dyn Storage) -> Result<Option<Vec<SegmentInfo>>> {
+    match manifest_io::load_checksummed_json::<SegmentManifest>(storage, MANIFEST_FILE, None)? {
+        Some((manifest, _format)) => Ok(Some(manifest.segments)),
+        None => Ok(None),
+    }
+}
+
+/// Persist `segments` as the new manifest, atomically.
+///
+/// # Arguments
+///
+/// * `storage` - The lexical index's storage.
+/// * `segments` - The complete committed segment set to record.
+///
+/// # Errors
+///
+/// Returns an error if serializing or persisting fails; the previous
+/// manifest is left intact in that case (temp + rename).
+pub(crate) fn save(storage: &dyn Storage, segments: &[SegmentInfo]) -> Result<()> {
+    let manifest = SegmentManifest {
+        version: MANIFEST_VERSION,
+        segments: segments.to_vec(),
+    };
+    manifest_io::save_checksummed_json(storage, MANIFEST_FILE, None, &manifest)
+}
+
+/// Mutate the shared manifest under the save-then-swap rule.
+///
+/// Clones the current list, applies `mutate` to the clone, persists the
+/// candidate while still holding the write guard, and swaps it into
+/// memory **only if the save succeeded**. On failure the in-memory copy
+/// (and the caller's pending state) is untouched, so a retried commit
+/// republishes the same mutation.
+///
+/// # Arguments
+///
+/// * `storage` - The lexical index's storage.
+/// * `shared` - The shared in-memory manifest.
+/// * `mutate` - Delta to apply to the candidate list. It receives the
+///   candidate, never the live list.
+///
+/// # Errors
+///
+/// Returns the persistence error, leaving memory unchanged.
+pub(crate) fn publish_with<F>(
+    storage: &dyn Storage,
+    shared: &RwLock<Vec<SegmentInfo>>,
+    mutate: F,
+) -> Result<()>
+where
+    F: FnOnce(&mut Vec<SegmentInfo>),
+{
+    let mut guard = shared.write();
+    let mut candidate = guard.clone();
+    mutate(&mut candidate);
+    save(storage, &candidate)?;
+    *guard = candidate;
+    Ok(())
+}
+
+/// Insert `info` into `list`, replacing any entry with the same
+/// `segment_id`.
+///
+/// The dedup is what makes a retried publication idempotent: a commit
+/// whose manifest save succeeded but whose later ladder step failed
+/// re-runs the whole publish, and must not double-add.
+pub(crate) fn upsert_entry(list: &mut Vec<SegmentInfo>, info: SegmentInfo) {
+    if let Some(existing) = list
+        .iter_mut()
+        .find(|entry| entry.segment_id == info.segment_id)
+    {
+        *existing = info;
+    } else {
+        list.push(info);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+
+    fn seg(id: &str, generation: u64) -> SegmentInfo {
+        SegmentInfo {
+            segment_id: id.to_string(),
+            doc_count: 1,
+            min_doc_id: 0,
+            max_doc_id: 0,
+            generation,
+            has_deletions: false,
+            shard_id: 0,
+            committed: true,
+        }
+    }
+
+    #[test]
+    fn save_load_roundtrip() {
+        let storage = MemoryStorage::new(MemoryStorageConfig::default());
+        assert!(load(&storage).unwrap().is_none(), "no manifest yet");
+
+        let segments = vec![seg("segment_000001", 1), seg("merged_2", 2)];
+        save(&storage, &segments).unwrap();
+        assert_eq!(load(&storage).unwrap().unwrap(), segments);
+    }
+
+    #[test]
+    fn upsert_entry_replaces_by_id() {
+        let mut list = vec![seg("segment_000001", 1)];
+        let mut updated = seg("segment_000001", 1);
+        updated.has_deletions = true;
+        upsert_entry(&mut list, updated.clone());
+        assert_eq!(list, vec![updated], "same id must replace, not append");
+
+        upsert_entry(&mut list, seg("segment_000002", 2));
+        assert_eq!(list.len(), 2, "new id must append");
+    }
+
+    #[test]
+    fn failed_save_leaves_memory_and_disk_untouched() {
+        // A storage that refuses every write.
+        #[derive(Debug)]
+        struct ReadOnly(MemoryStorage);
+        impl Storage for ReadOnly {
+            fn create_output(&self, _n: &str) -> Result<Box<dyn crate::storage::StorageOutput>> {
+                Err(crate::LaurusError::storage("read-only"))
+            }
+            fn create_output_append(
+                &self,
+                n: &str,
+            ) -> Result<Box<dyn crate::storage::StorageOutput>> {
+                self.0.create_output_append(n)
+            }
+            fn open_input(&self, n: &str) -> Result<Box<dyn crate::storage::StorageInput>> {
+                self.0.open_input(n)
+            }
+            fn file_exists(&self, n: &str) -> bool {
+                self.0.file_exists(n)
+            }
+            fn delete_file(&self, n: &str) -> Result<()> {
+                self.0.delete_file(n)
+            }
+            fn rename_file(&self, a: &str, b: &str) -> Result<()> {
+                self.0.rename_file(a, b)
+            }
+            fn list_files(&self) -> Result<Vec<String>> {
+                self.0.list_files()
+            }
+            fn file_size(&self, n: &str) -> Result<u64> {
+                self.0.file_size(n)
+            }
+            fn sync(&self) -> Result<()> {
+                Ok(())
+            }
+            fn metadata(&self, n: &str) -> Result<crate::storage::FileMetadata> {
+                self.0.metadata(n)
+            }
+            fn create_temp_output(
+                &self,
+                p: &str,
+            ) -> Result<(String, Box<dyn crate::storage::StorageOutput>)> {
+                self.0.create_temp_output(p)
+            }
+            fn close(&mut self) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let storage = ReadOnly(MemoryStorage::new(MemoryStorageConfig::default()));
+        let shared = RwLock::new(vec![seg("segment_000001", 1)]);
+        let err = publish_with(&storage, &shared, |list| {
+            upsert_entry(list, seg("segment_000002", 2));
+        });
+        assert!(err.is_err());
+        assert_eq!(
+            shared.read().len(),
+            1,
+            "a failed save must not advance the in-memory manifest"
+        );
+    }
+}

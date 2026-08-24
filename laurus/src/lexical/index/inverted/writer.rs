@@ -182,6 +182,15 @@ pub struct InvertedIndexWriter {
     /// checkpoint on the next commit).
     metadata: Option<Arc<parking_lot::RwLock<IndexMetadata>>>,
 
+    /// Shared handle to the index's committed-segment manifest (#1021).
+    ///
+    /// `Some` only for writers built via [`Self::with_shared_state`] —
+    /// like [`Self::metadata`], and with the same rationale: handle-less
+    /// writers (the merge engine's replay writer, direct test
+    /// constructions) keep today's `.meta`-only behavior and cannot touch
+    /// `segments.json`.
+    segment_manifest: Option<super::segment_manifest::SharedSegmentManifest>,
+
     /// Last processed WAL sequence number.
     last_wal_seq: u64,
 
@@ -211,13 +220,20 @@ pub struct InvertedIndexWriter {
     ///
     /// `flush_segment` writes a segment as soon as the buffer fills, with
     /// `committed: false` in its `.meta` so discovery skips it. `commit`
-    /// walks this list and flips the flag, which is the moment those
-    /// documents become searchable.
+    /// publishes this list — one manifest write adds every entry (#1021),
+    /// then the per-`.meta` flags are flipped as advisory dual-writes —
+    /// which is the moment those documents become searchable.
+    ///
+    /// Holds the full [`SegmentInfo`] (as flushed, `committed: false`) so
+    /// publication needs no `.meta` re-read; [`Self::flush_deletions`]
+    /// updates `has_deletions` here too, or a segment deleted-from and
+    /// published in the same commit would enter the manifest with the
+    /// flag still false and resurrect its deleted documents.
     ///
     /// Kept separate from [`Self::flushed_segments`], which exists for NRT
     /// `_id` resolution and is cleared on the same events: the two answer
     /// different questions and one is not derivable from the other.
-    pending_publish: Vec<String>,
+    pending_publish: Vec<SegmentInfo>,
 
     /// Cached `(segment_id, min_doc_id, max_doc_id)` for every committed
     /// segment, mirroring the `*.meta` files on storage (Issue #559 / #864).
@@ -281,18 +297,22 @@ impl std::fmt::Debug for InvertedIndexWriter {
 impl InvertedIndexWriter {
     /// Create a new inverted index writer (schema-less mode).
     ///
-    /// A writer built this way has no handle to an index's metadata and
-    /// therefore never writes `metadata.json` (#1023) — this is what keeps
-    /// the merge engine's internal replay writer (and every direct test
-    /// construction) from competing with the index over the control file.
-    /// Writers that should maintain the metadata are built by
+    /// A writer built this way has no handle to an index's shared state
+    /// and therefore never writes `metadata.json` (#1023) or
+    /// `segments.json` (#1021) — this is what keeps the merge engine's
+    /// internal replay writer (and every direct test construction) from
+    /// competing with the index over the control files. Segments committed
+    /// by a standalone writer are recorded only in their `.meta` files and
+    /// are NOT registered with an index's manifest. Writers that should
+    /// maintain the shared state are built by
     /// [`InvertedIndex::writer`](crate::lexical::index::inverted::InvertedIndex)
-    /// through [`Self::with_shared_metadata`].
+    /// through [`Self::with_shared_state`].
     pub fn new(storage: Arc<dyn Storage>, config: InvertedIndexWriterConfig) -> Result<Self> {
-        Self::build(storage, config, None)
+        Self::build(storage, config, None, None)
     }
 
-    /// Create a writer that maintains the index's shared metadata (#1023).
+    /// Create a writer that maintains the index's shared state
+    /// (#1023 / #1021).
     ///
     /// # Arguments
     ///
@@ -301,24 +321,28 @@ impl InvertedIndexWriter {
     /// * `metadata` - Handle to the owning index's authoritative metadata;
     ///   the writer applies its per-commit deltas to it and persists a
     ///   snapshot at every commit.
+    /// * `segment_manifest` - Handle to the owning index's committed-segment
+    ///   manifest; `commit` publishes flushed segments into it atomically.
     ///
     /// # Errors
     ///
     /// Returns an error if recovering writer state from storage fails.
-    pub(crate) fn with_shared_metadata(
+    pub(crate) fn with_shared_state(
         storage: Arc<dyn Storage>,
         config: InvertedIndexWriterConfig,
         metadata: Arc<parking_lot::RwLock<IndexMetadata>>,
+        segment_manifest: super::segment_manifest::SharedSegmentManifest,
     ) -> Result<Self> {
-        Self::build(storage, config, Some(metadata))
+        Self::build(storage, config, Some(metadata), Some(segment_manifest))
     }
 
     /// Shared constructor body behind [`Self::new`] and
-    /// [`Self::with_shared_metadata`].
+    /// [`Self::with_shared_state`].
     fn build(
         storage: Arc<dyn Storage>,
         config: InvertedIndexWriterConfig,
         metadata: Option<Arc<parking_lot::RwLock<IndexMetadata>>>,
+        segment_manifest: Option<super::segment_manifest::SharedSegmentManifest>,
     ) -> Result<Self> {
         // Recover state from existing segments. The same scan also seeds the
         // segment-range cache (Issue #559 / #864), so the cache is warm from
@@ -382,6 +406,7 @@ impl InvertedIndexWriter {
             },
             last_wal_seq,
             metadata,
+            segment_manifest,
             pending_deletions: std::collections::HashSet::new(),
             flushed_segments: Vec::new(),
             pending_publish: Vec::new(),
@@ -924,8 +949,11 @@ impl InvertedIndexWriter {
             self.storage.clone(),
         )?);
 
-        // Remember to publish it at the next commit (#1017).
-        self.pending_publish.push(segment_name.clone());
+        // Remember to publish it at the next commit (#1017). The full
+        // description is retained so publication needs no `.meta` re-read
+        // (#1021); `flush_deletions` keeps its `has_deletions` current.
+        self.pending_publish
+            .push(self.segment_info_for(&segment_name, /* committed */ false));
 
         // Clear buffers
         self.buffered_docs.clear();
@@ -2014,8 +2042,33 @@ impl InvertedIndexWriter {
     /// A segment already published (for instance one this writer adopted
     /// from an older index) is left alone.
     fn publish_pending_segments(&mut self) -> Result<()> {
-        for segment_id in std::mem::take(&mut self.pending_publish) {
-            self.update_segment_meta(&segment_id, |meta| {
+        if self.pending_publish.is_empty() {
+            return Ok(());
+        }
+
+        // Manifest first (#1021): ONE atomic write adds every pending
+        // segment — all-or-nothing, unlike the per-`.meta` flips below.
+        // save-then-swap: the pending list is consumed only after the whole
+        // publication succeeds, so the #875 retained-writer retry simply
+        // re-runs it; the upsert dedups by segment_id, so a retry whose
+        // manifest save had already landed cannot double-add.
+        if let Some(manifest) = &self.segment_manifest {
+            let pending = &self.pending_publish;
+            super::segment_manifest::publish_with(self.storage.as_ref(), manifest, |list| {
+                for info in pending {
+                    let mut info = info.clone();
+                    info.committed = true;
+                    super::segment_manifest::upsert_entry(list, info);
+                }
+            })?;
+        }
+
+        // Advisory `.meta` flips (dual-write during the #1021 transition).
+        // Iterating without draining fixes a latent partial-publish bug:
+        // the old `std::mem::take` dropped every not-yet-flipped id on a
+        // mid-loop error, permanently hiding those committed documents.
+        for info in &self.pending_publish {
+            self.update_segment_meta(&info.segment_id, |meta| {
                 if meta.committed {
                     false
                 } else {
@@ -2024,6 +2077,7 @@ impl InvertedIndexWriter {
                 }
             })?;
         }
+        self.pending_publish.clear();
         Ok(())
     }
 
@@ -2094,6 +2148,39 @@ impl InvertedIndexWriter {
             return Ok(());
         }
         let pending: Vec<String> = self.pending_meta_deletions.iter().cloned().collect();
+
+        // Apply the flips to the manifest (#1021), AFTER the bitmaps above
+        // are durable (#875's contract: a reader that sees the flag always
+        // finds the `.delmap`) and BEFORE the advisory `.meta` flips. One
+        // atomic write covers every flipped segment. A failed save leaves
+        // `pending_meta_deletions` intact for the retry; a repeated save
+        // after a partial advisory failure is idempotent.
+        if let Some(manifest) = &self.segment_manifest {
+            super::segment_manifest::publish_with(self.storage.as_ref(), manifest, |list| {
+                for segment_id in &pending {
+                    if let Some(entry) = list.iter_mut().find(|s| &s.segment_id == segment_id) {
+                        entry.has_deletions = true;
+                    }
+                }
+            })?;
+        }
+
+        // A segment flushed in THIS commit has no manifest entry yet — it
+        // is still in `pending_publish`. Update the retained description,
+        // or the deleted-from-then-published segment would enter the
+        // manifest with `has_deletions: false` and resurrect its deleted
+        // documents once discovery trusts the manifest (#1021).
+        for segment_id in &pending {
+            if let Some(entry) = self
+                .pending_publish
+                .iter_mut()
+                .find(|s| &s.segment_id == segment_id)
+            {
+                entry.has_deletions = true;
+            }
+        }
+
+        // Advisory `.meta` flips (dual-write during the #1021 transition).
         for segment_id in pending {
             self.persist_segment_meta_deletions(&segment_id)?;
             self.pending_meta_deletions.remove(&segment_id);
