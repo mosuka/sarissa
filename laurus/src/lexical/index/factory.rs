@@ -60,10 +60,14 @@ impl LexicalIndexFactory {
     /// use laurus::lexical::index::factory::LexicalIndexFactory;
     /// use laurus::storage::{StorageFactory, StorageConfig};
     /// use laurus::storage::file::FileStorageConfig;
+    /// use tempfile::TempDir;
     ///
     /// # fn main() -> laurus::Result<()> {
-    /// // Create file storage
-    /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
+    /// // Create file storage in a private temporary directory. A fixed
+    /// // path would race the other doctests: index control files
+    /// // (metadata.json, segments.json) are per-directory.
+    /// let dir = TempDir::new().unwrap();
+    /// let storage_config = StorageConfig::File(FileStorageConfig::new(dir.path()));
     /// let storage = StorageFactory::create(storage_config)?;
     ///
     /// // Create inverted index

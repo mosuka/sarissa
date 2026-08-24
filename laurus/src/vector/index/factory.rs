@@ -64,10 +64,15 @@ impl VectorIndexFactory {
     /// use laurus::vector::index::config::{VectorIndexTypeConfig, FlatIndexConfig};
     /// use laurus::storage::{StorageFactory, StorageConfig};
     /// use laurus::storage::file::FileStorageConfig;
+    /// use tempfile::TempDir;
     ///
     /// # fn main() -> laurus::Result<()> {
-    /// // Create file storage
-    /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
+    /// // Create file storage in a private temporary directory. A fixed
+    /// // path would race the other doctests: index control files
+    /// // (metadata.json, segments.json) are per-directory, and this
+    /// // doctest once failed on another doctest's lexical manifest.
+    /// let dir = TempDir::new().unwrap();
+    /// let storage_config = StorageConfig::File(FileStorageConfig::new(dir.path()));
     /// let storage = StorageFactory::create(storage_config)?;
     ///
     /// // Create flat index

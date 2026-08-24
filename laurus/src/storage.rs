@@ -749,14 +749,18 @@ impl StorageFactory {
     /// use laurus::storage::{StorageFactory, StorageConfig};
     /// use laurus::storage::file::FileStorageConfig;
     /// use laurus::storage::memory::MemoryStorageConfig;
+    /// use tempfile::TempDir;
     ///
     /// # fn main() -> laurus::Result<()> {
     /// // Create memory storage
     /// let config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// let storage = StorageFactory::create(config)?;
     ///
-    /// // Create file storage
-    /// let file_config = FileStorageConfig::new("/tmp/index");
+    /// // Create file storage in a private temporary directory (doctests
+    /// // must not share a fixed path — index control files are
+    /// // per-directory).
+    /// let dir = TempDir::new().unwrap();
+    /// let file_config = FileStorageConfig::new(dir.path());
     /// let config = StorageConfig::File(file_config);
     /// let storage = StorageFactory::create(config)?;
     /// # Ok(())
