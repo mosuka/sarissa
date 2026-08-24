@@ -964,8 +964,13 @@ impl InvertedIndexWriter {
         self.write_field_lengths(segment_name)?;
         self.write_field_stats(segment_name)?;
         self.write_doc_values(segment_name)?;
-        self.write_segment_metadata(segment_name, committed)?;
         self.write_bkd_trees(segment_name)?;
+        // The `.meta` goes LAST (#1032): it is what makes the segment
+        // discoverable, so writing it before the data files would let a
+        // failure in a later write leave a discoverable segment with files
+        // missing — a BKD-less segment, for instance, silently returns
+        // zero hits for numeric-range and geo queries.
+        self.write_segment_metadata(segment_name, committed)?;
         // The redundant `.json` stored-field mirror is no longer written
         // (Issue #756); stored fields are read from the typed `.docs` file.
 
@@ -1704,6 +1709,27 @@ impl InvertedIndexWriter {
         self.inverted_index = TermPostingIndex::new();
 
         Ok(())
+    }
+
+    /// Discard all pending state and make [`Drop`] fully inert (#1032).
+    ///
+    /// [`Drop`] runs `close()`, which commits anything still buffered — the
+    /// right default for a store-owned writer, but fatal for the merge
+    /// engine's replay writer: if the merge dies partway, that implicit
+    /// commit would flush the partially replayed documents into a fresh
+    /// `segment_*` and publish it, leaving every document live twice while
+    /// the source segments still exist. This discards the buffers (via
+    /// [`Self::rollback`]) and marks the writer closed so `close()` does
+    /// nothing at all — no flush, no publish, no `index.meta` write.
+    ///
+    /// Buffered deletion state is untouched, exactly as `rollback`
+    /// documents; the merge replay never creates any.
+    pub(crate) fn abort(&mut self) {
+        // Infallible in practice: `rollback` only clears in-memory buffers
+        // after the `check_closed` guard, and the writer cannot be closed
+        // here — `abort` is what closes it.
+        let _ = self.rollback();
+        self.closed = true;
     }
 
     /// Get writer statistics.

@@ -332,12 +332,26 @@ impl MergeEngine {
         // here re-added the whole merged output to `doc_count` on every
         // merge, compounding on each auto-merging commit.
         let mut writer = InvertedIndexWriter::new(self.storage.clone(), writer_config)?;
-        for doc_id in &order {
-            if let Some(analyzed) = docs.remove(doc_id) {
-                writer.upsert_analyzed_document(*doc_id, analyzed)?;
+        // Replay + flush as one fallible unit. On ANY error the writer is
+        // aborted before it can drop: `Drop` would otherwise commit the
+        // partially replayed buffer into a fresh `segment_*` and publish it
+        // (#1032) — silent document duplication, since the source segments
+        // are only deleted after a successful merge.
+        let replayed = (|| -> Result<Vec<String>> {
+            for doc_id in &order {
+                if let Some(analyzed) = docs.remove(doc_id) {
+                    writer.upsert_analyzed_document(*doc_id, analyzed)?;
+                }
             }
-        }
-        let file_paths = writer.flush_buffered_to_segment(new_segment_id)?;
+            writer.flush_buffered_to_segment(new_segment_id)
+        })();
+        let file_paths = match replayed {
+            Ok(paths) => paths,
+            Err(e) => {
+                writer.abort();
+                return Err(e);
+            }
+        };
 
         stats.docs_processed = doc_count;
         stats.postings_merged = doc_count;
