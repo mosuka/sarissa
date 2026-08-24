@@ -194,19 +194,41 @@ impl InvertedIndex {
 
         let metadata = Self::read_metadata(storage.as_ref())?;
 
-        // Manifest, or legacy migration (#1021): an index written before
-        // `segments.json` existed is read through the committed `.meta`
-        // scan, in memory only — `open` performs no writes (read-only and
-        // WASM storages must keep opening), so the first mutation persists
-        // the migrated manifest.
-        let segments = match segment_manifest::load(storage.as_ref())? {
-            Some(segments) => segments,
-            None => {
+        // Manifest, or legacy migration (#1021). Two legacy shapes read
+        // through the committed `.meta` scan instead: no manifest at all
+        // (pre-#1021), and a version-1 manifest (written while discovery
+        // still ran on the scan — it was never the authority, so it is a
+        // hint at best and NEVER a deletion warrant). The migration is in
+        // memory only — `open` writes nothing (read-only and WASM storages
+        // must keep opening) — and the first mutation persists it at the
+        // current version.
+        let loaded = segment_manifest::load(storage.as_ref())?;
+        let authoritative = matches!(
+            &loaded,
+            Some((version, _)) if *version >= segment_manifest::AUTHORITATIVE_VERSION
+        );
+        let segments = match loaded {
+            Some((version, segments)) if version >= segment_manifest::AUTHORITATIVE_VERSION => {
+                segments
+            }
+            _ => {
                 let mut scanned = Self::scan_segment_metas_from(storage.as_ref())?;
                 scanned.retain(|s| s.committed);
                 scanned
             }
         };
+
+        // Orphan sweep (#1021): reclaim segment files the manifest does not
+        // know — crash-orphaned uncommitted flushes, and the leftovers of a
+        // merge whose cleanup did not finish. Gated on an authoritative
+        // manifest: a legacy or version-1 index is never swept, so nothing
+        // is deleted on the word of a record that was never the authority.
+        // Best-effort by design: failures (read-only storage included) are
+        // ignored, and correctness never depends on the sweep — WAL replay
+        // covers anything a crash left unpublished.
+        if authoritative {
+            Self::sweep_orphans(storage.as_ref(), &segments);
+        }
 
         Ok(InvertedIndex {
             storage,
@@ -303,8 +325,12 @@ impl InvertedIndex {
     ///
     /// Published segments, ordered by generation.
     fn load_segments(&self) -> Result<Vec<SegmentInfo>> {
-        let mut segments = self.scan_segment_metas()?;
-        segments.retain(|s| s.committed);
+        // A pure in-memory read since #1021: the shared manifest mirrors
+        // the last successfully persisted `segments.json` (save-then-swap),
+        // and every entry in it is committed by construction. Zero storage
+        // I/O per reader construction, where the `.meta` scan paid
+        // O(segments) opens + parses.
+        let mut segments = self.segment_manifest.read().clone();
         segments.sort_by_key(|s| s.generation);
         Ok(segments)
     }
@@ -321,6 +347,61 @@ impl InvertedIndex {
     /// Every segment described on storage, in directory order.
     fn scan_segment_metas(&self) -> Result<Vec<SegmentInfo>> {
         Self::scan_segment_metas_from(self.storage.as_ref())
+    }
+
+    /// Delete segment-shaped files the manifest does not list (#1021).
+    ///
+    /// A file participates when the stem before its first `.` is
+    /// `segment_` or `merged_` followed by ASCII digits only — the two
+    /// shapes this index mints — which also covers their `.delmap`s and
+    /// per-field `.bkd`s while rejecting foreign names. A stem present in
+    /// `manifest` is live and kept. Deletions are best-effort (`let _`):
+    /// the sweep is an optimization, never a correctness requirement.
+    ///
+    /// Reclaiming a segment whose `.meta` says `committed: true` is logged
+    /// at `warn`: it usually means a crash in a publication window (the
+    /// manifest wins by design), but it can also mean segments committed
+    /// through a standalone `InvertedIndexWriter` into a directory owned
+    /// by a manifest-bearing index — a documented misuse.
+    fn sweep_orphans(storage: &dyn Storage, manifest: &[SegmentInfo]) {
+        let Ok(files) = storage.list_files() else {
+            return;
+        };
+        for file in files {
+            if file == "segments.json.tmp" {
+                let _ = storage.delete_file(&file);
+                continue;
+            }
+            let Some(stem) = file.split('.').next() else {
+                continue;
+            };
+            let ordinal = stem
+                .strip_prefix("segment_")
+                .or_else(|| stem.strip_prefix("merged_"));
+            let Some(ordinal) = ordinal else {
+                continue;
+            };
+            if ordinal.is_empty() || !ordinal.bytes().all(|b| b.is_ascii_digit()) {
+                continue;
+            }
+            if manifest.iter().any(|s| s.segment_id == stem) {
+                continue;
+            }
+            if file.ends_with(".meta")
+                && let Ok(mut input) = storage.open_input(&file)
+            {
+                let mut data = Vec::new();
+                if Read::read_to_end(&mut input, &mut data).is_ok()
+                    && let Ok(meta) = serde_json::from_slice::<SegmentInfo>(&data)
+                    && meta.committed
+                {
+                    log::warn!(
+                        "sweeping segment {stem}: its .meta says committed but the manifest                          does not list it (a crash in a publication window, or a segment                          committed by a standalone writer)"
+                    );
+                }
+            }
+            let _ = storage.delete_file(&file);
+        }
     }
 
     /// [`Self::scan_segment_metas`] as an associated function, so `open`
