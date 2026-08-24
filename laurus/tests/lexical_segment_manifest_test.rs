@@ -786,3 +786,116 @@ fn merge_crash_after_manifest_save_resolves_to_the_merged_segment() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// #1024 PR A — writer state derives from the manifest; the scan is legacy.
+// ---------------------------------------------------------------------------
+
+/// The lost-manifest guard: segment files with neither a manifest nor any
+/// `.meta` to migrate from must refuse to open — the alternative is a
+/// silently empty index whose next commit publishes a fresh manifest that
+/// the following open's sweep enforces by deleting every old segment.
+#[test]
+fn open_refuses_segment_files_with_nothing_to_describe_them() {
+    let storage = memory_storage();
+    let store = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
+    store.upsert_document(1, doc("alpha")).unwrap();
+    store.commit().unwrap();
+    drop(store);
+
+    // Simulate the lost-manifest state of a post-#1024 index: no
+    // segments.json, no .meta, but the segment data files are there.
+    storage.delete_file("segments.json").unwrap();
+    for f in storage.list_files().unwrap() {
+        if f.ends_with(".meta") && f != "index.meta" {
+            storage.delete_file(&f).unwrap();
+        }
+    }
+
+    let err = LexicalStore::new(storage.clone(), LexicalIndexConfig::default());
+    assert!(
+        err.is_err(),
+        "segment files without a manifest or .meta must refuse to open, not \
+         serve a silently empty index"
+    );
+}
+
+/// The generation seed counts surviving segment-file stems, not just
+/// manifest entries: an ordinal whose files survived (a failed best-effort
+/// sweep deletion, a legacy crash) must never be reused — the new segment
+/// would adopt stale foreign `.bkd`s / `.delmap`s by name prefix.
+#[test]
+fn generation_seed_never_reuses_a_surviving_file_ordinal() {
+    let storage = memory_storage();
+    let store = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
+    store.upsert_document(1, doc("alpha")).unwrap();
+    store.commit().unwrap();
+    drop(store);
+
+    // A stray high-ordinal data file the manifest does not know. The sweep
+    // will reclaim it, but the seed is taken from the pre-sweep listing.
+    plant_stray_segment(&storage, "segment_000009", /* with_meta */ false);
+
+    let reopened = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
+    reopened.upsert_document(2, doc("beta")).unwrap();
+    reopened.commit().unwrap();
+
+    let new_entry_generation = read_manifest(&storage)
+        .iter()
+        .map(|s| s.generation)
+        .max()
+        .unwrap();
+    assert_eq!(
+        new_entry_generation, 10,
+        "the next generation must clear the surviving stray ordinal (9), got {new_entry_generation}"
+    );
+}
+
+/// Flush-time reservation from the shared counter: a writer surviving
+/// `optimize` and the merge can no longer mint the same generation (both
+/// used to compute `max + 1` independently), and the post-merge flush
+/// sorts strictly NEWER than the merged segment.
+#[test]
+fn surviving_writer_and_merge_never_tie_on_generation() {
+    let storage = memory_storage();
+    let store = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
+
+    for i in 1..=2u64 {
+        store.upsert_document(i, doc("alpha")).unwrap();
+        store.commit().unwrap();
+    }
+    // A live writer with buffered docs survives optimize (#864/#1017).
+    store.upsert_document(3, doc("alpha")).unwrap();
+    store.optimize().unwrap();
+    // The same writer flushes again after the merge.
+    store.upsert_document(4, doc("alpha")).unwrap();
+    store.commit().unwrap();
+
+    let manifest = read_manifest(&storage);
+    let mut generations: Vec<u64> = manifest.iter().map(|s| s.generation).collect();
+    generations.sort_unstable();
+    let unique = generations.len();
+    generations.dedup();
+    assert_eq!(
+        generations.len(),
+        unique,
+        "generations must be unique across the merge and the surviving writer: {manifest:?}"
+    );
+
+    let merged_generation = manifest
+        .iter()
+        .find(|s| s.segment_id.starts_with("merged_"))
+        .map(|s| s.generation)
+        .expect("optimize must have produced a merged segment");
+    let post_merge_flush = manifest
+        .iter()
+        .filter(|s| s.segment_id.starts_with("segment_"))
+        .map(|s| s.generation)
+        .max()
+        .expect("the post-merge commit must have published a segment");
+    assert!(
+        post_merge_flush > merged_generation,
+        "a segment flushed after the merge must sort newer than the merged \
+         segment (merged={merged_generation}, flush={post_merge_flush})"
+    );
+}

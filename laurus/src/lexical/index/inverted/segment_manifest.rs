@@ -55,8 +55,30 @@ pub(crate) const MANIFEST_VERSION: u32 = 2;
 /// for the orphan sweep — see [`MANIFEST_VERSION`].
 pub(crate) const AUTHORITATIVE_VERSION: u32 = 2;
 
-/// Shared handle to the in-memory committed-segment set.
-pub(crate) type SharedSegmentManifest = Arc<RwLock<Vec<SegmentInfo>>>;
+/// In-memory manifest state shared between the index and its writers.
+#[derive(Debug)]
+pub(crate) struct ManifestState {
+    /// The committed segments — the mirror of the last successfully
+    /// persisted `segments.json`.
+    pub(crate) segments: Vec<SegmentInfo>,
+
+    /// Next segment generation ordinal to hand out (#1024).
+    ///
+    /// **In-memory only, never persisted.** Persistence is unnecessary
+    /// because a lexical merge always inserts its entry with a generation
+    /// strictly above its sources, so re-deriving from the entries can
+    /// never regress past a live segment; crash-lost reservations are
+    /// covered because the seed also scans surviving segment-file stems
+    /// (see `InvertedIndex::open`), which is strictly stronger than a
+    /// persisted counter (a memory-only bump would not have been saved
+    /// anyway). Reserved under this lock at flush/merge time via
+    /// [`reserve_generation`], which is what keeps a surviving writer and
+    /// a concurrent merge from minting the same generation.
+    pub(crate) next_generation: u64,
+}
+
+/// Shared handle to the in-memory manifest state.
+pub(crate) type SharedSegmentManifest = Arc<RwLock<ManifestState>>;
 
 /// Serialized form of [`MANIFEST_FILE`].
 #[derive(Debug, Serialize, Deserialize)]
@@ -132,18 +154,66 @@ pub(crate) fn save(storage: &dyn Storage, segments: &[SegmentInfo]) -> Result<()
 /// Returns the persistence error, leaving memory unchanged.
 pub(crate) fn publish_with<F>(
     storage: &dyn Storage,
-    shared: &RwLock<Vec<SegmentInfo>>,
+    shared: &RwLock<ManifestState>,
     mutate: F,
 ) -> Result<()>
 where
     F: FnOnce(&mut Vec<SegmentInfo>),
 {
     let mut guard = shared.write();
-    let mut candidate = guard.clone();
+    let mut candidate = guard.segments.clone();
     mutate(&mut candidate);
     save(storage, &candidate)?;
-    *guard = candidate;
+    guard.segments = candidate;
     Ok(())
+}
+
+/// Hand out the next segment generation ordinal (#1024).
+///
+/// Taken under the manifest write lock so a flushing writer and a
+/// concurrent merge can never mint the same generation — the tie the old
+/// scan-derived numbering allowed (a writer surviving `optimize` and the
+/// merged segment both computed `max + 1` independently).
+pub(crate) fn reserve_generation(shared: &RwLock<ManifestState>) -> u64 {
+    let mut guard = shared.write();
+    let generation = guard.next_generation;
+    guard.next_generation += 1;
+    generation
+}
+
+/// The generation ordinal encoded in a segment-shaped file name, if any.
+///
+/// Accepts the two stems this index mints — `segment_<digits>` and
+/// `merged_<digits>` — taking the stem before the first `.` so data
+/// files, `.delmap`s and per-field `.bkd`s all count.
+pub(crate) fn stem_ordinal(file_name: &str) -> Option<u64> {
+    let stem = file_name.split('.').next()?;
+    let ordinal = stem
+        .strip_prefix("segment_")
+        .or_else(|| stem.strip_prefix("merged_"))?;
+    if ordinal.is_empty() || !ordinal.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    ordinal.parse().ok()
+}
+
+/// Derive the generation-counter seed for an opening index (#1024).
+///
+/// `max(entry generations, surviving file-stem ordinals) + 1`. The file
+/// stems are load-bearing: a crash can lose an in-memory reservation
+/// while its flushed files survive (a legacy directory the sweep never
+/// touches, or a best-effort sweep deletion that failed), and reusing
+/// such an ordinal would let the new segment adopt stale foreign
+/// per-field `.bkd`s or a stale `.delmap` by name-prefix.
+pub(crate) fn derive_next_generation(entries: &[SegmentInfo], files: &[String]) -> u64 {
+    let from_entries = entries.iter().map(|s| s.generation + 1).max().unwrap_or(0);
+    let from_files = files
+        .iter()
+        .filter_map(|f| stem_ordinal(f))
+        .map(|ordinal| ordinal + 1)
+        .max()
+        .unwrap_or(0);
+    from_entries.max(from_files)
 }
 
 /// Insert `info` into `list`, replacing any entry with the same
@@ -212,7 +282,10 @@ mod tests {
     #[test]
     fn publish_with_applies_deltas_to_the_live_list() {
         let storage = MemoryStorage::new(MemoryStorageConfig::default());
-        let shared = RwLock::new(vec![seg("segment_000001", 1)]);
+        let shared = RwLock::new(ManifestState {
+            segments: vec![seg("segment_000001", 1)],
+            next_generation: 2,
+        });
 
         // A concurrent publication lands first.
         publish_with(&storage, &shared, |list| {
@@ -228,7 +301,12 @@ mod tests {
         })
         .unwrap();
 
-        let ids: Vec<String> = shared.read().iter().map(|s| s.segment_id.clone()).collect();
+        let ids: Vec<String> = shared
+            .read()
+            .segments
+            .iter()
+            .map(|s| s.segment_id.clone())
+            .collect();
         assert_eq!(
             ids,
             vec!["segment_000002".to_string(), "merged_3".to_string()],
@@ -287,13 +365,16 @@ mod tests {
         }
 
         let storage = ReadOnly(MemoryStorage::new(MemoryStorageConfig::default()));
-        let shared = RwLock::new(vec![seg("segment_000001", 1)]);
+        let shared = RwLock::new(ManifestState {
+            segments: vec![seg("segment_000001", 1)],
+            next_generation: 2,
+        });
         let err = publish_with(&storage, &shared, |list| {
             upsert_entry(list, seg("segment_000002", 2));
         });
         assert!(err.is_err());
         assert_eq!(
-            shared.read().len(),
+            shared.read().segments.len(),
             1,
             "a failed save must not advance the in-memory manifest"
         );
