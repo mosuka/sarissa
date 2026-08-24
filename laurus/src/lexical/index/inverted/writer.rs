@@ -159,8 +159,14 @@ pub struct InvertedIndexWriter {
     /// Document ID counter.
     next_doc_id: u64,
 
-    /// Current segment number.
-    current_segment: u32,
+    /// Generation ordinal of the segment currently being buffered.
+    ///
+    /// For a writer holding the shared manifest handle this is (re)reserved
+    /// from the shared counter at each flush (#1024), so it can never tie
+    /// with a concurrent merge's generation. For a handle-less writer it is
+    /// a plain local counter seeded by the constructor scan, exactly as
+    /// before. Widened to `u64`: it doubles as `SegmentInfo::generation`.
+    current_segment: u64,
 
     /// Whether the writer is closed.
     closed: bool,
@@ -344,15 +350,32 @@ impl InvertedIndexWriter {
         metadata: Option<Arc<parking_lot::RwLock<IndexMetadata>>>,
         segment_manifest: Option<super::segment_manifest::SharedSegmentManifest>,
     ) -> Result<Self> {
-        // Recover state from existing segments. The same scan also seeds the
-        // segment-range cache (Issue #559 / #864), so the cache is warm from
-        // birth at no extra I/O.
+        // Recover state from the committed segment set. A writer holding
+        // the shared manifest handle reads it from memory — zero I/O, where
+        // the `.meta` scan paid O(segments) opens + parses (#1024). A
+        // handle-less writer (standalone constructions, the merge replay
+        // writer) keeps the storage scan verbatim: its segments live only
+        // in their `.meta` files. Either way the same four values are
+        // seeded, and the recovery doubles as the segment-range cache seed
+        // (Issue #559 / #864).
         let mut next_doc_id = 0;
-        let mut max_segment_id = -1i32;
+        let mut current_segment = 0u64;
         let mut segment_ranges = Vec::new();
         let mut max_committed_doc_id = 0u64;
 
-        if let Ok(files) = storage.list_files() {
+        if let Some(manifest) = &segment_manifest {
+            let state = manifest.read();
+            for entry in &state.segments {
+                if entry.shard_id == config.shard_id {
+                    let local_id = crate::util::id::get_local_id(entry.max_doc_id);
+                    next_doc_id = next_doc_id.max(local_id + 1);
+                }
+                max_committed_doc_id = max_committed_doc_id.max(entry.max_doc_id);
+                segment_ranges.push((entry.segment_id.clone(), entry.min_doc_id, entry.max_doc_id));
+            }
+            // Advisory only — the real ordinal is reserved at flush time.
+            current_segment = state.next_generation;
+        } else if let Ok(files) = storage.list_files() {
             for file in files {
                 if file.ends_with(".meta") && file != "index.meta" {
                     // unexpected error handling: ignore malformed files
@@ -364,15 +387,13 @@ impl InvertedIndexWriter {
                             let local_id = crate::util::id::get_local_id(meta.max_doc_id);
                             next_doc_id = next_doc_id.max(local_id + 1);
                         }
-                        max_segment_id = max_segment_id.max(meta.generation as i32);
+                        current_segment = current_segment.max(meta.generation + 1);
                         max_committed_doc_id = max_committed_doc_id.max(meta.max_doc_id);
                         segment_ranges.push((meta.segment_id, meta.min_doc_id, meta.max_doc_id));
                     }
                 }
             }
         }
-
-        let current_segment = (max_segment_id + 1) as u32;
 
         // Create initial DocValuesWriter (will be reset per segment)
         let initial_segment_name = format!("{}_{:06}", config.segment_prefix, current_segment);
@@ -928,6 +949,14 @@ impl InvertedIndexWriter {
             self.index_dirty = false;
         }
 
+        // Reserve the generation ordinal from the shared counter (#1024) —
+        // at flush time, not at construction, so a merge that ran since
+        // this writer was built cannot end up tied with (or above) this
+        // segment's generation. Handle-less writers keep their local
+        // counter, seeded by the constructor scan.
+        if let Some(manifest) = &self.segment_manifest {
+            self.current_segment = super::segment_manifest::reserve_generation(manifest);
+        }
         let segment_name = format!("{}_{:06}", self.config.segment_prefix, self.current_segment);
 
         // A buffer flush is not a publication: these documents are not
@@ -1574,7 +1603,7 @@ impl InvertedIndexWriter {
             doc_count: self.buffered_docs.len() as u64,
             min_doc_id: min_id,
             max_doc_id: max_id,
-            generation: self.current_segment as u64,
+            generation: self.current_segment,
             has_deletions: false, // New segments initially have no deletions
             shard_id: self.config.shard_id,
             committed,
@@ -1954,9 +1983,12 @@ impl InvertedIndexWriter {
             .collect())
     }
 
-    /// Rebuild [`Self::segment_ranges`] / [`Self::max_committed_doc_id`] from
-    /// the `*.meta` files on storage and drop the cached
-    /// [`Self::deletion_manager`].
+    /// Rebuild [`Self::segment_ranges`] / [`Self::max_committed_doc_id`]
+    /// and drop the cached [`Self::deletion_manager`].
+    ///
+    /// A writer holding the shared manifest handle rebuilds from memory —
+    /// infallible and I/O-free (#1024); a handle-less writer re-scans the
+    /// `*.meta` files as before.
     ///
     /// Must be called after an external segment rewrite that this writer did
     /// not perform itself — today that is only
@@ -1968,9 +2000,32 @@ impl InvertedIndexWriter {
     ///
     /// # Errors
     ///
-    /// Returns an error if listing the storage fails; malformed `.meta` files
-    /// are skipped, matching the constructor's recovery scan.
+    /// Returns an error if listing the storage fails (handle-less path
+    /// only); malformed `.meta` files are skipped, matching the
+    /// constructor's recovery scan.
     pub fn invalidate_segment_cache(&mut self) -> Result<()> {
+        if let Some(manifest) = &self.segment_manifest {
+            // The merge published its transition to the shared manifest
+            // before this call, so memory is already the post-merge truth.
+            let state = manifest.read();
+            self.segment_ranges = state
+                .segments
+                .iter()
+                .map(|entry| (entry.segment_id.clone(), entry.min_doc_id, entry.max_doc_id))
+                .collect();
+            self.max_committed_doc_id = state
+                .segments
+                .iter()
+                .map(|entry| entry.max_doc_id)
+                .max()
+                .unwrap_or(0);
+            drop(state);
+            self.deletion_manager = None;
+            self.pending_meta_deletions.clear();
+            self.flushed_segments.clear();
+            return Ok(());
+        }
+
         // Build the new view first and swap it in only on success: clearing
         // eagerly and then failing (e.g. on `list_files`) would leave the
         // writer alive with an EMPTY cache and `max_committed_doc_id == 0`,

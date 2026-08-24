@@ -175,7 +175,10 @@ impl InvertedIndex {
             extra_fields: RwLock::new(HashMap::new()),
             closed: AtomicBool::new(false),
             metadata: Arc::new(RwLock::new(metadata)),
-            segment_manifest: Arc::new(RwLock::new(Vec::new())),
+            segment_manifest: Arc::new(RwLock::new(segment_manifest::ManifestState {
+                segments: Vec::new(),
+                next_generation: 0,
+            })),
         };
 
         index.write_metadata()?;
@@ -207,16 +210,43 @@ impl InvertedIndex {
             &loaded,
             Some((version, _)) if *version >= segment_manifest::AUTHORITATIVE_VERSION
         );
+        // One listing serves the lost-manifest guard, the generation-counter
+        // seed and the sweep. Taken BEFORE the sweep on purpose: seeding
+        // from pre-sweep stems is conservative (a swept ordinal leaves a
+        // harmless gap), and it is what covers ordinals whose files survive
+        // a failed best-effort deletion.
+        let files = storage.list_files()?;
         let segments = match loaded {
             Some((version, segments)) if version >= segment_manifest::AUTHORITATIVE_VERSION => {
                 segments
             }
             _ => {
+                // Lost-manifest guard (#1024): segment-shaped files with
+                // neither a manifest nor any `.meta` to migrate from means
+                // the manifest was deleted or lost. Opening anyway would
+                // serve a silently empty index, and the first commit would
+                // publish a fresh manifest that the NEXT open's sweep
+                // enforces by deleting every pre-existing segment —
+                // delayed, permanent data loss the WAL cannot cover (the
+                // metadata.json checkpoint is intact, so replay skips
+                // everything). Refuse loudly instead.
+                let has_meta = files
+                    .iter()
+                    .any(|f| f.ends_with(".meta") && segment_manifest::stem_ordinal(f).is_some());
+                let has_segment_files = files
+                    .iter()
+                    .any(|f| segment_manifest::stem_ordinal(f).is_some());
+                if loaded.is_none() && !has_meta && has_segment_files {
+                    return Err(LaurusError::index(
+                        "segments.json is missing but segment files are present; refusing to                          open — restore the manifest (or remove the segment files) instead of                          losing the segments to the next sweep",
+                    ));
+                }
                 let mut scanned = Self::scan_segment_metas_from(storage.as_ref())?;
                 scanned.retain(|s| s.committed);
                 scanned
             }
         };
+        let next_generation = segment_manifest::derive_next_generation(&segments, &files);
 
         // Orphan sweep (#1021): reclaim segment files the manifest does not
         // know — crash-orphaned uncommitted flushes, and the leftovers of a
@@ -227,7 +257,7 @@ impl InvertedIndex {
         // ignored, and correctness never depends on the sweep — WAL replay
         // covers anything a crash left unpublished.
         if authoritative {
-            Self::sweep_orphans(storage.as_ref(), &segments);
+            Self::sweep_orphans(storage.as_ref(), &segments, &files);
         }
 
         Ok(InvertedIndex {
@@ -236,7 +266,10 @@ impl InvertedIndex {
             extra_fields: RwLock::new(HashMap::new()),
             closed: AtomicBool::new(false),
             metadata: Arc::new(RwLock::new(metadata)),
-            segment_manifest: Arc::new(RwLock::new(segments)),
+            segment_manifest: Arc::new(RwLock::new(segment_manifest::ManifestState {
+                segments,
+                next_generation,
+            })),
         })
     }
 
@@ -330,23 +363,9 @@ impl InvertedIndex {
         // and every entry in it is committed by construction. Zero storage
         // I/O per reader construction, where the `.meta` scan paid
         // O(segments) opens + parses.
-        let mut segments = self.segment_manifest.read().clone();
+        let mut segments = self.segment_manifest.read().segments.clone();
         segments.sort_by_key(|s| s.generation);
         Ok(segments)
-    }
-
-    /// Read every segment `.meta` on storage, published or not.
-    ///
-    /// Generation numbering must come from this rather than from
-    /// [`Self::load_segments`]: a merge that numbered itself from the
-    /// published set alone could collide with a segment that is flushed but
-    /// not yet committed (#1017).
-    ///
-    /// # Returns
-    ///
-    /// Every segment described on storage, in directory order.
-    fn scan_segment_metas(&self) -> Result<Vec<SegmentInfo>> {
-        Self::scan_segment_metas_from(self.storage.as_ref())
     }
 
     /// Delete segment-shaped files the manifest does not list (#1021).
@@ -363,13 +382,10 @@ impl InvertedIndex {
     /// manifest wins by design), but it can also mean segments committed
     /// through a standalone `InvertedIndexWriter` into a directory owned
     /// by a manifest-bearing index — a documented misuse.
-    fn sweep_orphans(storage: &dyn Storage, manifest: &[SegmentInfo]) {
-        let Ok(files) = storage.list_files() else {
-            return;
-        };
+    fn sweep_orphans(storage: &dyn Storage, manifest: &[SegmentInfo], files: &[String]) {
         for file in files {
             if file == "segments.json.tmp" {
-                let _ = storage.delete_file(&file);
+                let _ = storage.delete_file(file);
                 continue;
             }
             let Some(stem) = file.split('.').next() else {
@@ -388,7 +404,7 @@ impl InvertedIndex {
                 continue;
             }
             if file.ends_with(".meta")
-                && let Ok(mut input) = storage.open_input(&file)
+                && let Ok(mut input) = storage.open_input(file)
             {
                 let mut data = Vec::new();
                 if Read::read_to_end(&mut input, &mut data).is_ok()
@@ -400,7 +416,7 @@ impl InvertedIndex {
                     );
                 }
             }
-            let _ = storage.delete_file(&file);
+            let _ = storage.delete_file(file);
         }
     }
 
@@ -486,23 +502,20 @@ impl InvertedIndex {
         self.merge_segment_set(&subset, next_generation)
     }
 
-    /// One past the highest generation on storage.
+    /// Reserve the generation for a newly merged segment (#1024).
     ///
-    /// Derived from every `.meta`, not just the published ones: a merge that
-    /// numbered itself from the visible set alone could collide with a
-    /// segment that is flushed but not yet committed (#1017).
+    /// Taken from the shared in-memory counter, which every flush also
+    /// reserves from — so a merge can no longer collide with a segment
+    /// flushed but not yet committed (#1017), nor tie with a surviving
+    /// writer's next flush (both used to compute `max + 1` independently).
+    /// A reservation consumed by a merge that later fails leaves a gap in
+    /// the numbering, which is harmless.
     ///
     /// # Returns
     ///
     /// The generation a newly merged segment should take.
     fn next_generation(&self) -> Result<u64> {
-        Ok(self
-            .scan_segment_metas()?
-            .iter()
-            .map(|s| s.generation)
-            .max()
-            .unwrap_or(0)
-            + 1)
+        Ok(segment_manifest::reserve_generation(&self.segment_manifest))
     }
 
     /// Merge a set of source segments into a single new segment.
