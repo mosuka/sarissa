@@ -43,6 +43,7 @@ pub mod query_cache;
 pub mod reader;
 pub mod searcher;
 pub mod segment;
+pub(crate) mod segment_manifest;
 pub mod writer;
 
 use self::reader::{InvertedIndexReader, InvertedIndexReaderConfig};
@@ -138,6 +139,18 @@ pub struct InvertedIndex {
     /// lock and persists a snapshot of it. Nothing re-reads the file into
     /// this lock after `open`, so disk can never clobber fresher state.
     metadata: Arc<RwLock<IndexMetadata>>,
+
+    /// The committed segment set, mirroring `segments.json` (#1021).
+    ///
+    /// Mutated only through
+    /// [`segment_manifest::publish_with`] (save-then-swap), so it is never
+    /// ahead of the persisted manifest. Shared with writers built by
+    /// [`Self::writer`]; writers built through the public
+    /// `InvertedIndexWriter::new` get no handle. Deliberately NOT part of
+    /// the `Debug` impl: publication holds the write guard across storage
+    /// I/O, and a blocking `.read()` in `Debug` would deadlock any error
+    /// path that formats the index mid-publish.
+    segment_manifest: segment_manifest::SharedSegmentManifest,
 }
 
 impl std::fmt::Debug for InvertedIndex {
@@ -162,9 +175,14 @@ impl InvertedIndex {
             extra_fields: RwLock::new(HashMap::new()),
             closed: AtomicBool::new(false),
             metadata: Arc::new(RwLock::new(metadata)),
+            segment_manifest: Arc::new(RwLock::new(Vec::new())),
         };
 
         index.write_metadata()?;
+        // An empty manifest from birth (#1021): "manifest present" then
+        // reliably means "authoritative record exists", and a fresh index
+        // is never mistaken for a legacy one.
+        segment_manifest::save(index.storage.as_ref(), &[])?;
         Ok(index)
     }
 
@@ -176,12 +194,27 @@ impl InvertedIndex {
 
         let metadata = Self::read_metadata(storage.as_ref())?;
 
+        // Manifest, or legacy migration (#1021): an index written before
+        // `segments.json` existed is read through the committed `.meta`
+        // scan, in memory only — `open` performs no writes (read-only and
+        // WASM storages must keep opening), so the first mutation persists
+        // the migrated manifest.
+        let segments = match segment_manifest::load(storage.as_ref())? {
+            Some(segments) => segments,
+            None => {
+                let mut scanned = Self::scan_segment_metas_from(storage.as_ref())?;
+                scanned.retain(|s| s.committed);
+                scanned
+            }
+        };
+
         Ok(InvertedIndex {
             storage,
             config,
             extra_fields: RwLock::new(HashMap::new()),
             closed: AtomicBool::new(false),
             metadata: Arc::new(RwLock::new(metadata)),
+            segment_manifest: Arc::new(RwLock::new(segments)),
         })
     }
 
@@ -287,7 +320,13 @@ impl InvertedIndex {
     ///
     /// Every segment described on storage, in directory order.
     fn scan_segment_metas(&self) -> Result<Vec<SegmentInfo>> {
-        let files = self.storage.list_files()?;
+        Self::scan_segment_metas_from(self.storage.as_ref())
+    }
+
+    /// [`Self::scan_segment_metas`] as an associated function, so `open`
+    /// can run the legacy-migration scan before `self` exists (#1021).
+    fn scan_segment_metas_from(storage: &dyn Storage) -> Result<Vec<SegmentInfo>> {
+        let files = storage.list_files()?;
         let mut segments = Vec::new();
 
         for file in &files {
@@ -296,7 +335,7 @@ impl InvertedIndex {
             if (file.starts_with("segment_") || file.starts_with("merged_"))
                 && file.ends_with(".meta")
             {
-                let mut input = self.storage.open_input(file)?;
+                let mut input = storage.open_input(file)?;
                 let mut data = Vec::new();
                 Read::read_to_end(&mut input, &mut data)?;
 
@@ -421,6 +460,22 @@ impl InvertedIndex {
 
         let engine = MergeEngine::new(MergeConfig::default(), self.storage.clone());
         let result = engine.merge_segments(&candidate, &managed, next_generation)?;
+
+        // Publish the merge transition as ONE manifest write (#1021): drop
+        // the sources and insert the merged segment with its final
+        // generation, applied as a delta to the LIVE list — never a
+        // snapshot replacement, which would lose a mutation that landed
+        // since this merge computed its sources. Everything after this is
+        // advisory (`.meta`) or physical cleanup, and every crash window
+        // below resolves in the manifest's favor.
+        let mut merged_info = result.new_segment.segment_info.clone();
+        merged_info.generation = next_generation;
+        let source_ids: Vec<String> = sources.iter().map(|s| s.segment_id.clone()).collect();
+        segment_manifest::publish_with(self.storage.as_ref(), &self.segment_manifest, |list| {
+            list.retain(|entry| !source_ids.contains(&entry.segment_id));
+            segment_manifest::upsert_entry(list, merged_info);
+        })?;
+
         self.set_segment_generation(&result.new_segment.segment_info.segment_id, next_generation)?;
 
         // Delete each source's `.meta` first (drops it from discovery), then the
@@ -585,15 +640,17 @@ impl LexicalIndex for InvertedIndex {
             fields,
             ..Default::default()
         };
-        // Hand the writer the shared metadata handle (#1023). This is the
-        // ONLY constructor that does: writers built through the public
-        // `InvertedIndexWriter::new` — the merge engine's internal replay
-        // writer included — get no handle and therefore cannot touch
-        // `metadata.json` at all.
-        let writer = InvertedIndexWriter::with_shared_metadata(
+        // Hand the writer the shared metadata and manifest handles
+        // (#1023 / #1021). This is the ONLY constructor that does: writers
+        // built through the public `InvertedIndexWriter::new` — the merge
+        // engine's internal replay writer included — get neither handle
+        // and therefore can touch neither `metadata.json` nor
+        // `segments.json`.
+        let writer = InvertedIndexWriter::with_shared_state(
             self.storage.clone(),
             writer_config,
             Arc::clone(&self.metadata),
+            Arc::clone(&self.segment_manifest),
         )?;
         Ok(Box::new(writer))
     }
