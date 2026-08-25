@@ -15,7 +15,6 @@ use crate::vector::index::format::{
 use crate::vector::index::hnsw::graph::OrdinalHnswGraph;
 use crate::vector::index::quantized_io::quantized_record_payload_size;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
-use crate::vector::index::rerank_sidecar::read_sidecar;
 use crate::vector::index::rerank_storage::RerankStoragePool;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
@@ -923,55 +922,20 @@ impl HnswIndexReader {
             }
         };
 
-        // Stage 2 rerank sidecar (Issue #481). Loaded eagerly into a
-        // RerankStoragePool when (a) a `<file_name>.f32` sidecar exists
-        // and (b) we are in Eager loading mode. Lazy mode skips the
-        // sidecar to honor its memory-savings promise — Stage 2 segments
-        // opened in Lazy mode silently degrade to Stage 1 (no rerank).
-        // The pool's vector positions are paired with `vector_ids` (the
-        // same order as the LVS1 segment), giving an identity mapping.
-        let rerank_storage = match storage.loading_mode() {
-            crate::storage::LoadingMode::Eager => {
-                let sidecar_name = format!("{}.f32", file_name);
-                if storage.file_exists(&sidecar_name) {
-                    let mut sidecar_in = storage.open_input(&sidecar_name)?;
-                    let sidecar_size = sidecar_in.size()?;
-                    let (header, payload) = read_sidecar(&mut sidecar_in, sidecar_size)?;
-                    if header.dim as usize != dimension {
-                        return Err(LaurusError::InvalidOperation(format!(
-                            "rerank sidecar dim mismatch: LVS1 segment uses {dimension}, \
-                             sidecar uses {}",
-                            header.dim
-                        )));
-                    }
-                    if header.vector_count as usize != vector_ids.len() {
-                        return Err(LaurusError::InvalidOperation(format!(
-                            "rerank sidecar vector_count mismatch: LVS1 segment has {} vectors, \
-                             sidecar has {}",
-                            vector_ids.len(),
-                            header.vector_count
-                        )));
-                    }
-                    // Transient rehydration for the sidecar's String-shaped
-                    // assignment input (eager-only path; nothing retained).
-                    let assignment: Vec<(u64, String)> = vector_ids
-                        .iter()
-                        .map(|&(id, fid)| (id, field_dict[fid as usize].to_string()))
-                        .collect();
-                    let pool = RerankStoragePool::from_sidecar_payload(
-                        header.storage_kind,
-                        dimension,
-                        header.vector_count as usize,
-                        payload,
-                        &assignment,
-                    )?;
-                    Some(Arc::new(pool))
-                } else {
-                    None
-                }
-            }
-            crate::storage::LoadingMode::Lazy => None,
-        };
+        // Stage 2 rerank sidecar (Issue #481), via the shared loader
+        // (#650 PR-2 / #554): loads whenever the sidecar exists,
+        // regardless of loading mode — the old Eager-only gate here never
+        // fired behind the engine (PrefixedStorage misreported Eager until
+        // #554 made it delegate), so "rerank works on mmap" is the
+        // shipped, tested behavior. The pool's vector positions pair with
+        // `vector_ids` (the same order as the LVS1 segment).
+        let rerank_storage = crate::vector::index::rerank_sidecar::load_rerank_sidecar(
+            storage.as_ref(),
+            &file_name,
+            dimension,
+            &vector_ids,
+            &field_dict,
+        )?;
 
         Ok(Self {
             vectors,

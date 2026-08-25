@@ -22,6 +22,12 @@ use crate::storage::Storage;
 /// Configuration for merge operations.
 #[derive(Debug, Clone)]
 pub struct MergeConfig {
+    /// Write the merged segment as a compound `.cfs` container (#554).
+    ///
+    /// Set from the owning index's `use_compound`, so the merged output
+    /// follows the same layout as fresh flushes.
+    pub use_compound: bool,
+
     /// Maximum memory usage during merge (in bytes).
     pub max_memory_mb: u64,
 
@@ -44,6 +50,7 @@ pub struct MergeConfig {
 impl Default for MergeConfig {
     fn default() -> Self {
         MergeConfig {
+            use_compound: false,
             max_memory_mb: 256,
             batch_size: 10000,
             enable_compression: true,
@@ -290,12 +297,8 @@ impl MergeEngine {
         for segment in segments {
             let reader = SegmentReader::open(segment.segment_info.clone(), self.storage.clone())?;
             let deleted = self.load_deleted_docs(&segment.segment_info)?;
-            let reconstructed = self.reconstruct_segment(
-                &reader,
-                &segment.segment_info.segment_id,
-                &deleted,
-                &mut store_positions,
-            )?;
+            let reconstructed =
+                self.reconstruct_segment(&reader, &deleted, &mut store_positions)?;
             stats.deleted_docs_removed += deleted.len();
             for (doc_id, analyzed) in reconstructed {
                 if docs.insert(doc_id, analyzed).is_none() {
@@ -321,6 +324,7 @@ impl MergeEngine {
             shard_id: stats.shard_id,
             max_buffered_docs: usize::MAX,
             max_buffer_memory: usize::MAX,
+            use_compound: self.config.use_compound,
             ..Default::default()
         };
         // Deliberately `new`, not `with_shared_metadata` (#1023): this
@@ -445,7 +449,6 @@ impl MergeEngine {
     fn reconstruct_segment(
         &self,
         reader: &SegmentReader,
-        segment_id: &str,
         deleted: &RoaringTreemap,
         store_positions: &mut Option<bool>,
     ) -> Result<Vec<(u64, AnalyzedDocument)>> {
@@ -514,15 +517,12 @@ impl MergeEngine {
         // index-only (`stored=false`) and multi-valued numeric fields, which a
         // stored-field derivation would miss (Issue #758).
         let mut points: AHashMap<u64, AHashMap<String, Vec<Vec<f64>>>> = AHashMap::new();
-        let bkd_prefix = format!("{segment_id}.");
-        let bkd_suffix = ".bkd";
-        for file in self.storage.list_files()? {
-            let Some(field) = file
-                .strip_prefix(&bkd_prefix)
-                .and_then(|rest| rest.strip_suffix(bkd_suffix))
-            else {
-                continue;
-            };
+        // Enumerate through the reader (#554): a raw `list_files` scan
+        // finds no `.bkd` files once the parts live inside a compound
+        // container, and the merged segment would silently drop every
+        // numeric/geo point (`verify_after_merge` only checks doc_count).
+        for field in reader.bkd_field_names()? {
+            let field = field.as_str();
             if let Some(tree) = reader.get_bkd_tree(field)? {
                 let mut visitor = CollectPointsVisitor::default();
                 tree.intersect(&mut visitor)?;

@@ -475,11 +475,19 @@ pub fn read_sidecar<R: Read>(
 /// [`crate::vector::index::rerank_storage::RerankStoragePool`]
 /// (Issue #481; shared across HNSW/Flat/IVF readers by #650 PR-2 / #932).
 ///
-/// Lenient-if-absent: returns `Ok(None)` when no sidecar file exists or
-/// when `storage` is in Lazy loading mode (the sidecar is skipped to honor
-/// Lazy's memory-savings promise — Stage 2 segments opened Lazy silently
-/// degrade to Stage 1). A present sidecar whose `dim`/`vector_count`
-/// disagree with the segment fails loudly.
+/// Lenient-if-absent: returns `Ok(None)` when no sidecar file exists.
+/// A present sidecar whose `dim`/`vector_count` disagree with the segment
+/// fails loudly.
+///
+/// The sidecar loads regardless of the storage's loading mode. An
+/// Eager-only gate used to sit here "to honor Lazy's memory-savings
+/// promise", but it never actually fired behind the engine: the engine
+/// wraps every store in `PrefixedStorage`, which misreported the trait
+/// default `Eager` until #554 made it delegate — so the shipped, tested
+/// behavior has always been "rerank works on mmap", and honoring the
+/// corrected mode would have silently degraded Stage 2 to Stage 1 in the
+/// default production configuration. Buffering the sidecar is the
+/// documented cost of opting a field into `rerank_storage` (#481).
 ///
 /// The pool's positions pair with `vector_ids` (the segment's record
 /// order, which the writer also used for the sidecar payload), giving an
@@ -506,9 +514,6 @@ pub(crate) fn load_rerank_sidecar(
     vector_ids: &[(u64, u16)],
     field_dict: &[std::sync::Arc<str>],
 ) -> Result<Option<std::sync::Arc<crate::vector::index::rerank_storage::RerankStoragePool>>> {
-    if !matches!(storage.loading_mode(), crate::storage::LoadingMode::Eager) {
-        return Ok(None);
-    }
     let sidecar_name = format!("{file_name}.f32");
     if !storage.file_exists(&sidecar_name) {
         return Ok(None);

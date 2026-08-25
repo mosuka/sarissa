@@ -105,7 +105,25 @@ impl DocValuesWriter {
     pub fn write_to(&self, segment_name: &str) -> Result<()> {
         let dv_filename = format!("{}{}", segment_name, DOC_VALUES_EXTENSION);
         let mut output = self.storage.create_output(&dv_filename)?;
+        self.write_to_output(&mut output)?;
+        output.flush()?;
+        Ok(())
+    }
 
+    /// Write the DocValues payload to an already-open output (#554).
+    ///
+    /// The format is position-independent, so it serializes identically
+    /// into a loose `.dv` file or a compound-container part. The output is
+    /// neither flushed nor closed here — the caller owns its lifecycle.
+    ///
+    /// # Arguments
+    ///
+    /// * `output` - Destination for the DVFF payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization or a write fails.
+    pub fn write_to_output(&self, output: &mut dyn std::io::Write) -> Result<()> {
         // Write magic number and version
         output.write_all(b"DVFF")?; // DocValues File Format
         output.write_all(&[1u8, 0u8])?; // Version 1.0
@@ -140,7 +158,6 @@ impl DocValuesWriter {
             output.write_all(&serialized)?;
         }
 
-        output.flush()?;
         Ok(())
     }
 }

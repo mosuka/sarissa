@@ -35,6 +35,15 @@ use crate::storage::structured::StructWriter;
 /// Inverted index writer configuration.
 #[derive(Clone)]
 pub struct InvertedIndexWriterConfig {
+    /// Write flushed segments as one compound `.cfs` container instead of
+    /// loose per-part files (#554).
+    ///
+    /// One `create` + one fsync per segment instead of one per part.
+    /// Readers detect the layout per segment, so loose and compound
+    /// segments coexist freely in one index. Off by default until the
+    /// #554 rollout flips it.
+    pub use_compound: bool,
+
     /// Maximum number of documents to buffer before flushing to disk.
     pub max_buffered_docs: usize,
 
@@ -76,6 +85,7 @@ impl std::fmt::Debug for InvertedIndexWriterConfig {
 impl Default for InvertedIndexWriterConfig {
     fn default() -> Self {
         InvertedIndexWriterConfig {
+            use_compound: false,
             max_buffered_docs: 10000,
             max_buffer_memory: 64 * 1024 * 1024, // 64MB
             segment_prefix: "segment".to_string(),
@@ -1004,26 +1014,30 @@ impl InvertedIndexWriter {
         // the manifest at publication, never through its files — which is
         // also what makes a crash mid-write harmless (the sweep reclaims
         // unreferenced files at the next open).
-        self.write_inverted_index(segment_name)?;
-        self.write_stored_documents(segment_name)?;
-        self.write_field_lengths(segment_name)?;
-        self.write_field_stats(segment_name)?;
-        self.write_doc_values(segment_name)?;
-        self.write_bkd_trees(segment_name)?;
-        // The redundant `.json` stored-field mirror is no longer written
-        // (Issue #756); stored fields are read from the typed `.docs` file.
-
-        // Collect every file written under this segment prefix (the BKD step
-        // writes one `.{field}.bkd` per numeric/geo field, so enumerate rather
-        // than hard-code the set).
-        let prefix = format!("{segment_name}.");
-        let paths = self
-            .storage
-            .list_files()?
-            .into_iter()
-            .filter(|f| f.starts_with(&prefix))
-            .collect();
-        Ok(paths)
+        //
+        // The same orchestration serves both layouts (#554): loose files
+        // (one create per part) or one compound container (`.cfs` — one
+        // create, one fsync). The parts themselves cannot tell the
+        // difference: the sink hands them a `StorageOutput` either way.
+        let mut sink = if self.config.use_compound {
+            PartSink::Compound(super::compound::CompoundSegmentWriter::create(
+                self.storage.as_ref(),
+                segment_name,
+            )?)
+        } else {
+            PartSink::Loose {
+                storage: self.storage.as_ref(),
+                segment_name: segment_name.to_string(),
+                paths: Vec::new(),
+            }
+        };
+        self.write_inverted_index(&mut sink)?;
+        self.write_stored_documents(&mut sink)?;
+        self.write_field_lengths(&mut sink)?;
+        self.write_field_stats(&mut sink)?;
+        self.write_doc_values(&mut sink)?;
+        self.write_bkd_trees(&mut sink)?;
+        sink.finish()
     }
 
     /// Flush the currently buffered documents to a caller-named segment,
@@ -1063,10 +1077,9 @@ impl InvertedIndexWriter {
     }
 
     /// Write the inverted index to storage.
-    fn write_inverted_index(&self, segment_name: &str) -> Result<()> {
+    fn write_inverted_index(&self, sink: &mut PartSink<'_>) -> Result<()> {
         // Write posting lists
-        let posting_file = format!("{segment_name}.post");
-        let posting_output = self.storage.create_output(&posting_file)?;
+        let posting_output = sink.part("post")?;
         let mut posting_writer = StructWriter::new(posting_output);
 
         let mut term_dict_builder = TermDictionaryBuilder::new();
@@ -1147,15 +1160,16 @@ impl InvertedIndexWriter {
         }
 
         posting_writer.close()?;
+        sink.seal()?;
 
         // Write term dictionary
-        let dict_file = format!("{segment_name}.dict");
-        let dict_output = self.storage.create_output(&dict_file)?;
+        let dict_output = sink.part("dict")?;
         let mut dict_writer = StructWriter::new(dict_output);
 
         let term_dict = term_dict_builder.build()?;
         term_dict.write_to_storage(&mut dict_writer)?;
         dict_writer.close()?;
+        sink.seal()?;
 
         Ok(())
     }
@@ -1294,9 +1308,8 @@ impl InvertedIndexWriter {
     }
 
     /// Write stored documents to storage with type information preserved.
-    fn write_stored_documents(&self, segment_name: &str) -> Result<()> {
-        let stored_file = format!("{segment_name}.docs");
-        let stored_output = self.storage.create_output(&stored_file)?;
+    fn write_stored_documents(&self, sink: &mut PartSink<'_>) -> Result<()> {
+        let stored_output = sink.part("docs")?;
         let mut stored_writer = StructWriter::new(stored_output);
 
         // Write document count
@@ -1382,6 +1395,7 @@ impl InvertedIndexWriter {
         }
 
         stored_writer.close()?;
+        sink.seal()?;
         Ok(())
     }
 
@@ -1419,9 +1433,8 @@ impl InvertedIndexWriter {
     }
 
     /// Write field lengths to storage.
-    fn write_field_lengths(&self, segment_name: &str) -> Result<()> {
-        let lens_file = format!("{segment_name}.lens");
-        let lens_output = self.storage.create_output(&lens_file)?;
+    fn write_field_lengths(&self, sink: &mut PartSink<'_>) -> Result<()> {
+        let lens_output = sink.part("lens")?;
         let mut lens_writer = StructWriter::new(lens_output);
 
         // Write document count
@@ -1439,13 +1452,13 @@ impl InvertedIndexWriter {
         }
 
         lens_writer.close()?;
+        sink.seal()?;
         Ok(())
     }
 
     /// Write field statistics to storage.
-    fn write_field_stats(&self, segment_name: &str) -> Result<()> {
-        let fstats_file = format!("{segment_name}.fstats");
-        let fstats_output = self.storage.create_output(&fstats_file)?;
+    fn write_field_stats(&self, sink: &mut PartSink<'_>) -> Result<()> {
+        let fstats_output = sink.part("fstats")?;
         let mut fstats_writer = StructWriter::new(fstats_output);
 
         let field_stats = self.calculate_field_stats();
@@ -1462,16 +1475,16 @@ impl InvertedIndexWriter {
         }
 
         fstats_writer.close()?;
+        sink.seal()?;
         Ok(())
     }
 
     /// Write DocValues to storage.
-    fn write_doc_values(&self, segment_name: &str) -> Result<()> {
-        // Write under the caller-supplied segment name. On the normal flush
-        // path this equals the writer's own `segment_name`; the merge path
-        // (Issue #753) passes the merged segment's name so accumulated values
-        // land in the right `.dv` file.
-        self.doc_values_writer.write_to(segment_name)?;
+    fn write_doc_values(&self, sink: &mut PartSink<'_>) -> Result<()> {
+        let mut output = sink.part("dv")?;
+        self.doc_values_writer.write_to_output(&mut output)?;
+        output.flush()?;
+        sink.seal()?;
         Ok(())
     }
 
@@ -1481,7 +1494,7 @@ impl InvertedIndexWriter {
     /// (`points`) and parallel doc-id buffers (`doc_ids`) so the BKD writer
     /// can be fed without re-allocating per point. The dimensionality is
     /// captured from the first point seen for each field.
-    fn write_bkd_trees(&self, segment_name: &str) -> Result<()> {
+    fn write_bkd_trees(&self, sink: &mut PartSink<'_>) -> Result<()> {
         // (flat points, doc_ids, num_dims)
         let mut field_buckets: AHashMap<String, (Vec<f64>, Vec<u64>, usize)> = AHashMap::new();
 
@@ -1507,11 +1520,11 @@ impl InvertedIndexWriter {
                 continue;
             }
 
-            let file_name = format!("{segment_name}.{field}.bkd");
-            let output = self.storage.create_output(&file_name)?;
+            let output = sink.part(&format!("{field}.bkd"))?;
             let mut writer = BKDWriter::new(output, num_dims as u32);
             writer.write(&points, &doc_ids)?;
             writer.finish()?;
+            sink.seal()?;
         }
         Ok(())
     }
@@ -2222,5 +2235,62 @@ impl LexicalIndexWriter for InvertedIndexWriter {
 
     fn find_doc_ids_by_term(&self, field: &str, term: &str) -> Result<Option<Vec<u64>>> {
         InvertedIndexWriter::find_doc_ids_by_term(self, field, term)
+    }
+}
+
+/// Where a flushing segment's parts are written (#554).
+///
+/// The part-writing functions receive a `StorageOutput` per part and
+/// cannot tell the layouts apart: `Loose` hands out one real file per
+/// part (each closed by its `StructWriter`), `Compound` hands out
+/// [`super::compound::PartOutput`] views over one shared container
+/// (whose `close` is a no-op; the container fsyncs once in `finish`).
+enum PartSink<'a> {
+    /// One file per part: `{segment_name}.{suffix}`.
+    Loose {
+        storage: &'a dyn crate::storage::Storage,
+        segment_name: String,
+        paths: Vec<String>,
+    },
+    /// One `.cfs` container for every part.
+    Compound(super::compound::CompoundSegmentWriter),
+}
+
+impl PartSink<'_> {
+    /// Open the output for the next part.
+    fn part(&mut self, suffix: &str) -> crate::Result<Box<dyn crate::storage::StorageOutput>> {
+        match self {
+            PartSink::Loose {
+                storage,
+                segment_name,
+                paths,
+            } => {
+                let name = format!("{segment_name}.{suffix}");
+                paths.push(name.clone());
+                storage.create_output(&name)
+            }
+            PartSink::Compound(writer) => Ok(Box::new(writer.begin_part(suffix)?)),
+        }
+    }
+
+    /// Seal the part opened by the last [`Self::part`]. Must be called
+    /// after the part's writer has finished (its `close` included).
+    fn seal(&mut self) -> crate::Result<()> {
+        match self {
+            PartSink::Loose { .. } => Ok(()),
+            PartSink::Compound(writer) => writer.end_part(),
+        }
+    }
+
+    /// Finish the layout and return the written file paths.
+    fn finish(self) -> crate::Result<Vec<String>> {
+        match self {
+            PartSink::Loose { paths, .. } => Ok(paths),
+            PartSink::Compound(writer) => {
+                let container = writer.container_name_owned();
+                writer.finish()?;
+                Ok(vec![container])
+            }
+        }
     }
 }

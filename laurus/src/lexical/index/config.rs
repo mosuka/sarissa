@@ -17,6 +17,16 @@ use crate::lexical::core::field::FieldOption;
 /// including segment management, buffering, compression, and term storage options.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InvertedIndexConfig {
+    /// Write flushed segments as one compound `.cfs` container instead of
+    /// loose per-part files (#554).
+    ///
+    /// One `create` + one fsync per segment instead of one per part.
+    /// Readers detect the layout per segment, so loose and compound
+    /// segments coexist freely. Off by default until the #554 rollout
+    /// flips it.
+    #[serde(default)]
+    pub use_compound: bool,
+
     /// Maximum number of documents per segment.
     ///
     /// When a segment reaches this size, it will be considered for merging.
@@ -108,6 +118,7 @@ fn default_parsed_query_cache_capacity() -> usize {
 impl Default for InvertedIndexConfig {
     fn default() -> Self {
         InvertedIndexConfig {
+            use_compound: false,
             max_docs_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             compress_stored_fields: false,

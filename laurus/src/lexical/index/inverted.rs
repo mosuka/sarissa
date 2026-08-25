@@ -34,6 +34,7 @@ use crate::storage::file::{FileStorage, FileStorageConfig};
 use crate::storage::manifest as manifest_io;
 
 pub(crate) mod bmw;
+pub(crate) mod compound;
 pub mod core;
 pub mod parsed_query_cache;
 pub(crate) mod per_segment_view;
@@ -573,7 +574,13 @@ impl InvertedIndex {
             strategy: MergeStrategy::SizeBased,
         };
 
-        let engine = MergeEngine::new(MergeConfig::default(), self.storage.clone());
+        let engine = MergeEngine::new(
+            MergeConfig {
+                use_compound: self.config.use_compound,
+                ..MergeConfig::default()
+            },
+            self.storage.clone(),
+        );
         let result = engine.merge_segments(&candidate, &managed, next_generation)?;
 
         // Publish the merge transition as ONE manifest write (#1021): drop
@@ -729,6 +736,7 @@ impl LexicalIndex for InvertedIndex {
             analyzer: self.config.analyzer.clone(),
             shard_id: self.config.shard_id,
             fields,
+            use_compound: self.config.use_compound,
             ..Default::default()
         };
         // Hand the writer the shared metadata and manifest handles
