@@ -98,6 +98,14 @@ impl PrefixedStorage {
 }
 
 impl Storage for PrefixedStorage {
+    fn loading_mode(&self) -> crate::storage::LoadingMode {
+        // Delegate (#554): the trait default is `Eager`, which misclassified
+        // an mmap-backed FileStorage behind the engine's prefix wrapper —
+        // and consumers use this to pick between paging-friendly lazy reads
+        // and one-shot buffering.
+        self.inner.loading_mode()
+    }
+
     fn open_input(&self, name: &str) -> Result<Box<dyn StorageInput>> {
         self.inner.open_input(&self.map_name(name))
     }

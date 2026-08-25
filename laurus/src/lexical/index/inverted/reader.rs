@@ -441,6 +441,12 @@ pub struct SegmentReader {
     /// Storage backend.
     storage: Arc<dyn Storage>,
 
+    /// The compound-container facade when this segment is a `.cfs`
+    /// (#554); `None` for loose segments. Kept typed alongside the
+    /// type-erased `storage` clone so part enumeration (`bkd_field_names`)
+    /// can consult the table.
+    compound: Option<Arc<crate::lexical::index::inverted::compound::CompoundSegmentStorage>>,
+
     /// Term dictionary for efficient term lookup.
     term_dictionary: RwLock<Option<Arc<BlockTermDictionary>>>,
 
@@ -483,9 +489,22 @@ impl SegmentReader {
 
     /// Open a segment reader (schema-less mode).
     pub fn open(info: SegmentInfo, storage: Arc<dyn Storage>) -> Result<Self> {
+        // Layout detection (#554): a `{segment_id}.cfs` container routes
+        // every part read through a windowed facade; its absence means a
+        // loose (pre-#554) segment and the storage is used as-is. Loose
+        // and compound segments therefore coexist freely in one index.
+        let compound = crate::lexical::index::inverted::compound::CompoundSegmentStorage::try_open(
+            Arc::clone(&storage),
+            &info.segment_id,
+        )?;
+        let storage: Arc<dyn Storage> = match &compound {
+            Some(facade) => Arc::clone(facade) as Arc<dyn Storage>,
+            None => storage,
+        };
         let reader = SegmentReader {
             info,
             storage,
+            compound,
             term_dictionary: RwLock::new(None),
             stored_documents: RwLock::new(None),
             field_lengths: RwLock::new(None),
@@ -499,6 +518,39 @@ impl SegmentReader {
         };
 
         Ok(reader)
+    }
+
+    /// The numeric/geo field names this segment carries BKD trees for
+    /// (#554).
+    ///
+    /// Compound segments answer from the container table; loose segments
+    /// scan storage for `{segment_id}.{field}.bkd` files — the enumeration
+    /// the merge engine used to do against raw storage, which would find
+    /// nothing once the parts moved into a container and silently drop
+    /// every point at the first merge.
+    ///
+    /// # Returns
+    ///
+    /// The field names, in no particular order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if listing a loose segment's storage fails.
+    pub fn bkd_field_names(&self) -> Result<Vec<String>> {
+        if let Some(facade) = &self.compound {
+            return Ok(facade.bkd_field_names());
+        }
+        let prefix = format!("{}.", self.info.segment_id);
+        Ok(self
+            .storage
+            .list_files()?
+            .into_iter()
+            .filter_map(|file| {
+                file.strip_prefix(&prefix)
+                    .and_then(|rest| rest.strip_suffix(".bkd"))
+                    .map(str::to_string)
+            })
+            .collect())
     }
 
     /// Enable (or resize) this segment's decoded posting-list cache with a byte
