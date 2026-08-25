@@ -1,23 +1,31 @@
 use chrono::{TimeZone, Utc};
-use laurus::lexical::LexicalIndexWriter;
 use laurus::lexical::NumericRangeQuery;
 use laurus::lexical::NumericType;
 use laurus::lexical::Query;
 use laurus::lexical::{GeoDistanceQuery, GeoPoint};
-use laurus::lexical::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use laurus::storage::Storage;
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use laurus::{DataValue, Document};
 use std::sync::Arc;
 
+/// A writer registered with a real index (#1024): a standalone
+/// `InvertedIndexWriter` is ephemeral — its segments enter no manifest and
+/// `build_reader` sees nothing — so durable fixtures go through
+/// `InvertedIndex::create` + `writer()`.
+fn index_writer(
+    storage: Arc<dyn laurus::storage::Storage>,
+) -> Box<dyn laurus::lexical::writer::LexicalIndexWriter> {
+    let index =
+        laurus::lexical::index::inverted::InvertedIndex::create(storage, Default::default())
+            .unwrap();
+    use laurus::lexical::index::LexicalIndex;
+    index.writer().unwrap()
+}
+
 #[test]
 fn test_bkd_file_creation_and_query() {
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let config = InvertedIndexWriterConfig {
-        max_buffered_docs: 10,
-        ..Default::default()
-    };
-    let mut writer = InvertedIndexWriter::new(storage.clone(), config).unwrap();
+    let mut writer = index_writer(storage.clone());
 
     // Doc 1: age=30, score=95.5
     let doc1 = Document::builder()
@@ -106,11 +114,7 @@ fn test_bkd_file_creation_and_query() {
 #[test]
 fn test_geo_bkd_query() {
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let config = InvertedIndexWriterConfig {
-        max_buffered_docs: 10,
-        ..Default::default()
-    };
-    let mut writer = InvertedIndexWriter::new(storage.clone(), config).unwrap();
+    let mut writer = index_writer(storage.clone());
 
     // Tokyo: 35.6812, 139.7671
     let tokyo = GeoPoint::new(35.6812, 139.7671);

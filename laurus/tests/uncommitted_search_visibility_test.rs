@@ -70,10 +70,11 @@ async fn engine_past_auto_flush() -> laurus::Result<(Engine, Arc<dyn Storage>)> 
 
     // Without this the tests could pass by failing to set up their own
     // premise: no flush, no flushed segment, nothing to be visible.
+    // The evidence is a data file (#1024: `.meta` files no longer exist).
     let flushed = storage
         .list_files()?
         .iter()
-        .any(|f| f.contains("segment_") && f.ends_with(".meta"));
+        .any(|f| f.contains("segment_") && f.ends_with(".post"));
     assert!(
         flushed,
         "automatic flush_segment must fire at max_buffered_docs"

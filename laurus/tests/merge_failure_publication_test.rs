@@ -177,34 +177,32 @@ fn failed_merge_must_not_publish_a_segment() {
     store.upsert_document(1, doc("apple")).unwrap();
     store.commit().unwrap();
 
-    let metas_before: Vec<String> = list_metas(&inner);
+    let before = list_manifest_ids(&inner);
 
     store.upsert_document(2, doc("banana")).unwrap();
     failing.fail_next_create_with_prefix("merged_");
     assert!(store.commit().is_err());
     drop(store);
 
-    // The new source segment from commit 2 is expected; a further
-    // `segment_*` beyond it is the Drop-published orphan.
-    let metas_after = list_metas(&inner);
-    let new_metas: Vec<&String> = metas_after
-        .iter()
-        .filter(|m| !metas_before.contains(m))
-        .collect();
+    // The new source segment from commit 2 is expected in the manifest —
+    // the sole publication record since #1024; anything further would be
+    // the Drop-published orphan.
+    let after = list_manifest_ids(&inner);
+    let added: Vec<&String> = after.iter().filter(|m| !before.contains(m)).collect();
     assert_eq!(
-        new_metas.len(),
+        added.len(),
         1,
-        "a failed merge must add only commit 2's own segment, found: {new_metas:?}"
+        "a failed merge must add only commit 2's own segment, found: {added:?}"
     );
 }
 
-/// The segment `.meta` must be written LAST, so a failure in any data file
-/// cannot leave a discoverable segment with files missing.
+/// A failure in any data-file write must not leave a discoverable
+/// segment (#1032, restated for #1024: discoverability now means a
+/// manifest entry, and publication happens only after every data file
+/// exists — there is no `.meta` to order against any more).
 ///
-/// Kills the merged segment's `.bkd` write — under the old order the
-/// `.meta` (with `committed: true`) had already been written by then, so
-/// the half-segment was discoverable and its numeric-range queries would
-/// silently return zero hits.
+/// Kills the merged segment's `.bkd` write; the manifest must not list
+/// the merged segment afterwards.
 #[test]
 fn segment_meta_is_written_after_every_data_file() {
     let inner: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
@@ -230,11 +228,9 @@ fn segment_meta_is_written_after_every_data_file() {
     );
     drop(store);
 
-    let leaked: Vec<String> = inner
-        .list_files()
-        .unwrap()
+    let leaked: Vec<String> = list_manifest_ids(&inner)
         .into_iter()
-        .filter(|f| f.starts_with("merged_") && f.ends_with(".meta"))
+        .filter(|id| id.starts_with("merged_"))
         .collect();
     assert!(
         leaked.is_empty(),
@@ -242,22 +238,35 @@ fn segment_meta_is_written_after_every_data_file() {
     );
 }
 
-/// List the committed `segment_*` / `merged_*` `.meta` names.
-fn list_metas(storage: &Arc<dyn Storage>) -> Vec<String> {
-    let mut metas: Vec<String> = storage
-        .list_files()
+/// The segment ids the manifest — the sole publication record — lists.
+fn list_manifest_ids(storage: &Arc<dyn Storage>) -> Vec<String> {
+    let mut input = storage.open_input("segments.json").unwrap();
+    let mut bytes = Vec::new();
+    input.read_to_end(&mut bytes).unwrap();
+    let payload: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => {
+            let mut len: u64 = 0;
+            let mut shift = 0;
+            let mut cursor = 0usize;
+            loop {
+                let byte = bytes[cursor];
+                cursor += 1;
+                len |= u64::from(byte & 0x7F) << shift;
+                if byte & 0x80 == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            serde_json::from_slice(&bytes[cursor..cursor + len as usize]).unwrap()
+        }
+    };
+    let mut ids: Vec<String> = payload["segments"]
+        .as_array()
         .unwrap()
-        .into_iter()
-        .filter(|f| f.ends_with(".meta") && f != "index.meta")
-        .filter(|f| {
-            // Only count committed (published) segments.
-            let mut input = storage.open_input(f).unwrap();
-            let mut bytes = Vec::new();
-            input.read_to_end(&mut bytes).unwrap();
-            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            v["committed"].as_bool().unwrap_or(true)
-        })
+        .iter()
+        .map(|s| s["segment_id"].as_str().unwrap().to_string())
         .collect();
-    metas.sort();
-    metas
+    ids.sort();
+    ids
 }

@@ -2,10 +2,8 @@ use std::sync::Arc;
 
 use laurus::Document;
 use laurus::analysis::analyzer::standard::StandardAnalyzer;
-use laurus::lexical::LexicalIndexWriter;
 use laurus::lexical::Query;
 use laurus::lexical::span::{SpanQuery, SpanQueryBuilder, SpanQueryWrapper, SpanTermQuery};
-use laurus::lexical::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use laurus::storage::memory::MemoryStorage;
 
 type TestIndex = (
@@ -17,11 +15,15 @@ fn create_test_index() -> Result<TestIndex, Box<dyn std::error::Error>> {
     let storage = Arc::new(MemoryStorage::new(
         laurus::storage::memory::MemoryStorageConfig::default(),
     ));
-    let config = InvertedIndexWriterConfig {
-        analyzer: Arc::new(StandardAnalyzer::new()?),
-        ..Default::default()
-    };
-    let mut writer = InvertedIndexWriter::new(storage.clone(), config)?;
+    let index = laurus::lexical::index::inverted::InvertedIndex::create(
+        storage.clone(),
+        laurus::lexical::InvertedIndexConfig {
+            analyzer: Arc::new(StandardAnalyzer::new()?),
+            ..Default::default()
+        },
+    )?;
+    use laurus::lexical::index::LexicalIndex;
+    let mut writer = index.writer()?;
 
     // Doc 0: "hello world"
     writer.add_document(

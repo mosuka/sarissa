@@ -350,14 +350,16 @@ impl InvertedIndexWriter {
         metadata: Option<Arc<parking_lot::RwLock<IndexMetadata>>>,
         segment_manifest: Option<super::segment_manifest::SharedSegmentManifest>,
     ) -> Result<Self> {
-        // Recover state from the committed segment set. A writer holding
-        // the shared manifest handle reads it from memory — zero I/O, where
-        // the `.meta` scan paid O(segments) opens + parses (#1024). A
-        // handle-less writer (standalone constructions, the merge replay
-        // writer) keeps the storage scan verbatim: its segments live only
-        // in their `.meta` files. Either way the same four values are
-        // seeded, and the recovery doubles as the segment-range cache seed
-        // (Issue #559 / #864).
+        // Recover state from the committed segment set — read from the
+        // shared manifest, in memory, zero I/O (#1024; the `.meta` scan
+        // this replaces paid O(segments) opens + parses). The same pass
+        // seeds the segment-range cache (Issue #559 / #864).
+        //
+        // A handle-less writer (the merge replay writer, standalone
+        // constructions) seeds NOTHING: it is an ephemeral tool whose
+        // segments are never registered anywhere, so there is no committed
+        // state for it to recover — and no `.meta` files exist for it to
+        // scan on a post-#1024 index anyway.
         let mut next_doc_id = 0;
         let mut current_segment = 0u64;
         let mut segment_ranges = Vec::new();
@@ -375,24 +377,6 @@ impl InvertedIndexWriter {
             }
             // Advisory only — the real ordinal is reserved at flush time.
             current_segment = state.next_generation;
-        } else if let Ok(files) = storage.list_files() {
-            for file in files {
-                if file.ends_with(".meta") && file != "index.meta" {
-                    // unexpected error handling: ignore malformed files
-                    if let Ok(input) = storage.open_input(&file)
-                        && let Ok(meta) = serde_json::from_reader::<_, SegmentInfo>(input)
-                    {
-                        // Only consider segments from the same shard for next_doc_id (local counter part)
-                        if meta.shard_id == config.shard_id {
-                            let local_id = crate::util::id::get_local_id(meta.max_doc_id);
-                            next_doc_id = next_doc_id.max(local_id + 1);
-                        }
-                        current_segment = current_segment.max(meta.generation + 1);
-                        max_committed_doc_id = max_committed_doc_id.max(meta.max_doc_id);
-                        segment_ranges.push((meta.segment_id, meta.min_doc_id, meta.max_doc_id));
-                    }
-                }
-            }
         }
 
         // Create initial DocValuesWriter (will be reset per segment)
@@ -962,7 +946,7 @@ impl InvertedIndexWriter {
         // A buffer flush is not a publication: these documents are not
         // committed yet, so discovery must skip the segment until `commit`
         // publishes it (#1017).
-        self.write_segment_files(&segment_name, /* committed */ false)?;
+        self.write_segment_files(&segment_name)?;
 
         // Mirror the freshly written `.meta` into the segment-range cache
         // (Issue #559 / #864) so an overwrite of one of these docs later in
@@ -974,7 +958,7 @@ impl InvertedIndexWriter {
         // same `SegmentInfo` the `.meta` was serialised from, and before
         // the buffers that description is computed from are cleared.
         self.flushed_segments.push(SegmentReader::open(
-            self.segment_info_for(&segment_name, /* committed */ false),
+            self.segment_info_for(&segment_name),
             self.storage.clone(),
         )?);
 
@@ -982,7 +966,7 @@ impl InvertedIndexWriter {
         // description is retained so publication needs no `.meta` re-read
         // (#1021); `flush_deletions` keeps its `has_deletions` current.
         self.pending_publish
-            .push(self.segment_info_for(&segment_name, /* committed */ false));
+            .push(self.segment_info_for(&segment_name));
 
         // Clear buffers
         self.buffered_docs.clear();
@@ -1015,19 +999,17 @@ impl InvertedIndexWriter {
     /// # Arguments
     ///
     /// * `segment_name` - Name the segment's files are written under.
-    fn write_segment_files(&self, segment_name: &str, committed: bool) -> Result<Vec<String>> {
+    fn write_segment_files(&self, segment_name: &str) -> Result<Vec<String>> {
+        // Data files only (#1024): a segment becomes discoverable through
+        // the manifest at publication, never through its files — which is
+        // also what makes a crash mid-write harmless (the sweep reclaims
+        // unreferenced files at the next open).
         self.write_inverted_index(segment_name)?;
         self.write_stored_documents(segment_name)?;
         self.write_field_lengths(segment_name)?;
         self.write_field_stats(segment_name)?;
         self.write_doc_values(segment_name)?;
         self.write_bkd_trees(segment_name)?;
-        // The `.meta` goes LAST (#1032): it is what makes the segment
-        // discoverable, so writing it before the data files would let a
-        // failure in a later write leave a discoverable segment with files
-        // missing — a BKD-less segment, for instance, silently returns
-        // zero hits for numeric-range and geo queries.
-        self.write_segment_metadata(segment_name, committed)?;
         // The redundant `.json` stored-field mirror is no longer written
         // (Issue #756); stored fields are read from the typed `.docs` file.
 
@@ -1070,7 +1052,7 @@ impl InvertedIndexWriter {
         // were already visible, and the merge engine deletes them once this
         // returns — hiding the output until some later commit would make an
         // `optimize()` lose everything it just consolidated (#1017).
-        let paths = self.write_segment_files(segment_name, /* committed */ true)?;
+        let paths = self.write_segment_files(segment_name)?;
         self.extend_segment_cache(segment_name);
         self.buffered_docs.clear();
         self.buffered_doc_ids.clear();
@@ -1596,7 +1578,7 @@ impl InvertedIndexWriter {
     /// # Returns
     ///
     /// The segment's metadata.
-    fn segment_info_for(&self, segment_name: &str, committed: bool) -> SegmentInfo {
+    fn segment_info_for(&self, segment_name: &str) -> SegmentInfo {
         let (min_id, max_id) = self.buffered_doc_id_range();
         SegmentInfo {
             segment_id: segment_name.to_string(),
@@ -1606,30 +1588,7 @@ impl InvertedIndexWriter {
             generation: self.current_segment,
             has_deletions: false, // New segments initially have no deletions
             shard_id: self.config.shard_id,
-            committed,
         }
-    }
-
-    /// Write segment metadata.
-    ///
-    /// # Arguments
-    ///
-    /// * `segment_name` - Name the segment's files are written under.
-    /// * `committed` - See [`Self::segment_info_for`].
-    fn write_segment_metadata(&self, segment_name: &str, committed: bool) -> Result<()> {
-        let info = self.segment_info_for(segment_name, committed);
-
-        // Write as JSON for compatibility with InvertedIndex::load_segments()
-        let meta_file = format!("{segment_name}.meta");
-        let json_data = serde_json::to_string_pretty(&info).map_err(|e| {
-            LaurusError::index(format!("Failed to serialize segment metadata: {e}"))
-        })?;
-
-        let mut output = self.storage.create_output(&meta_file)?;
-        std::io::Write::write_all(&mut output, json_data.as_bytes())?;
-        output.close()?;
-
-        Ok(())
     }
 
     /// Commit all pending changes.
@@ -1664,8 +1623,6 @@ impl InvertedIndexWriter {
         // same crash contract #875 established.
         self.publish_pending_segments()?;
 
-        // Write index metadata
-        self.write_index_metadata()?;
         self.write_metadata_json()?;
 
         // The committed searcher can serve these segments now, so stop
@@ -1674,21 +1631,6 @@ impl InvertedIndexWriter {
         // rebuilt over the full committed set.
         self.flushed_segments.clear();
 
-        Ok(())
-    }
-
-    /// Write global index metadata.
-    fn write_index_metadata(&self) -> Result<()> {
-        let meta_output = self.storage.create_output("index.meta")?;
-        let mut meta_writer = StructWriter::new(meta_output);
-
-        meta_writer.write_u32(0x494D4554)?; // Magic "IMET"
-        meta_writer.write_u32(1)?; // Version
-        meta_writer.write_u64(crate::util::time::now_secs())?; // Timestamp
-        meta_writer.write_u64(self.stats.docs_added)?;
-        meta_writer.write_u32(self.stats.segments_created)?;
-
-        meta_writer.close()?;
         Ok(())
     }
 
@@ -2026,150 +1968,54 @@ impl InvertedIndexWriter {
             return Ok(());
         }
 
-        // Build the new view first and swap it in only on success: clearing
-        // eagerly and then failing (e.g. on `list_files`) would leave the
-        // writer alive with an EMPTY cache and `max_committed_doc_id == 0`,
-        // silently skipping every subsequent overwrite's deletion via the
-        // fast path — worse than the error itself.
-        let mut segment_ranges = Vec::new();
-        let mut max_committed_doc_id = 0u64;
-        for file in self.storage.list_files()? {
-            if !file.ends_with(".meta") || file == "index.meta" {
-                continue;
-            }
-            let Ok(input) = self.storage.open_input(&file) else {
-                continue;
-            };
-            let Ok(meta) = serde_json::from_reader::<_, SegmentInfo>(input) else {
-                continue;
-            };
-            max_committed_doc_id = max_committed_doc_id.max(meta.max_doc_id);
-            segment_ranges.push((meta.segment_id, meta.min_doc_id, meta.max_doc_id));
-        }
-        self.segment_ranges = segment_ranges;
-        self.max_committed_doc_id = max_committed_doc_id;
-        // Contract (Issue #875): any buffered deletion state must have been
-        // flushed BEFORE the external rewrite that prompted this call —
-        // `LexicalStore::optimize` calls `flush_deletions` ahead of its
-        // force-merge. Dropping the manager (and the pending meta flips)
-        // here discards only state that describes segments which no longer
-        // exist; flushing at this point instead would recreate `.delmap` /
-        // `.meta` files for merged-away segments.
+        // Handle-less writers are ephemeral (#1024): their segments are
+        // registered nowhere, so after an external rewrite there is no
+        // record to rebuild from — clear to empty.
+        self.segment_ranges = Vec::new();
+        self.max_committed_doc_id = 0;
         self.deletion_manager = None;
         self.pending_meta_deletions.clear();
-        // The force-merge that prompted this replaced the files these
-        // readers were opened over, so they describe segments that no
-        // longer exist (#1016). `LexicalStore::optimize` drops the cached
-        // searcher at the same time, so the merged result stays reachable.
         self.flushed_segments.clear();
         Ok(())
     }
 
-    /// Record that a segment needs its `.meta` `has_deletions` flag flipped.
-    ///
-    /// The actual `.meta` parse + rewrite is deferred to
-    /// [`Self::flush_deletions`] (Issue #875) — this is a set insert, so the
-    /// per-delete hot path pays no storage read, JSON parse, or fsync.
+    /// Record that a segment's `has_deletions` flag must flip at the next
+    /// [`Self::flush_deletions`] (Issue #875) — a set insert, so the
+    /// per-delete hot path pays no storage I/O. The flip lands in the
+    /// manifest entry (and in the pending publication, for a segment
+    /// flushed in the same commit) — see `flush_deletions` (#1024).
     fn update_segment_meta_deletions(&mut self, segment_id: &str) {
         self.pending_meta_deletions.insert(segment_id.to_string());
     }
 
-    /// Rewrite a segment's `.meta` to `has_deletions = true` (idempotent —
-    /// nothing is written when the flag is already set).
-    fn persist_segment_meta_deletions(&self, segment_id: &str) -> Result<()> {
-        self.update_segment_meta(segment_id, |meta| {
-            if meta.has_deletions {
-                false
-            } else {
-                meta.has_deletions = true;
-                true
-            }
-        })
-    }
-
     /// Publish every segment flushed since the last commit (#1017).
     ///
-    /// Flipping `committed` is what makes a segment's documents searchable,
-    /// so this is the point at which a commit becomes visible. It runs after
-    /// [`Self::flush_deletions`] and before the `metadata.json` checkpoint —
-    /// see [`Self::commit`] for why both halves of that sandwich matter.
-    ///
-    /// A segment already published (for instance one this writer adopted
-    /// from an older index) is left alone.
+    /// Entering the manifest is what makes a segment's documents
+    /// searchable, so this is the point at which a commit becomes visible.
+    /// It runs after [`Self::flush_deletions`] and before the
+    /// `metadata.json` checkpoint — see [`Self::commit`] for why both
+    /// halves of that sandwich matter.
     fn publish_pending_segments(&mut self) -> Result<()> {
         if self.pending_publish.is_empty() {
             return Ok(());
         }
 
-        // Manifest first (#1021): ONE atomic write adds every pending
-        // segment — all-or-nothing, unlike the per-`.meta` flips below.
-        // save-then-swap: the pending list is consumed only after the whole
-        // publication succeeds, so the #875 retained-writer retry simply
+        // ONE atomic manifest write adds every pending segment (#1021) —
+        // all-or-nothing. save-then-swap: the pending list is consumed only
+        // after the save succeeds, so the #875 retained-writer retry simply
         // re-runs it; the upsert dedups by segment_id, so a retry whose
-        // manifest save had already landed cannot double-add.
+        // save had already landed cannot double-add. A handle-less writer
+        // publishes nowhere (#1024): its segments are ephemeral by
+        // definition — data files with no registration.
         if let Some(manifest) = &self.segment_manifest {
             let pending = &self.pending_publish;
             super::segment_manifest::publish_with(self.storage.as_ref(), manifest, |list| {
                 for info in pending {
-                    let mut info = info.clone();
-                    info.committed = true;
-                    super::segment_manifest::upsert_entry(list, info);
-                }
-            })?;
-        }
-
-        // Advisory `.meta` flips (dual-write during the #1021 transition).
-        // Iterating without draining fixes a latent partial-publish bug:
-        // the old `std::mem::take` dropped every not-yet-flipped id on a
-        // mid-loop error, permanently hiding those committed documents.
-        for info in &self.pending_publish {
-            self.update_segment_meta(&info.segment_id, |meta| {
-                if meta.committed {
-                    false
-                } else {
-                    meta.committed = true;
-                    true
+                    super::segment_manifest::upsert_entry(list, info.clone());
                 }
             })?;
         }
         self.pending_publish.clear();
-        Ok(())
-    }
-
-    /// Read a segment's `.meta`, let `edit` mutate it, and write it back
-    /// atomically if anything changed.
-    ///
-    /// The rewrite goes through a temporary file and a rename because
-    /// `InvertedIndex::load_segments` treats a malformed `.meta` as a hard
-    /// error — a torn in-place rewrite would not lose one segment, it would
-    /// stop every reader from being constructed at all.
-    ///
-    /// # Arguments
-    ///
-    /// * `segment_id` - Segment whose metadata to edit.
-    /// * `edit` - Mutates the metadata; returns whether it changed anything.
-    fn update_segment_meta(
-        &self,
-        segment_id: &str,
-        edit: impl FnOnce(&mut SegmentInfo) -> bool,
-    ) -> Result<()> {
-        let meta_file = format!("{segment_id}.meta");
-        let input = self.storage.open_input(&meta_file)?;
-        let mut meta: SegmentInfo = serde_json::from_reader(input)
-            .map_err(|e| LaurusError::index(format!("Failed to read segment meta: {e}")))?;
-
-        if !edit(&mut meta) {
-            return Ok(());
-        }
-
-        let json = serde_json::to_string_pretty(&meta)
-            .map_err(|e| LaurusError::index(format!("Failed to serialize segment meta: {e}")))?;
-        let tmp_file = format!("{meta_file}.tmp");
-        let mut output = self.storage.create_output(&tmp_file)?;
-        std::io::Write::write_all(&mut output, json.as_bytes())?;
-        output.close()?;
-        self.storage.rename_file(&tmp_file, &meta_file)?;
-
         Ok(())
     }
 
@@ -2235,11 +2081,10 @@ impl InvertedIndexWriter {
             }
         }
 
-        // Advisory `.meta` flips (dual-write during the #1021 transition).
-        for segment_id in pending {
-            self.persist_segment_meta_deletions(&segment_id)?;
-            self.pending_meta_deletions.remove(&segment_id);
-        }
+        // Consumed only now that both destinations hold the flips; a
+        // handle-less writer records them nowhere (#1024) — its segments
+        // are unregistered to begin with.
+        self.pending_meta_deletions.clear();
         Ok(())
     }
 
@@ -2340,33 +2185,21 @@ impl LexicalIndexWriter for InvertedIndexWriter {
         use crate::lexical::index::inverted::reader::{
             InvertedIndexReader, InvertedIndexReaderConfig,
         };
-        use crate::lexical::index::inverted::segment::SegmentInfo;
 
-        // List all segments from storage
-        // This assumes standard segment naming: segment_XXXXXX.meta
-        let mut segments = Vec::new();
-        let mut segment_id = 0;
-
-        loop {
-            let segment_name = format!("{}_{:06}", self.config.segment_prefix, segment_id);
-            let meta_file = format!("{}.meta", segment_name);
-
-            if self.storage.file_exists(&meta_file) {
-                // Read segment metadata
-                let input = self.storage.open_input(&meta_file)?;
-                let mut json_data = String::new();
-                std::io::Read::read_to_string(&mut std::io::BufReader::new(input), &mut json_data)?;
-
-                let segment_info: SegmentInfo = serde_json::from_str(&json_data).map_err(|e| {
-                    LaurusError::index(format!("Failed to parse segment metadata: {e}"))
-                })?;
-
-                segments.push(segment_info);
-                segment_id += 1;
-            } else {
-                break;
-            }
-        }
+        // The committed segment set comes from the manifest (#1024): the
+        // shared in-memory copy when this writer holds the handle, a
+        // one-shot load otherwise. The old implementation probed
+        // `segment_000000.meta, _000001, …` until the first miss — it never
+        // saw `merged_*` segments and stopped at the first numbering gap
+        // any merge leaves, so this is also a correctness upgrade.
+        let mut segments = if let Some(manifest) = &self.segment_manifest {
+            manifest.read().segments.clone()
+        } else {
+            super::segment_manifest::load(self.storage.as_ref())?
+                .map(|(_, segments)| segments)
+                .unwrap_or_default()
+        };
+        segments.sort_by_key(|s| s.generation);
 
         let config = InvertedIndexReaderConfig {
             analyzer: self.config.analyzer.clone(),

@@ -1,16 +1,14 @@
-//! #1021 — the lexical segment manifest.
+//! #1021 / #1024 — the lexical segment manifest.
 //!
-//! Two layers of coverage, matching the two PRs:
-//!
-//! - The **equivalence property suite** (PR 1): after every mutation
-//!   class, `segments.json` must equal the committed `.meta` scan,
-//!   `has_deletions` and `generation` included. Written when discovery
-//!   still ran on the scan, and kept: it now pins the advisory dual-write.
-//! - The **authority suite** (PR 2): discovery reads only the manifest
-//!   (zero storage I/O per reader construction), the orphan sweep
-//!   reclaims what the manifest does not list — but only under an
-//!   authoritative (version >= 2) manifest — and every merge crash
-//!   window resolves in the manifest's favor with no duplicate hits.
+//! `segments.json` is the sole record of the committed segment set:
+//! discovery reads only the manifest (zero storage I/O per reader
+//! construction), publication and the merge transition are single atomic
+//! writes, the orphan sweep reclaims what the manifest does not list —
+//! but only under an authoritative (version >= 2) manifest — and every
+//! merge crash window resolves in the manifest's favor with no duplicate
+//! hits. Since #1024 there are no `.meta` files at all: what used to be
+//! the equivalence suite (manifest == committed-`.meta` scan) is now a
+//! set of direct manifest-content assertions per mutation class.
 
 use std::io::Read;
 use std::sync::Arc;
@@ -56,12 +54,6 @@ impl FailingStorage {
 
     fn fail_next_delete_matching(&self, prefix: &str, suffix: &str) {
         *self.fail_delete_of.lock() = Some((prefix.to_string(), suffix.to_string()));
-    }
-
-    /// Arm a one-shot `create_output` failure that skips the first `skip`
-    /// matches — for aiming past an earlier write of the same file.
-    fn fail_create_matching_after(&self, prefix: &str, suffix: &str, skip: usize) {
-        *self.fail_create_of.lock() = Some((prefix.to_string(), suffix.to_string(), skip));
     }
 }
 
@@ -207,31 +199,40 @@ fn read_manifest(storage: &Arc<dyn Storage>) -> Vec<SegmentInfo> {
         .collect()
 }
 
-/// Scan the committed `.meta` files, exactly as discovery does today.
-fn scan_committed_metas(storage: &Arc<dyn Storage>) -> Vec<SegmentInfo> {
-    let mut segments: Vec<SegmentInfo> = storage
-        .list_files()
-        .unwrap()
-        .into_iter()
-        .filter(|f| (f.starts_with("segment_") || f.starts_with("merged_")) && f.ends_with(".meta"))
-        .map(|f| serde_json::from_slice::<SegmentInfo>(&read_bytes(storage, &f)).unwrap())
-        .filter(|s| s.committed)
-        .collect();
-    segments.sort_by(|a, b| a.segment_id.cmp(&b.segment_id));
-    segments
+/// Assert the manifest holds exactly `count` segments.
+#[track_caller]
+fn assert_manifest_len(storage: &Arc<dyn Storage>, count: usize) {
+    let manifest = read_manifest(storage);
+    assert_eq!(
+        manifest.len(),
+        count,
+        "unexpected committed segment set: {manifest:?}"
+    );
 }
 
-/// The equivalence property: the manifest and the committed-`.meta` scan
-/// describe the same segments, field for field.
-#[track_caller]
-fn assert_equiv(storage: &Arc<dyn Storage>) {
-    let mut manifest = read_manifest(storage);
-    manifest.sort_by(|a, b| a.segment_id.cmp(&b.segment_id));
-    let metas = scan_committed_metas(storage);
-    assert_eq!(
-        manifest, metas,
-        "segments.json must equal the committed .meta scan"
-    );
+/// Write a pre-#1024 `.meta` for every current manifest entry — the shape
+/// a legacy (pre-manifest-authority) index left on storage. Used to
+/// construct legacy-migration fixtures now that no production path writes
+/// `.meta` files.
+fn plant_legacy_metas(storage: &Arc<dyn Storage>) {
+    use std::io::Write;
+    for info in read_manifest(storage) {
+        let legacy = serde_json::json!({
+            "segment_id": info.segment_id,
+            "doc_count": info.doc_count,
+            "min_doc_id": info.min_doc_id,
+            "max_doc_id": info.max_doc_id,
+            "generation": info.generation,
+            "has_deletions": info.has_deletions,
+            "shard_id": info.shard_id,
+            "committed": true,
+        });
+        let name = format!("{}.meta", info.segment_id);
+        let mut out = storage.create_output(&name).unwrap();
+        out.write_all(&serde_json::to_vec(&legacy).unwrap())
+            .unwrap();
+        out.close().unwrap();
+    }
 }
 
 fn doc(body: &str) -> Document {
@@ -257,9 +258,8 @@ fn manifest_matches_meta_after_plain_commits() {
     for round in 1..=2u64 {
         store.upsert_document(round, doc("alpha")).unwrap();
         store.commit().unwrap();
-        assert_equiv(&storage);
+        assert_manifest_len(&storage, round as usize);
     }
-    assert_eq!(read_manifest(&storage).len(), 2);
 }
 
 /// A deleting commit: the `has_deletions` flip reaches the manifest.
@@ -274,7 +274,7 @@ fn manifest_matches_meta_after_a_deleting_commit() {
     store.upsert_document(1, doc("alpha-v2")).unwrap();
     store.commit().unwrap();
 
-    assert_equiv(&storage);
+    assert_manifest_len(&storage, 2);
     assert!(
         read_manifest(&storage).iter().any(|s| s.has_deletions),
         "the deleting commit must flip has_deletions in the manifest"
@@ -304,7 +304,7 @@ fn delete_and_publish_in_one_commit_keeps_has_deletions() {
     store.upsert_document(1, doc("alpha-v2")).unwrap();
     store.commit().unwrap();
 
-    assert_equiv(&storage);
+    assert_manifest_len(&storage, 2);
     assert!(
         read_manifest(&storage)
             .iter()
@@ -327,8 +327,13 @@ fn manifest_matches_meta_after_auto_merge() {
     for round in 1..=3u64 {
         store.upsert_document(round, doc("alpha")).unwrap();
         store.commit().unwrap();
-        assert_equiv(&storage);
+        // max_segments = 1: every commit past the first merges back down.
+        assert_manifest_len(&storage, 1);
     }
+    assert!(
+        read_manifest(&storage)[0].segment_id.starts_with("merged_"),
+        "the surviving segment must be the merged one"
+    );
 }
 
 /// Optimize (force-merge-all): same property on the other merge path.
@@ -342,7 +347,11 @@ fn manifest_matches_meta_after_optimize() {
         store.commit().unwrap();
     }
     store.optimize().unwrap();
-    assert_equiv(&storage);
+    assert_manifest_len(&storage, 1);
+    assert!(
+        read_manifest(&storage)[0].segment_id.starts_with("merged_"),
+        "optimize must leave exactly the merged segment"
+    );
 }
 
 /// save-then-swap: a failed manifest save leaves the previous manifest
@@ -373,7 +382,6 @@ fn failed_manifest_save_retries_cleanly() {
 
     // The retained writer retries (#875) and republishes.
     store.commit().unwrap();
-    assert_equiv(&inner);
     let manifest = read_manifest(&inner);
     let mut ids: Vec<&str> = manifest.iter().map(|s| s.segment_id.as_str()).collect();
     ids.sort_unstable();
@@ -383,43 +391,12 @@ fn failed_manifest_save_retries_cleanly() {
     assert_eq!(manifest.len(), 2);
 }
 
-/// The `mem::take` partial-publish regression: an advisory `.meta` flip
-/// failing mid-publish must not drop the unflipped segments — the retry
-/// publishes every pending segment.
-#[test]
-fn partial_meta_flip_failure_republishes_everything() {
-    let inner = memory_storage();
-    let failing = Arc::new(FailingStorage::new(inner.clone()));
-    let storage: Arc<dyn Storage> = failing.clone();
-
-    let store = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
-    // Two pending segments in one commit: one auto-flushed, one flushed by
-    // the commit itself.
-    for i in 1..=10_050u64 {
-        store.upsert_document(i, doc("alpha")).unwrap();
-    }
-    // Fail the first advisory `.meta` publish flip (a rename onto a
-    // `segment_*.meta`); the manifest save (`segments.json`) has already
-    // succeeded by then.
-    failing.fail_next_rename_matching("segment_", ".meta");
-    assert!(
-        store.commit().is_err(),
-        "the injected .meta flip failure must surface"
-    );
-
-    // Retry: everything is republished — manifest and .meta agree and
-    // every segment is committed.
-    store.commit().unwrap();
-    assert_equiv(&inner);
-    assert_eq!(
-        read_manifest(&inner).len(),
-        2,
-        "both pending segments must be published after the retry"
-    );
-}
-
-/// Legacy migration: an index without a manifest opens through the `.meta`
-/// scan, and the first mutation persists the migrated manifest.
+/// Legacy migration: a pre-manifest index (committed `.meta` files, no
+/// `segments.json`) opens through the one sanctioned `.meta` read, and the
+/// first mutation persists the migrated manifest.
+///
+/// The legacy state is planted by hand — no production path writes `.meta`
+/// files any more (#1024).
 #[test]
 fn legacy_index_without_manifest_migrates_on_first_mutation() {
     let storage = memory_storage();
@@ -428,18 +405,20 @@ fn legacy_index_without_manifest_migrates_on_first_mutation() {
     store.commit().unwrap();
     drop(store);
 
-    // Simulate a pre-manifest index.
+    // Rewind to the pre-manifest world: `.meta` files describe the
+    // segments, `segments.json` does not exist.
+    plant_legacy_metas(&storage);
     storage.delete_file("segments.json").unwrap();
 
     let reopened = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
     reopened.upsert_document(2, doc("beta")).unwrap();
     reopened.commit().unwrap();
 
-    assert_equiv(&storage);
+    assert_manifest_len(&storage, 2);
     assert_eq!(
-        read_manifest(&storage).len(),
+        hits(&reopened, "alpha") + hits(&reopened, "beta"),
         2,
-        "the migrated manifest must contain the legacy segment AND the new one"
+        "the legacy segment and the new one must both be live"
     );
 }
 
@@ -605,17 +584,18 @@ fn reader_construction_does_no_discovery_io() {
 fn plant_stray_segment(storage: &Arc<dyn Storage>, stem: &str, with_meta: bool) {
     let mut files = vec![(format!("{stem}.post"), b"junk".to_vec())];
     if with_meta {
-        let info = SegmentInfo {
-            segment_id: stem.to_string(),
-            doc_count: 1,
-            min_doc_id: 900_000,
-            max_doc_id: 900_000,
-            generation: 99,
-            has_deletions: false,
-            shard_id: 0,
-            committed: true,
-        };
-        files.push((format!("{stem}.meta"), serde_json::to_vec(&info).unwrap()));
+        // The pre-#1024 on-disk shape, committed included.
+        let legacy = serde_json::json!({
+            "segment_id": stem,
+            "doc_count": 1,
+            "min_doc_id": 900_000,
+            "max_doc_id": 900_000,
+            "generation": 99,
+            "has_deletions": false,
+            "shard_id": 0,
+            "committed": true,
+        });
+        files.push((format!("{stem}.meta"), serde_json::to_vec(&legacy).unwrap()));
     }
     for (name, bytes) in files {
         let mut out = storage.create_output(&name).unwrap();
@@ -644,12 +624,16 @@ fn sweep_is_gated_on_an_authoritative_manifest() {
         "a v2 manifest must reclaim stray segment files at open"
     );
 
-    // Case 2: no manifest — nothing is swept.
+    // Case 2: no manifest, a legacy index (`.meta` files describe the
+    // segments — a bare absence would refuse to open, see
+    // `open_refuses_segment_files_with_nothing_to_describe_them`).
+    // Nothing is swept.
     let storage = memory_storage();
     let store = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
     store.upsert_document(1, doc("alpha")).unwrap();
     store.commit().unwrap();
     drop(store);
+    plant_legacy_metas(&storage);
     storage.delete_file("segments.json").unwrap();
     // Meta-less: the migration scan must not adopt it, so only the sweep
     // gate stands between it and deletion.
@@ -668,9 +652,11 @@ fn sweep_is_gated_on_an_authoritative_manifest() {
     store.upsert_document(1, doc("alpha")).unwrap();
     store.commit().unwrap();
     drop(store);
-    // Rewrite the manifest as version 1, raw-JSON legacy form (accepted by
-    // the loader), listing the real segments.
-    let real = scan_committed_metas(&storage);
+    // Rewind to the PR-1 era: `.meta` files exist (a v1-era index always
+    // wrote them) and the manifest says version 1, raw-JSON legacy form
+    // (accepted by the loader), listing the real segments.
+    let real = read_manifest(&storage);
+    plant_legacy_metas(&storage);
     let v1 = serde_json::json!({ "version": 1u32, "segments": real });
     storage.delete_file("segments.json").unwrap();
     let mut out = storage.create_output("segments.json").unwrap();
@@ -737,54 +723,48 @@ fn merge_crash_before_manifest_save_resolves_to_the_sources() {
     );
 }
 
-/// A merge that crashes after its manifest save — before the advisory
-/// generation rewrite or the source deletions: the merged segment is
-/// authoritative, the source leftovers are reclaimed, no duplicates.
+/// A merge that crashes after its manifest save — during the source file
+/// deletions: the merged segment is authoritative, the source leftovers
+/// are reclaimed at the next open, no duplicates.
+///
+/// (#1024 removed the other post-save steps this test used to exercise:
+/// the advisory `.meta` generation rewrite no longer exists.)
 #[test]
 fn merge_crash_after_manifest_save_resolves_to_the_merged_segment() {
-    for arm in ["advisory", "source-delete"] {
-        let inner = memory_storage();
-        let failing = Arc::new(FailingStorage::new(inner.clone()));
-        let storage: Arc<dyn Storage> = failing.clone();
+    let inner = memory_storage();
+    let failing = Arc::new(FailingStorage::new(inner.clone()));
+    let storage: Arc<dyn Storage> = failing.clone();
 
-        let config = LexicalIndexConfig::builder()
-            .max_segments(1)
-            .merge_factor(2)
-            .build();
-        let store = LexicalStore::new(storage.clone(), config.clone()).unwrap();
-        store.upsert_document(1, doc("alpha")).unwrap();
-        store.commit().unwrap();
-        store.upsert_document(2, doc("alpha")).unwrap();
-        match arm {
-            // set_segment_generation rewrites the merged .meta in place.
-            // Skip the merge engine's own initial write of that file.
-            "advisory" => failing.fail_create_matching_after("merged_", ".meta", 1),
-            // The first source .meta deletion.
-            _ => failing.fail_next_delete_matching("segment_", ".meta"),
-        }
-        assert!(
-            store.commit().is_err(),
-            "arm {arm}: the failure must surface"
-        );
-        drop(store);
+    let config = LexicalIndexConfig::builder()
+        .max_segments(1)
+        .merge_factor(2)
+        .build();
+    let store = LexicalStore::new(storage.clone(), config.clone()).unwrap();
+    store.upsert_document(1, doc("alpha")).unwrap();
+    store.commit().unwrap();
+    store.upsert_document(2, doc("alpha")).unwrap();
+    // The first source data-file deletion fails after the manifest already
+    // recorded the transition.
+    failing.fail_next_delete_matching("segment_", ".post");
+    assert!(store.commit().is_err(), "the failure must surface");
+    drop(store);
 
-        let reopened = LexicalStore::new(inner.clone(), config).unwrap();
-        assert_eq!(
-            hits(&reopened, "alpha"),
-            2,
-            "arm {arm}: every document exactly once, served by the merged segment"
-        );
-        drop(reopened);
-        let files = inner.list_files().unwrap();
-        assert!(
-            files.iter().any(|f| f.starts_with("merged_")),
-            "arm {arm}: the merged segment is the live copy"
-        );
-        assert!(
-            !files.iter().any(|f| f.starts_with("segment_")),
-            "arm {arm}: the source leftovers must be reclaimed, found {files:?}"
-        );
-    }
+    let reopened = LexicalStore::new(inner.clone(), config).unwrap();
+    assert_eq!(
+        hits(&reopened, "alpha"),
+        2,
+        "every document exactly once, served by the merged segment"
+    );
+    drop(reopened);
+    let files = inner.list_files().unwrap();
+    assert!(
+        files.iter().any(|f| f.starts_with("merged_")),
+        "the merged segment is the live copy"
+    );
+    assert!(
+        !files.iter().any(|f| f.starts_with("segment_")),
+        "the source leftovers must be reclaimed, found {files:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

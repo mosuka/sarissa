@@ -1657,17 +1657,19 @@ mod tests {
     /// and the multi-segment fanout (Issue #600).
     fn populated_searcher(segments: usize) -> InvertedIndexSearcher {
         use crate::analysis::analyzer::standard::StandardAnalyzer;
-        use crate::lexical::index::inverted::writer::{
-            InvertedIndexWriter, InvertedIndexWriterConfig,
-        };
-        use crate::lexical::writer::LexicalIndexWriter;
+        use crate::lexical::index::LexicalIndex;
+        use crate::lexical::index::inverted::{InvertedIndex, InvertedIndexConfig};
 
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let config = InvertedIndexWriterConfig {
+        // Through the index (#1024): a standalone writer registers its
+        // segments nowhere, so durable fixtures go through the real path.
+        let storage: Arc<dyn crate::storage::Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let config = InvertedIndexConfig {
             analyzer: Arc::new(StandardAnalyzer::new().unwrap()),
             ..Default::default()
         };
-        let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
+        let index = InvertedIndex::create(storage, config).unwrap();
+        let mut writer = index.writer().unwrap();
         let per_segment = 200;
         for seg in 0..segments.max(1) {
             for i in 0..per_segment {
@@ -2221,14 +2223,13 @@ mod tests {
     /// pruning disabled too — so this pins that pruning really fires.
     #[test]
     fn disjoint_segments_are_pruned_against_the_lead_floor() {
-        use crate::lexical::index::inverted::writer::{
-            InvertedIndexWriter, InvertedIndexWriterConfig,
-        };
-        use crate::lexical::writer::LexicalIndexWriter;
+        use crate::lexical::index::LexicalIndex;
+        use crate::lexical::index::inverted::{InvertedIndex, InvertedIndexConfig};
 
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let mut writer =
-            InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+        let storage: Arc<dyn crate::storage::Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let index = InvertedIndex::create(storage, InvertedIndexConfig::default()).unwrap();
+        let mut writer = index.writer().unwrap();
         // Three commits, values strictly increasing: [0..4), [10..14), [20..24).
         for group in 0..3u64 {
             for offset in 0..4u64 {
@@ -2295,14 +2296,13 @@ mod tests {
     /// never prune anything.
     #[test]
     fn uniform_segments_keep_the_parallel_fanout() {
-        use crate::lexical::index::inverted::writer::{
-            InvertedIndexWriter, InvertedIndexWriterConfig,
-        };
-        use crate::lexical::writer::LexicalIndexWriter;
+        use crate::lexical::index::LexicalIndex;
+        use crate::lexical::index::inverted::{InvertedIndex, InvertedIndexConfig};
 
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let mut writer =
-            InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+        let storage: Arc<dyn crate::storage::Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let index = InvertedIndex::create(storage, InvertedIndexConfig::default()).unwrap();
+        let mut writer = index.writer().unwrap();
         // Three commits, each spanning the identical range [0, 30].
         for _ in 0..3 {
             for offset in 0..4u64 {
@@ -2367,15 +2367,14 @@ mod tests {
     #[test]
     fn per_segment_view_forwards_doc_values() {
         use crate::lexical::core::field::FieldValue;
+        use crate::lexical::index::LexicalIndex;
         use crate::lexical::index::inverted::per_segment_view::PerSegmentReaderView;
-        use crate::lexical::index::inverted::writer::{
-            InvertedIndexWriter, InvertedIndexWriterConfig,
-        };
-        use crate::lexical::writer::LexicalIndexWriter;
+        use crate::lexical::index::inverted::{InvertedIndex, InvertedIndexConfig};
 
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let mut writer =
-            InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+        let storage: Arc<dyn crate::storage::Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let index = InvertedIndex::create(storage, InvertedIndexConfig::default()).unwrap();
+        let mut writer = index.writer().unwrap();
         writer
             .add_document(
                 crate::Document::builder()

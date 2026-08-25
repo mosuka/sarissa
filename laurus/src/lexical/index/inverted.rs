@@ -35,7 +35,6 @@ use crate::storage::manifest as manifest_io;
 
 pub(crate) mod bmw;
 pub mod core;
-pub mod maintenance;
 pub mod parsed_query_cache;
 pub(crate) mod per_segment_view;
 pub mod posting_cache;
@@ -241,9 +240,7 @@ impl InvertedIndex {
                         "segments.json is missing but segment files are present; refusing to                          open — restore the manifest (or remove the segment files) instead of                          losing the segments to the next sweep",
                     ));
                 }
-                let mut scanned = Self::scan_segment_metas_from(storage.as_ref())?;
-                scanned.retain(|s| s.committed);
-                scanned
+                Self::scan_segment_metas_from(storage.as_ref())?
             }
         };
         let next_generation = segment_manifest::derive_next_generation(&segments, &files);
@@ -403,26 +400,40 @@ impl InvertedIndex {
             if manifest.iter().any(|s| s.segment_id == stem) {
                 continue;
             }
-            if file.ends_with(".meta")
-                && let Ok(mut input) = storage.open_input(file)
-            {
-                let mut data = Vec::new();
-                if Read::read_to_end(&mut input, &mut data).is_ok()
-                    && let Ok(meta) = serde_json::from_slice::<SegmentInfo>(&data)
-                    && meta.committed
-                {
-                    log::warn!(
-                        "sweeping segment {stem}: its .meta says committed but the manifest                          does not list it (a crash in a publication window, or a segment                          committed by a standalone writer)"
-                    );
-                }
-            }
+            // No content inspection (#1024): `.meta` files are legacy
+            // artifacts, and the manifest is the sole authority — a file
+            // the manifest does not list is an orphan by definition
+            // (a crash in a publication window, an unfinished merge
+            // cleanup, or a segment written by a standalone writer).
+            log::debug!("sweeping unreferenced segment file {file}");
             let _ = storage.delete_file(file);
         }
     }
 
-    /// [`Self::scan_segment_metas`] as an associated function, so `open`
-    /// can run the legacy-migration scan before `self` exists (#1021).
+    /// The legacy-migration scan (#1021/#1024): read every pre-manifest
+    /// `.meta` on storage — the ONE sanctioned `.meta` read left, used by
+    /// `open` when no authoritative manifest exists. Unpublished records
+    /// (`committed: false`, written by pre-#1024 builds for
+    /// flushed-but-uncommitted segments) are skipped.
     fn scan_segment_metas_from(storage: &dyn Storage) -> Result<Vec<SegmentInfo>> {
+        /// The on-disk shape of a pre-#1024 `.meta`, parsed only here.
+        /// `committed` defaulted to true for records older than #1017.
+        #[derive(serde::Deserialize)]
+        struct LegacyMetaRecord {
+            segment_id: String,
+            doc_count: u64,
+            min_doc_id: u64,
+            max_doc_id: u64,
+            generation: u64,
+            has_deletions: bool,
+            shard_id: u16,
+            #[serde(default = "legacy_committed_default")]
+            committed: bool,
+        }
+        fn legacy_committed_default() -> bool {
+            true
+        }
+
         let files = storage.list_files()?;
         let mut segments = Vec::new();
 
@@ -436,11 +447,21 @@ impl InvertedIndex {
                 let mut data = Vec::new();
                 Read::read_to_end(&mut input, &mut data)?;
 
-                let segment_info: SegmentInfo = serde_json::from_slice(&data).map_err(|e| {
+                let record: LegacyMetaRecord = serde_json::from_slice(&data).map_err(|e| {
                     LaurusError::index(format!("Failed to parse segment metadata: {e}"))
                 })?;
-
-                segments.push(segment_info);
+                if !record.committed {
+                    continue;
+                }
+                segments.push(SegmentInfo {
+                    segment_id: record.segment_id,
+                    doc_count: record.doc_count,
+                    min_doc_id: record.min_doc_id,
+                    max_doc_id: record.max_doc_id,
+                    generation: record.generation,
+                    has_deletions: record.has_deletions,
+                    shard_id: record.shard_id,
+                });
             }
         }
 
@@ -530,8 +551,8 @@ impl InvertedIndex {
     /// seen in both a source and the merged segment). A no-op for fewer than
     /// two sources.
     fn merge_segment_set(&self, sources: &[SegmentInfo], next_generation: u64) -> Result<()> {
-        use self::segment::manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
         use self::segment::merge_engine::{MergeConfig, MergeEngine};
+        use self::segment::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 
         if sources.len() < 2 {
             return Ok(());
@@ -570,16 +591,10 @@ impl InvertedIndex {
             segment_manifest::upsert_entry(list, merged_info);
         })?;
 
-        self.set_segment_generation(&result.new_segment.segment_info.segment_id, next_generation)?;
-
-        // Delete each source's `.meta` first (drops it from discovery), then the
-        // remaining data files.
-        for info in sources {
-            let meta = format!("{}.meta", info.segment_id);
-            if self.storage.file_exists(&meta) {
-                self.storage.delete_file(&meta)?;
-            }
-        }
+        // Physical cleanup only (#1024): the manifest write above already
+        // removed the sources from discovery atomically, so file deletion
+        // order no longer matters — anything a crash leaves behind is an
+        // unreferenced orphan the next open's sweep reclaims.
         for info in sources {
             self.delete_segment_files(&info.segment_id)?;
         }
@@ -600,24 +615,6 @@ impl InvertedIndex {
                     .sum()
             })
             .unwrap_or(0)
-    }
-
-    /// Rewrite a segment's `.meta` with an updated generation.
-    fn set_segment_generation(&self, segment_id: &str, generation: u64) -> Result<()> {
-        let meta_file = format!("{segment_id}.meta");
-        let mut input = self.storage.open_input(&meta_file)?;
-        let mut data = Vec::new();
-        Read::read_to_end(&mut input, &mut data)?;
-        let mut info: SegmentInfo = serde_json::from_slice(&data)
-            .map_err(|e| LaurusError::index(format!("Failed to parse segment metadata: {e}")))?;
-        info.generation = generation;
-        let json = serde_json::to_string_pretty(&info).map_err(|e| {
-            LaurusError::index(format!("Failed to serialize segment metadata: {e}"))
-        })?;
-        let mut output = self.storage.create_output(&meta_file)?;
-        std::io::Write::write_all(&mut output, json.as_bytes())?;
-        output.close()?;
-        Ok(())
     }
 
     /// Delete every file belonging to `segment_id`.
@@ -924,10 +921,15 @@ mod tests {
 
         assert_eq!(writer.pending_docs(), 0);
 
-        // Check that files were created
+        // A standalone writer flushes data files; it registers them
+        // nowhere (#1024 — index.meta is gone, and only an index-owned
+        // writer publishes into segments.json).
         let files = storage.list_files().unwrap();
-        assert!(files.contains(&"index.meta".to_string()));
-        assert!(files.iter().any(|f| f.starts_with("segment_")));
+        assert!(
+            files
+                .iter()
+                .any(|f| f.starts_with("segment_") && f.ends_with(".post"))
+        );
     }
 
     #[test]

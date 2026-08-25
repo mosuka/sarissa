@@ -4,11 +4,9 @@
 //! production search does and verify the Lucene-style "any value
 //! matches" semantics for both `Int64Array` and `Float64Array` fields.
 
-use laurus::lexical::LexicalIndexWriter;
 use laurus::lexical::NumericRangeQuery;
 use laurus::lexical::NumericType;
 use laurus::lexical::Query;
-use laurus::lexical::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use laurus::{DataValue, Document};
 use std::sync::Arc;
@@ -29,17 +27,24 @@ fn collect_matcher_results(mut m: Box<dyn laurus::lexical::query::matcher::Match
     docs
 }
 
+/// A writer registered with a real index (#1024): a standalone
+/// `InvertedIndexWriter` is ephemeral — its segments enter no manifest and
+/// `build_reader` sees nothing — so durable fixtures go through
+/// `InvertedIndex::create` + `writer()`.
+fn index_writer(
+    storage: Arc<dyn laurus::storage::Storage>,
+) -> Box<dyn laurus::lexical::writer::LexicalIndexWriter> {
+    let index =
+        laurus::lexical::index::inverted::InvertedIndex::create(storage, Default::default())
+            .unwrap();
+    use laurus::lexical::index::LexicalIndex;
+    index.writer().unwrap()
+}
+
 #[test]
 fn int64_array_any_value_in_range() {
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let mut writer = InvertedIndexWriter::new(
-        storage.clone(),
-        InvertedIndexWriterConfig {
-            max_buffered_docs: 10,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let mut writer = index_writer(storage.clone());
 
     // Doc 0: scores = [85, 72, 95]  (95 in [80, 100])
     // Doc 1: scores = [60, 65]      (no value in [80, 100])
@@ -106,14 +111,7 @@ fn int64_array_any_value_in_range() {
 #[test]
 fn int64_array_dedups_doc_when_multiple_values_match() {
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let mut writer = InvertedIndexWriter::new(
-        storage.clone(),
-        InvertedIndexWriterConfig {
-            max_buffered_docs: 10,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let mut writer = index_writer(storage.clone());
 
     // Doc 0 has THREE values inside [50, 100]: 60, 80, 90.
     // The doc must be reported only once (Lucene dedup contract).
@@ -144,14 +142,7 @@ fn int64_array_dedups_doc_when_multiple_values_match() {
 #[test]
 fn float64_array_any_value_in_range() {
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let mut writer = InvertedIndexWriter::new(
-        storage.clone(),
-        InvertedIndexWriterConfig {
-            max_buffered_docs: 10,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let mut writer = index_writer(storage.clone());
 
     // Doc 0: prices = [12.5, 99.9, 7.0]  (99.9 in [50.0, 100.0])
     // Doc 1: prices = [200.0, 250.0]     (none in range)
@@ -191,14 +182,7 @@ fn single_valued_field_unchanged_by_multi_valued_changes() {
     // Regression: existing single-valued integer fields must keep their
     // pre-existing behaviour after the multi-value plumbing change.
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let mut writer = InvertedIndexWriter::new(
-        storage.clone(),
-        InvertedIndexWriterConfig {
-            max_buffered_docs: 10,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let mut writer = index_writer(storage.clone());
 
     writer
         .add_document(

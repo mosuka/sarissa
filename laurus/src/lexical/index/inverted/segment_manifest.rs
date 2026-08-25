@@ -247,7 +247,6 @@ mod tests {
             generation,
             has_deletions: false,
             shard_id: 0,
-            committed: true,
         }
     }
 

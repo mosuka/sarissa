@@ -22,12 +22,30 @@ fn doc(title: &str) -> Document {
 
 /// Count discovered segment metadata files (`segment_*` flushed + `merged_*`).
 fn segment_count(storage: &Arc<dyn Storage>) -> usize {
-    storage
-        .list_files()
-        .unwrap()
-        .iter()
-        .filter(|f| (f.starts_with("segment_") || f.starts_with("merged_")) && f.ends_with(".meta"))
-        .count()
+    // Count via the manifest (#1024): `.meta` files are gone, and
+    // `segments.json` is the sole record of the committed segment set.
+    let mut input = storage.open_input("segments.json").unwrap();
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut input, &mut bytes).unwrap();
+    let payload: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => {
+            let mut len: u64 = 0;
+            let mut shift = 0;
+            let mut cursor = 0usize;
+            loop {
+                let byte = bytes[cursor];
+                cursor += 1;
+                len |= u64::from(byte & 0x7F) << shift;
+                if byte & 0x80 == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            serde_json::from_slice(&bytes[cursor..cursor + len as usize]).unwrap()
+        }
+    };
+    payload["segments"].as_array().unwrap().len()
 }
 
 fn hits(store: &LexicalStore, field: &str, term: &str) -> usize {

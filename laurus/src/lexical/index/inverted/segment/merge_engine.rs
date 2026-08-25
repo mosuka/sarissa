@@ -12,9 +12,7 @@ use crate::error::{LaurusError, Result};
 use crate::lexical::core::analyzed::{AnalyzedDocument, AnalyzedTerm};
 use crate::lexical::index::inverted::reader::{InvertedIndexReader, SegmentReader};
 use crate::lexical::index::inverted::segment::SegmentInfo;
-use crate::lexical::index::inverted::segment::manager::{
-    ManagedSegmentInfo, MergeCandidate, MergeStrategy,
-};
+use crate::lexical::index::inverted::segment::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use crate::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use crate::lexical::index::structures::aabb::AABB;
 use crate::lexical::index::structures::visitor::{CellRelation, IntersectVisitor};
@@ -365,10 +363,6 @@ impl MergeEngine {
             generation: 0,        // Will be assigned by segment manager
             has_deletions: false, // New merged segment has no deleted docs until updated
             shard_id: stats.shard_id,
-            // A merge consolidates already-published segments and its
-            // sources are deleted once it lands, so the result is published
-            // immediately (#1017).
-            committed: true,
         };
 
         // Calculate segment size
@@ -641,8 +635,8 @@ impl IntersectVisitor for CollectPointsVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lexical::index::inverted::segment::ManagedSegmentInfo;
     use crate::lexical::index::inverted::segment::SegmentInfo;
-    use crate::lexical::index::inverted::segment::manager::ManagedSegmentInfo;
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;
@@ -759,7 +753,6 @@ mod tests {
             generation: 1,
             has_deletions: false,
             shard_id: 0, // Added shard_id for test segments
-            committed: true,
         };
 
         ManagedSegmentInfo::new(segment_info)
@@ -817,11 +810,25 @@ mod tests {
             .build()
     }
 
-    fn load_segment_info(storage: &Arc<dyn Storage>, seg_id: &str) -> SegmentInfo {
-        let mut input = storage.open_input(&format!("{seg_id}.meta")).unwrap();
-        let mut buf = Vec::new();
-        std::io::Read::read_to_end(&mut input, &mut buf).unwrap();
-        serde_json::from_slice(&buf).unwrap()
+    /// Describe a segment a standalone writer just flushed (#1024: such
+    /// writers register their segments nowhere, so the test provides the
+    /// descriptor the manifest would normally hold).
+    fn segment_info(
+        seg_id: &str,
+        doc_count: u64,
+        min: u64,
+        max: u64,
+        generation: u64,
+    ) -> SegmentInfo {
+        SegmentInfo {
+            segment_id: seg_id.to_string(),
+            doc_count,
+            min_doc_id: min,
+            max_doc_id: max,
+            generation,
+            has_deletions: false,
+            shard_id: 0,
+        }
     }
 
     /// End-to-end correctness of the rewritten merge (Issue #753, closes #556):
@@ -850,8 +857,8 @@ mod tests {
         writer.commit().unwrap(); // segment_000001
         drop(writer);
 
-        let si0 = load_segment_info(&storage, "segment_000000");
-        let si1 = load_segment_info(&storage, "segment_000001");
+        let si0 = segment_info("segment_000000", 2, d0, d1, 0);
+        let si1 = segment_info("segment_000001", 1, d2, d2, 1);
         let candidate = MergeCandidate {
             segments: vec![si0.segment_id.clone(), si1.segment_id.clone()],
             priority: 1.0,

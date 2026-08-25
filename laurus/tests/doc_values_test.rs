@@ -3,10 +3,22 @@
 
 use std::sync::Arc;
 
-use laurus::lexical::LexicalIndexWriter;
-use laurus::lexical::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use laurus::{DataValue, Document};
+
+/// A writer registered with a real index (#1024): a standalone
+/// `InvertedIndexWriter` is ephemeral — its segments enter no manifest and
+/// `build_reader` sees nothing — so durable fixtures go through
+/// `InvertedIndex::create` + `writer()`.
+fn index_writer(
+    storage: Arc<dyn laurus::storage::Storage>,
+) -> Box<dyn laurus::lexical::writer::LexicalIndexWriter> {
+    let index =
+        laurus::lexical::index::inverted::InvertedIndex::create(storage, Default::default())
+            .unwrap();
+    use laurus::lexical::index::LexicalIndex;
+    index.writer().unwrap()
+}
 
 /// #943: `has_doc_values` must answer correctly as the very first
 /// operation on a fresh reader — it used to report `false` until some
@@ -14,8 +26,7 @@ use laurus::{DataValue, Document};
 #[test]
 fn has_doc_values_is_correct_on_a_fresh_reader() {
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let mut writer =
-        InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+    let mut writer = index_writer(storage);
 
     let doc = Document::builder()
         .add_field("popularity", DataValue::Int64(42))

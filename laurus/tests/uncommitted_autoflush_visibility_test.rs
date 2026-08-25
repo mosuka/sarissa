@@ -47,30 +47,34 @@ async fn engine_past_auto_flush() -> laurus::Result<(Engine, Arc<dyn Storage>)> 
         .collect();
     engine.put_documents(docs).await?;
 
-    // The flush must really have happened, or these tests prove nothing:
-    // a segment `.meta` exists even though nothing has been committed.
-    let metas: Vec<String> = storage
+    // The flush must really have happened, or these tests prove nothing.
+    // The evidence is a data file (#1024: `.meta` files no longer exist —
+    // and `.post` was always the more durable signal anyway).
+    let flushed: Vec<String> = storage
         .list_files()?
         .into_iter()
-        .filter(|f| f.contains("segment_") && f.ends_with(".meta"))
+        .filter(|f| f.contains("segment_") && f.ends_with(".post"))
         .collect();
     assert!(
-        !metas.is_empty(),
+        !flushed.is_empty(),
         "automatic flush_segment must fire at max_buffered_docs"
     );
 
-    // And it must be written unpublished (#1017): the segment exists on
-    // storage, but nothing has committed it, so search must not see it. That
-    // is the invariant these NRT tests share a fixture with — they prove
-    // `_id` resolution still works precisely *because* the segment is
-    // invisible to the searcher.
-    for meta in &metas {
-        let mut input = storage.open_input(meta)?;
-        let mut json = String::new();
-        std::io::Read::read_to_string(&mut input, &mut json)?;
+    // And it must be unpublished (#1017): the segment's files exist on
+    // storage, but the manifest — the sole publication record since #1024 —
+    // must not list it, so search must not see it. That is the invariant
+    // these NRT tests share a fixture with — they prove `_id` resolution
+    // still works precisely *because* the segment is invisible to the
+    // searcher.
+    let mut input = storage.open_input("lexical/segments.json")?;
+    let mut manifest = Vec::new();
+    std::io::Read::read_to_end(&mut input, &mut manifest)?;
+    let manifest = String::from_utf8_lossy(&manifest).into_owned();
+    for file in &flushed {
+        let stem = file.split('.').next().unwrap();
         assert!(
-            json.contains("\"committed\": false"),
-            "a flushed-but-uncommitted segment must be unpublished; {meta} says: {json}"
+            !manifest.contains(stem),
+            "a flushed-but-uncommitted segment must be unpublished; the manifest lists {stem}"
         );
     }
 
