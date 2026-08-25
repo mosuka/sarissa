@@ -29,7 +29,7 @@ sequenceDiagram
 1. **WAL-first**: Every write (add or delete) is appended to the WAL before updating in-memory structures
 2. **Buffered writes**: In-memory buffers accumulate changes until `commit()` is called
 3. **Atomic commit**: `commit()` flushes all buffered changes to segment files and truncates the WAL
-4. **Commit-scoped visibility**: a lexical segment is written as soon as the writer's buffer fills, which can happen long before `commit()`, so the segment file existing on storage is not what makes its documents searchable. Each segment's metadata carries a published flag that only `commit()` sets, and segment discovery skips anything unpublished — so "documents become searchable only after `commit()`" holds regardless of when a searcher happens to be built. Deletions are published in the same step, after their bitmaps are durable, so a reader that can see a segment can always filter it
+4. **Commit-scoped visibility**: a lexical segment is written as soon as the writer's buffer fills, which can happen long before `commit()`, so the segment files existing on storage is not what makes its documents searchable. Publication is a manifest entry that only `commit()` adds, and segment discovery reads only the manifest — so "documents become searchable only after `commit()`" holds regardless of when a searcher happens to be built. Deletions are published in the same step, after their bitmaps are durable, so a reader that can see a segment can always filter it
 5. **Crash safety**: If the process crashes between writes and commit, the WAL is replayed on the next startup
 6. **Atomic file writes**: Segment files (e.g. the HNSW `.hnsw` graph, its metadata, and the deletion bitmap) are written to a temporary file and atomically renamed into place, so a crash mid-write leaves the previously committed file intact rather than a truncated one
 7. **Checksum verification**: Those files carry a CRC-32 (a footer on `.hnsw` and the `.hnsw.f32` rerank sidecar, framing on `metadata.json` and the deletion bitmap) that is verified on load, so silent on-disk corruption is detected instead of being read as valid data. Files written before checksums were added still load (the checksum is optional per file). Loaders also bound buffer allocations against the real file size before trusting a header, so a corrupt size field is rejected as corruption rather than triggering a huge out-of-memory allocation
@@ -233,15 +233,19 @@ segment in one manifest write, and a merge drops its sources and inserts the
 merged segment in one write. The in-memory copy mirrors the last
 *successfully persisted* manifest (a failed save leaves the pending state for
 the retry), so reader construction is a pure in-memory read — no directory
-listing, no per-segment metadata parse. Per-segment `.meta` files are still
-written as advisory duplicates during the transition, but discovery never
-reads them, and after a crash in a publication window the manifest — not the
-`.meta` set — is what wins: files the manifest does not list are reclaimed at
-the next open. Two consequences worth knowing: at most **one writing store
-instance per directory** is supported (concurrent instances would overwrite
-each other's manifest), and segments committed through a standalone
-`InvertedIndexWriter` into a directory owned by a manifest-bearing index are
-not registered with the manifest and will be reclaimed.
+listing, no per-segment metadata parse. There are no per-segment `.meta`
+files any more: the manifest is the only record, files it does not list are
+reclaimed at the next open, and an index written before the manifest existed
+is migrated by a one-time read of its legacy `.meta` files when opened.
+Opening an index whose `segments.json` is missing while segment files are
+present is refused loudly rather than served as silently empty. Three
+consequences worth knowing: at most **one writing store instance per
+directory** is supported (concurrent instances would overwrite each other's
+manifest); a standalone `InvertedIndexWriter` is an ephemeral tool — its
+commits register segments nowhere, and such files in a manifest-owned
+directory are reclaimed; and a pre-manifest binary opening a post-manifest
+index finds no `.meta` files and sees it as empty — a one-way format step
+worth a release note.
 
 The commit ladder is:
 

@@ -551,12 +551,6 @@ pub struct DeletionStats {
 
     /// Total memory used by bitmaps (bytes).
     pub bitmap_memory_usage: usize,
-
-    /// Number of deletion operations performed.
-    pub deletion_operations: u64,
-
-    /// Number of compaction operations performed.
-    pub compaction_operations: u64,
 }
 
 /// Global deletion state across all segments.
@@ -573,9 +567,6 @@ pub struct GlobalDeletionState {
 
     /// Segments that need compaction.
     pub compaction_candidates: Vec<String>,
-
-    /// Last compaction timestamp.
-    pub last_compaction: u64,
 
     /// Total space that can be reclaimed (bytes).
     pub reclaimable_space: u64,
@@ -595,23 +586,8 @@ impl GlobalDeletionState {
             total_deleted: 0,
             global_deletion_ratio: 0.0,
             compaction_candidates: Vec::new(),
-            last_compaction: 0,
             reclaimable_space: 0,
         }
-    }
-
-    /// Check if global compaction is needed.
-    pub fn needs_global_compaction(&self, threshold: f64) -> bool {
-        self.global_deletion_ratio > threshold
-    }
-
-    /// Get efficiency metrics.
-    pub fn efficiency_metrics(&self) -> (f64, u64, usize) {
-        (
-            self.global_deletion_ratio,
-            self.reclaimable_space,
-            self.compaction_candidates.len(),
-        )
     }
 }
 
@@ -681,11 +657,6 @@ impl DeletionManager {
         Ok(manager)
     }
 
-    /// Get deletion bitmap for a segment.
-    pub fn get_bitmap(&self, segment_id: &str) -> Option<Arc<DeletionBitmap>> {
-        self.bitmaps.read().unwrap().get(segment_id).cloned()
-    }
-
     /// Initialize deletion tracking for a segment.
     pub fn initialize_segment(
         &self,
@@ -719,18 +690,6 @@ impl DeletionManager {
         self.update_stats();
         let _ = self.update_global_state();
 
-        Ok(())
-    }
-
-    /// Resize a segment's bitmap.
-    ///
-    /// The resized bitmap is persisted by the next [`flush`](Self::flush).
-    pub fn resize_segment(&self, segment_id: &str, new_size: u64) -> Result<()> {
-        let bitmaps = self.bitmaps.read().unwrap();
-        if let Some(bitmap) = bitmaps.get(segment_id) {
-            bitmap.resize(new_size);
-            self.mark_dirty(segment_id);
-        }
         Ok(())
     }
 
@@ -768,108 +727,6 @@ impl DeletionManager {
         }
 
         Ok(was_deleted)
-    }
-
-    /// Delete multiple documents in batch.
-    pub fn delete_documents(&self, segment_id: &str, doc_ids: &[u64], reason: &str) -> Result<u64> {
-        let mut deleted_count = 0;
-
-        // Process in batches (read lock is sufficient with atomic bitmap)
-        for chunk in doc_ids.chunks(self.config.deletion_batch_size) {
-            {
-                let bitmaps = self.bitmaps.read().unwrap();
-
-                if let Some(bitmap) = bitmaps.get(segment_id) {
-                    for &doc_id in chunk {
-                        if bitmap.delete_document(doc_id)? {
-                            deleted_count += 1;
-                        }
-                    }
-                } else {
-                    return Err(LaurusError::index(format!(
-                        "Segment {segment_id} not found in deletion manager"
-                    )));
-                }
-            }
-
-            // Log deletions
-            if let Some(ref log) = self.deletion_log {
-                for &doc_id in chunk {
-                    log.log_deletion(segment_id, doc_id, reason)?;
-                }
-            }
-        }
-
-        if deleted_count > 0 {
-            self.mark_dirty(segment_id);
-            self.update_stats();
-            let _ = self.update_global_state();
-        }
-
-        Ok(deleted_count)
-    }
-
-    /// Check if a document is deleted.
-    pub fn is_deleted(&self, segment_id: &str, doc_id: u64) -> bool {
-        let bitmaps = self.bitmaps.read().unwrap();
-
-        if let Some(bitmap) = bitmaps.get(segment_id) {
-            bitmap.is_deleted(doc_id)
-        } else {
-            false
-        }
-    }
-
-    /// Get deletion ratio for a segment.
-    pub fn get_deletion_ratio(&self, segment_id: &str) -> f64 {
-        let bitmaps = self.bitmaps.read().unwrap();
-
-        if let Some(bitmap) = bitmaps.get(segment_id) {
-            bitmap.deletion_ratio()
-        } else {
-            0.0
-        }
-    }
-
-    /// Get segments that need compaction.
-    pub fn get_compaction_candidates(&self) -> Vec<String> {
-        let bitmaps = self.bitmaps.read().unwrap();
-
-        bitmaps
-            .values()
-            .filter(|bitmap| bitmap.needs_compaction(self.config.compaction_threshold))
-            .map(|bitmap| bitmap.segment_id.clone())
-            .collect()
-    }
-
-    /// Get deleted document IDs for a segment.
-    pub fn get_deleted_docs(&self, segment_id: &str) -> Vec<u64> {
-        let bitmaps = self.bitmaps.read().unwrap();
-
-        if let Some(bitmap) = bitmaps.get(segment_id) {
-            bitmap.get_deleted_docs()
-        } else {
-            Vec::new()
-        }
-    }
-
-    /// Remove tracking for a segment (after merge/deletion).
-    pub fn remove_segment(&self, segment_id: &str) -> Result<()> {
-        {
-            let mut bitmaps = self.bitmaps.write().unwrap();
-            bitmaps.remove(segment_id);
-        }
-        // Drop any pending dirty mark so a later `flush` cannot resurrect the
-        // `.delmap` file of a segment that no longer exists (Issue #875).
-        self.dirty_segments.write().unwrap().remove(segment_id);
-
-        // Delete bitmap file
-        let bitmap_file = format!("{segment_id}.delmap");
-        let _ = self.storage.delete_file(&bitmap_file);
-
-        self.update_stats();
-        let _ = self.update_global_state();
-        Ok(())
     }
 
     /// Record that a segment's in-memory bitmap diverged from its `.delmap`
@@ -920,14 +777,6 @@ impl DeletionManager {
             flushed.push(segment_id.clone());
         }
         Ok(flushed)
-    }
-
-    /// Check whether any segment has unpersisted deletion state.
-    ///
-    /// Returns `true` when at least one mutation since the last
-    /// [`flush`](Self::flush) is still buffered in memory.
-    pub fn has_dirty_segments(&self) -> bool {
-        !self.dirty_segments.read().unwrap().is_empty()
     }
 
     /// Save bitmap to storage.
@@ -993,28 +842,6 @@ impl DeletionManager {
         stats.bitmap_memory_usage = bitmaps.values().map(|b| b.memory_usage()).sum();
     }
 
-    /// Get current statistics.
-    pub fn get_stats(&self) -> DeletionStats {
-        self.stats.read().unwrap().clone()
-    }
-
-    /// Get configuration.
-    pub fn get_config(&self) -> &DeletionConfig {
-        &self.config
-    }
-
-    /// Get global deletion state.
-    pub fn get_global_state(&self) -> GlobalDeletionState {
-        self.global_state.read().unwrap().clone()
-    }
-
-    /// Restore global deletion state (used for transaction rollback).
-    pub fn restore_global_state(&self, state: GlobalDeletionState) -> Result<()> {
-        let mut global_state = self.global_state.write().unwrap();
-        *global_state = state;
-        Ok(())
-    }
-
     /// Update global deletion state based on current segment states.
     pub fn update_global_state(&self) -> Result<()> {
         let bitmaps = self.bitmaps.read().unwrap();
@@ -1059,155 +886,6 @@ impl DeletionManager {
             .sum();
 
         Ok(())
-    }
-
-    /// Check if automatic compaction should be triggered.
-    pub fn should_trigger_auto_compaction(&self) -> bool {
-        if !self.config.auto_compaction {
-            return false;
-        }
-
-        let global_state = self.global_state.read().unwrap();
-        let current_time = crate::util::time::now_secs();
-
-        // Check if enough time has passed since last compaction
-        let time_threshold = global_state.last_compaction + self.config.compaction_interval_secs;
-        let time_to_compact = current_time >= time_threshold;
-
-        // Check if deletion ratio exceeds threshold
-        let ratio_threshold =
-            global_state.needs_global_compaction(self.config.compaction_threshold);
-
-        // Check if we have candidates
-        let has_candidates = !global_state.compaction_candidates.is_empty();
-
-        time_to_compact && ratio_threshold && has_candidates
-    }
-
-    /// Mark compaction as completed.
-    pub fn mark_compaction_completed(&self, segments_compacted: &[String]) -> Result<()> {
-        // Remove compacted segments from tracking
-        for segment_id in segments_compacted {
-            self.remove_segment(segment_id)?;
-        }
-
-        // Update global state
-        let mut global_state = self.global_state.write().unwrap();
-        global_state.last_compaction = crate::util::time::now_secs();
-
-        // Update statistics
-        let mut stats = self.stats.write().unwrap();
-        stats.compaction_operations += 1;
-
-        // Refresh global state
-        drop(global_state);
-        self.update_global_state()?;
-
-        Ok(())
-    }
-
-    /// Get comprehensive deletion report.
-    pub fn get_deletion_report(&self) -> DeletionReport {
-        let stats = self.stats.read().unwrap();
-        let global_state = self.global_state.read().unwrap();
-        let bitmaps = self.bitmaps.read().unwrap();
-
-        let segment_reports: Vec<SegmentDeletionReport> = bitmaps
-            .values()
-            .map(|bitmap| SegmentDeletionReport {
-                segment_id: bitmap.segment_id.clone(),
-                total_docs: bitmap.total_docs.load(Ordering::SeqCst),
-                deleted_docs: bitmap.deleted_count.load(Ordering::SeqCst),
-                deletion_ratio: bitmap.deletion_ratio(),
-                needs_compaction: bitmap.needs_compaction(self.config.compaction_threshold),
-                memory_usage: bitmap.memory_usage(),
-                last_modified: bitmap.last_modified.load(Ordering::SeqCst),
-            })
-            .collect();
-
-        DeletionReport {
-            global_state: global_state.clone(),
-            deletion_stats: stats.clone(),
-            segment_reports,
-            auto_compaction_enabled: self.config.auto_compaction,
-            next_compaction_due: global_state.last_compaction
-                + self.config.compaction_interval_secs,
-        }
-    }
-}
-
-/// Report about segment deletion status.
-#[derive(Debug, Clone)]
-pub struct SegmentDeletionReport {
-    /// Segment identifier.
-    pub segment_id: String,
-
-    /// Total documents in segment.
-    pub total_docs: u64,
-
-    /// Deleted documents in segment.
-    pub deleted_docs: u64,
-
-    /// Deletion ratio.
-    pub deletion_ratio: f64,
-
-    /// Whether this segment needs compaction.
-    pub needs_compaction: bool,
-
-    /// Memory usage of deletion bitmap.
-    pub memory_usage: usize,
-
-    /// Last modification timestamp.
-    pub last_modified: u64,
-}
-
-/// Comprehensive deletion report.
-#[derive(Debug, Clone)]
-pub struct DeletionReport {
-    /// Global deletion state.
-    pub global_state: GlobalDeletionState,
-
-    /// Overall deletion statistics.
-    pub deletion_stats: DeletionStats,
-
-    /// Per-segment deletion reports.
-    pub segment_reports: Vec<SegmentDeletionReport>,
-
-    /// Whether auto-compaction is enabled.
-    pub auto_compaction_enabled: bool,
-
-    /// Timestamp when next compaction is due.
-    pub next_compaction_due: u64,
-}
-
-impl DeletionReport {
-    /// Get summary metrics.
-    pub fn summary(&self) -> (f64, usize, u64, bool) {
-        (
-            self.global_state.global_deletion_ratio,
-            self.global_state.compaction_candidates.len(),
-            self.global_state.reclaimable_space,
-            self.global_state.needs_global_compaction(0.3), // Default threshold
-        )
-    }
-
-    /// Get segments by compaction urgency.
-    pub fn segments_by_urgency(&self) -> (Vec<String>, Vec<String>, Vec<String>) {
-        let mut urgent = Vec::new();
-        let mut moderate = Vec::new();
-        let mut low = Vec::new();
-
-        for report in &self.segment_reports {
-            if report.deletion_ratio > 0.5 {
-                urgent.push(report.segment_id.clone());
-            } else if report.deletion_ratio > 0.3 {
-                moderate.push(report.segment_id.clone());
-            } else if report.deletion_ratio > 0.1 {
-                low.push(report.segment_id.clone());
-            }
-        }
-
-        (urgent, moderate, low)
     }
 }
 
@@ -1338,288 +1016,28 @@ mod tests {
         assert!(!loaded.is_deleted(223));
     }
 
-    #[test]
-    fn test_deletion_manager_creation() {
-        let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-
-        let manager = DeletionManager::new(config, storage).unwrap();
-
-        let stats = manager.get_stats();
-        assert_eq!(stats.segments_tracked, 0);
-        assert_eq!(stats.total_docs, 0);
-    }
-
-    #[test]
-    fn test_deletion_manager_operations() {
-        let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = DeletionManager::new(config, storage).unwrap();
-
-        // Initialize segment
-        manager.initialize_segment("seg001", 0, 999).unwrap();
-
-        // Delete documents
-        assert!(
-            manager
-                .delete_document("seg001", 100, "test deletion")
-                .unwrap()
-        );
-        assert!(
-            manager
-                .delete_document("seg001", 200, "test deletion")
-                .unwrap()
-        );
-
-        // Check deletion status
-        assert!(manager.is_deleted("seg001", 100));
-        assert!(manager.is_deleted("seg001", 200));
-        assert!(!manager.is_deleted("seg001", 300));
-
-        // Check deletion ratio
-        let ratio = manager.get_deletion_ratio("seg001");
-        assert_eq!(ratio, 0.002); // 2/1000
-
-        let stats = manager.get_stats();
-        assert_eq!(stats.segments_tracked, 1);
-        assert_eq!(stats.total_deleted, 2);
-    }
-
     /// Deferred persistence (Issue #875): mutations must not write the
-    /// `.delmap` file; `flush` persists every dirty segment once and is
-    /// idempotent.
+    /// `.delmap` file; `flush` persists every dirty segment and is
+    /// idempotent. Rewritten on the live mutation API after #1024 removed
+    /// the speculative `DeletionManager` surface.
     #[test]
-    fn test_flush_persists_dirty_bitmaps_once() {
-        let config = DeletionConfig {
-            enable_deletion_log: false,
-            ..Default::default()
-        };
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = DeletionManager::new(config, storage.clone()).unwrap();
-
+    fn flush_persists_dirty_bitmaps_deferred() {
+        let storage: Arc<dyn crate::storage::Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let manager = DeletionManager::new(DeletionConfig::default(), storage.clone()).unwrap();
         manager.initialize_segment("seg001", 0, 999).unwrap();
-        manager.delete_document("seg001", 100, "test").unwrap();
-        manager.delete_document("seg001", 200, "test").unwrap();
+        manager.delete_document("seg001", 5, "test").unwrap();
 
-        // Nothing persisted yet — deletions are buffered in memory.
-        assert!(!storage.file_exists("seg001.delmap"));
-        assert!(manager.has_dirty_segments());
-
-        // One flush persists the segment's bitmap.
-        let flushed = manager.flush().unwrap();
-        assert_eq!(flushed, vec!["seg001".to_string()]);
-        assert!(storage.file_exists("seg001.delmap"));
-        assert!(!manager.has_dirty_segments());
-
-        // Idempotent: a second flush without mutations writes nothing.
-        assert!(manager.flush().unwrap().is_empty());
-
-        // The persisted bitmap round-trips into a fresh manager.
-        let reloaded = DeletionManager::new(
-            DeletionConfig {
-                enable_deletion_log: false,
-                ..Default::default()
-            },
-            storage,
-        )
-        .unwrap();
-        assert!(reloaded.is_deleted("seg001", 100));
-        assert!(reloaded.is_deleted("seg001", 200));
-        assert!(!reloaded.is_deleted("seg001", 300));
-    }
-
-    /// `remove_segment` must drop the segment's dirty mark so a later `flush`
-    /// cannot resurrect the `.delmap` of a merged-away segment (Issue #875).
-    #[test]
-    fn test_remove_segment_drops_dirty_mark() {
-        let config = DeletionConfig {
-            enable_deletion_log: false,
-            ..Default::default()
-        };
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = DeletionManager::new(config, storage.clone()).unwrap();
-
-        manager.initialize_segment("seg001", 0, 999).unwrap();
-        manager.delete_document("seg001", 100, "test").unwrap();
-        assert!(manager.has_dirty_segments());
-
-        manager.remove_segment("seg001").unwrap();
-
-        assert!(!manager.has_dirty_segments());
-        assert!(manager.flush().unwrap().is_empty());
-        assert!(!storage.file_exists("seg001.delmap"));
-    }
-
-    #[test]
-    fn test_batch_deletion() {
-        let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = DeletionManager::new(config, storage).unwrap();
-
-        manager.initialize_segment("seg001", 0, 19).unwrap(); // Reduced from 1000 to 20
-
-        let doc_ids = vec![1, 2, 3, 4, 5]; // 5 docs out of 20
-        let deleted_count = manager
-            .delete_documents("seg001", &doc_ids, "batch deletion")
-            .unwrap();
-
-        assert_eq!(deleted_count, 5);
-
-        for &doc_id in &doc_ids {
-            assert!(manager.is_deleted("seg001", doc_id));
-        }
-
-        let ratio = manager.get_deletion_ratio("seg001");
-        assert_eq!(ratio, 0.25); // 5/20 = 0.25
-    }
-
-    #[test]
-    fn test_compaction_candidates() {
-        let config = DeletionConfig {
-            compaction_threshold: 0.1, // 10%
-            ..Default::default()
-        };
-
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = DeletionManager::new(config, storage).unwrap();
-
-        // Initialize segments (reduced sizes)
-        manager.initialize_segment("seg001", 0, 9).unwrap(); // Reduced from 1000 to 10
-        manager.initialize_segment("seg002", 0, 9).unwrap(); // Reduced from 1000 to 10
-
-        // Delete enough docs in seg001 to trigger compaction
-        let doc_ids: Vec<u64> = vec![0, 1]; // 20% deletion (2/10)
-        manager
-            .delete_documents("seg001", &doc_ids, "test")
-            .unwrap();
-
-        // Delete fewer docs in seg002
-        manager.delete_documents("seg002", &[0], "test").unwrap(); // 10% deletion (1/10)
-
-        let candidates = manager.get_compaction_candidates();
-        assert_eq!(candidates.len(), 1); // Only seg001 should be candidate (20% > 10% threshold)
-        assert!(candidates.contains(&"seg001".to_string()));
-    }
-
-    #[test]
-    fn test_global_deletion_state() {
-        let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = DeletionManager::new(config, storage).unwrap();
-
-        // Initialize multiple segments (reduced sizes)
-        manager.initialize_segment("seg001", 0, 9).unwrap(); // Reduced from 1000 to 10
-        manager.initialize_segment("seg002", 0, 19).unwrap(); // Reduced from 2000 to 20
-
-        // Delete documents in different segments
-        let doc_ids1: Vec<u64> = (0..4).collect(); // 40% deletion (4/10)
-        manager
-            .delete_documents("seg001", &doc_ids1, "test")
-            .unwrap();
-
-        let doc_ids2: Vec<u64> = (0..2).collect(); // 10% deletion (2/20)
-        manager
-            .delete_documents("seg002", &doc_ids2, "test")
-            .unwrap();
-
-        // Get global state
-        let global_state = manager.get_global_state();
-
-        assert_eq!(global_state.total_documents, 30); // 10 + 20
-        assert_eq!(global_state.total_deleted, 6); // 4 + 2
-        assert!((global_state.global_deletion_ratio - 0.2).abs() < 0.001); // 6/30 = 0.2
-        assert!(!global_state.compaction_candidates.is_empty());
         assert!(
-            global_state
-                .compaction_candidates
-                .contains(&"seg001".to_string())
+            !storage.file_exists("seg001.delmap"),
+            "mutations must not write the .delmap before flush (#875)"
         );
-    }
-
-    #[test]
-    fn test_deletion_report() {
-        let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = DeletionManager::new(config, storage).unwrap();
-
-        // Initialize segments and add deletions (reduced sizes)
-        manager.initialize_segment("seg001", 0, 9).unwrap(); // Reduced from 1000 to 10
-        manager.initialize_segment("seg002", 0, 19).unwrap(); // Reduced from 2000 to 20
-
-        let doc_ids: Vec<u64> = (0..4).collect(); // 40% deletion in seg001 (4/10)
-        manager
-            .delete_documents("seg001", &doc_ids, "test")
-            .unwrap();
-
-        // Get comprehensive deletion report
-        let report = manager.get_deletion_report();
-
-        assert_eq!(report.segment_reports.len(), 2);
-        assert_eq!(report.global_state.total_documents, 30); // 10 + 20
-        assert_eq!(report.global_state.total_deleted, 4);
-        assert!(report.auto_compaction_enabled);
-
-        // Test urgency classification
-        let (urgent, moderate, low) = report.segments_by_urgency();
-        assert_eq!(urgent.len(), 0); // seg001 has 40% deletion (moderate)
-        assert_eq!(moderate.len(), 1); // seg001 falls into moderate category (30-50%)
-        assert_eq!(low.len(), 0);
-
-        // Test summary
-        let (ratio, candidates, _space, needs_compaction) = report.summary();
-        assert!((ratio - 0.133333).abs() < 0.001); // 4/30 ≈ 0.133
-        assert_eq!(candidates, 1);
-        // Note: space may be 0 if deletion ratio is below compaction threshold
-        // space is u64, so >= 0 check is redundant
-        assert!(!needs_compaction); // Below 30% threshold
-    }
-
-    #[test]
-    fn test_auto_compaction_trigger() {
-        let config = DeletionConfig {
-            auto_compaction: true,
-            compaction_threshold: 0.2,   // 20% threshold
-            compaction_interval_secs: 1, // 1 second interval
-            ..Default::default()
-        };
-
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = DeletionManager::new(config, storage).unwrap();
-
-        // Initialize segment and delete enough to trigger compaction
-        manager.initialize_segment("seg001", 0, 99).unwrap();
-        let doc_ids: Vec<u64> = (0..25).collect(); // 25% deletion
-        manager
-            .delete_documents("seg001", &doc_ids, "test")
-            .unwrap();
-
-        // Should trigger auto compaction after interval
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        assert!(manager.should_trigger_auto_compaction());
-    }
-
-    #[test]
-    fn test_mark_compaction_completed() {
-        let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let manager = DeletionManager::new(config, storage).unwrap();
-
-        // Initialize segments
-        manager.initialize_segment("seg001", 0, 999).unwrap();
-        manager.initialize_segment("seg002", 0, 1999).unwrap();
-
-        // Mark compaction as completed for seg001
-        let compacted_segments = vec!["seg001".to_string()];
-        manager
-            .mark_compaction_completed(&compacted_segments)
-            .unwrap();
-
-        // seg001 should be removed from tracking
-        let global_state = manager.get_global_state();
-        assert_eq!(global_state.total_documents, 2000); // Only seg002 remains
-
-        // Compaction stats should be updated
-        let stats = manager.get_stats();
-        assert_eq!(stats.compaction_operations, 1);
+        manager.flush().unwrap();
+        assert!(
+            storage.file_exists("seg001.delmap"),
+            "flush must persist the dirty bitmap"
+        );
+        // Idempotent: a second flush finds nothing dirty and succeeds.
+        manager.flush().unwrap();
     }
 }

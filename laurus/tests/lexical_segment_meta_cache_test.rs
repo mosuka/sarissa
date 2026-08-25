@@ -2,12 +2,13 @@
 //! cached `DeletionManager` (Issue #864, closing #559 / #571).
 //!
 //! Before the fix, every upsert ran `find_segments_for_doc`, which listed the
-//! storage and JSON-parsed **every** `*.meta` file, and every overwrite of a
+//! storage and JSON-parsed every segment descriptor, and every overwrite of a
 //! committed document constructed a fresh `DeletionManager` (reloading every
-//! `.delmap` bitmap). The cache mirrors the `.meta` ranges in memory: it is
-//! seeded by the constructor's existing recovery scan, extended on flush, and
-//! rebuilt by `invalidate_segment_cache` after `LexicalStore::optimize`'s
-//! force-merge — the only path that rewrites segments behind a live writer.
+//! `.delmap` bitmap). Since #1024 the cache is seeded from the index's shared
+//! manifest — zero storage I/O at writer construction — extended on flush,
+//! and rebuilt (from memory) by `invalidate_segment_cache` after
+//! `LexicalStore::optimize`'s force-merge — the only path that rewrites
+//! segments behind a live writer.
 //!
 //! The primary gate is deterministic: a `CountingStorage` decorator counts
 //! `list_files` calls, so the tests assert exact I/O counts instead of timing.
@@ -103,44 +104,55 @@ fn doc(title: &str) -> Document {
     Document::builder().add_text("title", title).build()
 }
 
-/// Write one committed segment holding `ids` onto `storage`.
-fn seed_committed_segment(storage: &Arc<dyn Storage>, ids: &[u64]) {
-    let mut writer =
-        InvertedIndexWriter::new(storage.clone(), InvertedIndexWriterConfig::default()).unwrap();
+/// Create an index and commit one segment holding `ids` (#1024: durable
+/// segments exist only through an index — a standalone writer registers
+/// its segments nowhere).
+fn seeded_index(
+    storage: &Arc<dyn Storage>,
+    ids: &[u64],
+) -> laurus::lexical::index::inverted::InvertedIndex {
+    use laurus::lexical::index::LexicalIndex;
+    let index = laurus::lexical::index::inverted::InvertedIndex::create(
+        storage.clone(),
+        Default::default(),
+    )
+    .unwrap();
+    let mut writer = index.writer().unwrap();
     for &id in ids {
         writer
             .upsert_document(id, doc(&format!("seed{id}")))
             .unwrap();
     }
     writer.commit().unwrap();
+    index
 }
 
 /// #559: fresh-id upserts must not rescan segment metadata — the constructor's
 /// single recovery scan is the only `list_files` a pure-ingest writer pays.
 #[test]
 fn fresh_id_upserts_never_rescan_meta_files() {
+    use laurus::lexical::index::LexicalIndex;
     let counting = Arc::new(CountingStorage::new());
     let storage: Arc<dyn Storage> = counting.clone();
-    seed_committed_segment(&storage, &[1, 2, 3]);
+    let index = seeded_index(&storage, &[1, 2, 3]);
 
     let before_construction = counting.list_files_count();
-    let mut writer =
-        InvertedIndexWriter::new(storage.clone(), InvertedIndexWriterConfig::default()).unwrap();
+    let mut writer = index.writer().unwrap();
     assert_eq!(
         counting.list_files_count(),
-        before_construction + 1,
-        "the constructor performs exactly one recovery scan"
+        before_construction,
+        "the constructor performs NO storage I/O (#1024: seeded from the \
+         shared manifest; the old recovery scan paid one list + N parses)"
     );
 
-    let after_construction = counting.list_files_count();
     for id in 10..60u64 {
         writer.upsert_document(id, doc(&format!("t{id}"))).unwrap();
     }
     assert_eq!(
         counting.list_files_count(),
-        after_construction,
+        before_construction,
         "50 fresh-id upserts must not list the storage at all \
-         (pre-#864 behavior: one full .meta list+parse per upsert)"
+         (pre-#864 behavior: one full metadata list+parse per upsert)"
     );
 }
 
@@ -151,12 +163,12 @@ fn fresh_id_upserts_never_rescan_meta_files() {
 /// exists).
 #[test]
 fn overwrite_committed_docs_reuses_cache_and_manager() {
+    use laurus::lexical::index::LexicalIndex;
     let counting = Arc::new(CountingStorage::new());
     let storage: Arc<dyn Storage> = counting.clone();
-    seed_committed_segment(&storage, &[1, 2, 3]);
+    let index = seeded_index(&storage, &[1, 2, 3]);
 
-    let mut writer =
-        InvertedIndexWriter::new(storage.clone(), InvertedIndexWriterConfig::default()).unwrap();
+    let mut writer = index.writer().unwrap();
     let after_construction = counting.list_files_count();
 
     // First overwrite: the lazily created DeletionManager loads existing
@@ -313,31 +325,31 @@ fn optimize_rebuilds_live_writer_cache() {
     );
 }
 
-/// #864 review follow-up: `invalidate_segment_cache` must be atomic — when
-/// the rebuild scan fails, the OLD (still-valid) cache must survive intact.
-/// A clear-then-fail implementation would leave the writer with an empty
-/// cache and `max_committed_doc_id == 0`, silently skipping every subsequent
-/// overwrite's deletion via the fast path.
+/// #864 review follow-up, restated for #1024: `invalidate_segment_cache`
+/// on an index-owned writer rebuilds from the shared manifest — it must
+/// not touch storage at all, so a storage that cannot even list files
+/// still leaves the writer with a correct cache. (The old hazard — a
+/// clear-then-fail rebuild emptying the cache and silently skipping
+/// every overwrite's deletion — is gone by construction.)
 #[test]
-fn invalidate_failure_preserves_old_cache() {
+fn invalidate_rebuilds_from_memory_without_storage() {
+    use laurus::lexical::index::LexicalIndex;
     let counting = Arc::new(CountingStorage::new());
     let storage: Arc<dyn Storage> = counting.clone();
-    seed_committed_segment(&storage, &[1, 2, 3]);
+    let index = seeded_index(&storage, &[1, 2, 3]);
 
-    let mut writer =
-        InvertedIndexWriter::new(storage.clone(), InvertedIndexWriterConfig::default()).unwrap();
+    let mut writer = index.writer().unwrap();
 
-    // Rebuild fails: the error must propagate...
+    // Even with list_files failing, the memory rebuild succeeds...
     counting.set_fail_list_files(true);
     writer
         .invalidate_segment_cache()
-        .expect_err("the injected list_files failure must propagate");
+        .expect("the memory rebuild must not touch storage");
     counting.set_fail_list_files(false);
 
-    // ...but the previous cache must still be in force: the segments were
-    // not actually replaced (no merge ran), so an overwrite must still
-    // resolve the seeded segment and mark its deletion (persisted by the
-    // deferred flush, #875).
+    // ...and the rebuilt cache still resolves the seeded segment: the
+    // overwrite marks its deletion (persisted by the deferred flush,
+    // #875).
     writer.upsert_document(1, doc("one-v2")).unwrap();
     writer.flush_deletions().unwrap();
     let delmaps: Vec<String> = storage
@@ -349,7 +361,6 @@ fn invalidate_failure_preserves_old_cache() {
     assert_eq!(
         delmaps.len(),
         1,
-        "the overwrite must still mark the deletion from the preserved \
-         cache — an emptied cache would have skipped it silently: {delmaps:?}"
+        "the overwrite must mark the deletion from the rebuilt cache: {delmaps:?}"
     );
 }

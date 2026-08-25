@@ -2461,17 +2461,15 @@ mod tests {
     /// no `.post` file.
     #[test]
     fn postings_never_yields_a_deleted_document() {
-        use crate::lexical::index::inverted::writer::{
-            InvertedIndexWriter, InvertedIndexWriterConfig,
-        };
-        use crate::lexical::writer::LexicalIndexWriter;
+        use crate::lexical::index::LexicalIndex;
+        use crate::lexical::index::inverted::{InvertedIndex, InvertedIndexConfig};
         use crate::maintenance::deletion::{DeletionConfig, DeletionManager};
         use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
 
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let mut writer =
-            InvertedIndexWriter::new(storage.clone(), InvertedIndexWriterConfig::default())
-                .unwrap();
+        let storage: Arc<dyn crate::storage::Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let index = InvertedIndex::create(storage.clone(), InvertedIndexConfig::default()).unwrap();
+        let mut writer = index.writer().unwrap();
 
         let doc_count = 60u64;
         for _ in 0..doc_count {
@@ -2556,15 +2554,14 @@ mod tests {
     /// this wiring.
     #[test]
     fn segment_reader_decodes_postings_written_by_the_writer() {
-        use crate::lexical::index::inverted::writer::{
-            InvertedIndexWriter, InvertedIndexWriterConfig,
-        };
-        use crate::lexical::writer::LexicalIndexWriter;
+        use crate::lexical::index::LexicalIndex;
+        use crate::lexical::index::inverted::{InvertedIndex, InvertedIndexConfig};
         use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
 
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let mut writer =
-            InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+        let storage: Arc<dyn crate::storage::Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let index = InvertedIndex::create(storage, InvertedIndexConfig::default()).unwrap();
+        let mut writer = index.writer().unwrap();
 
         // Enough documents to push the term past the bit-packed block
         // boundary, so the decode exercises full blocks plus a tail.
@@ -2962,7 +2959,6 @@ mod tests {
             generation: 1,
             has_deletions: false,
             shard_id: 0,
-            committed: true,
         };
 
         assert_eq!(info.segment_id, "seg_000001");

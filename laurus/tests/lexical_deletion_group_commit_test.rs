@@ -19,13 +19,21 @@
 //! - WAL recovery auto-commits, so replayed deletions are searchable on a
 //!   freshly reopened engine without a manual commit.
 
-use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use laurus::Document;
 use laurus::lexical::{LexicalIndexConfig, LexicalSearchRequest, LexicalStore, TermQuery};
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use laurus::storage::{FileMetadata, Storage, StorageInput, StorageOutput};
+
+/// The manifest as lossy text (it is framed: varint + JSON + CRC, so a
+/// strict UTF-8 read fails on the trailer).
+fn read_manifest_text(storage: &Arc<dyn Storage>) -> String {
+    let mut input = storage.open_input("segments.json").unwrap();
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut input, &mut bytes).unwrap();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
 
 fn doc(title: &str) -> Document {
     Document::builder()
@@ -41,14 +49,6 @@ fn hits(store: &LexicalStore, term: &str) -> usize {
         .unwrap()
         .hits
         .len()
-}
-
-/// Read a storage file into a string (test helper for `.meta` inspection).
-fn read_file(storage: &Arc<dyn Storage>, name: &str) -> String {
-    let mut input = storage.open_input(name).unwrap();
-    let mut content = String::new();
-    input.read_to_string(&mut content).unwrap();
-    content
 }
 
 fn delmap_files(storage: &Arc<dyn Storage>) -> Vec<String> {
@@ -77,19 +77,16 @@ fn deletions_persist_only_at_commit() {
     // Existing-id upsert -> delete-first marks the committed version deleted.
     store.upsert_document(1, doc("beta")).unwrap();
 
-    // Deferred: nothing persisted yet, meta flag untouched.
+    // Deferred: nothing persisted yet, manifest flag untouched (#1024:
+    // the flag lives in `segments.json` — `.meta` files are gone).
     assert!(
         delmap_files(&storage).is_empty(),
         "deletion bitmap must stay buffered until commit (#875)"
     );
-    for file in storage.list_files().unwrap() {
-        if file.ends_with(".meta") && file != "index.meta" {
-            assert!(
-                read_file(&storage, &file).contains("\"has_deletions\": false"),
-                "{file}: has_deletions must not flip before commit (#875)"
-            );
-        }
-    }
+    assert!(
+        !read_manifest_text(&storage).contains("\"has_deletions\":true"),
+        "has_deletions must not flip before commit (#875)"
+    );
 
     store.commit().unwrap();
 
@@ -99,13 +96,7 @@ fn deletions_persist_only_at_commit() {
         "commit must persist the deletion bitmap"
     );
     assert!(
-        storage
-            .list_files()
-            .unwrap()
-            .iter()
-            .any(|f| f.ends_with(".meta")
-                && f != "index.meta"
-                && read_file(&storage, f).contains("\"has_deletions\": true")),
+        read_manifest_text(&storage).contains("\"has_deletions\":true"),
         "commit must flip has_deletions on the affected segment"
     );
     assert_eq!(hits(&store, "beta"), 1);
