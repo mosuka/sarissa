@@ -197,8 +197,16 @@ fn merge_of_compound_sources_preserves_points() {
 fn loose_and_compound_segments_coexist() {
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-    // Segment 1: loose layout (the pre-#554 default).
-    let index = InvertedIndex::create(storage.clone(), InvertedIndexConfig::default()).unwrap();
+    // Segment 1: loose layout, explicitly — the default flipped to
+    // compound, so "loose" must now be asked for.
+    let index = InvertedIndex::create(
+        storage.clone(),
+        InvertedIndexConfig {
+            use_compound: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let mut writer = index.writer().unwrap();
     writer.upsert_document(1, doc("alpha loose", 1)).unwrap();
     writer.commit().unwrap();
@@ -265,4 +273,170 @@ fn deletion_on_a_compound_segment_is_applied() {
             .any(|f| f.ends_with(".delmap")),
         "the deletion bitmap stays a loose file next to the container"
     );
+}
+
+// ---------------------------------------------------------------------------
+// PR B — the deterministic I/O gate.
+// ---------------------------------------------------------------------------
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Counts creates matching the flushed segment's prefix and
+/// `flush_and_sync` calls on its outputs.
+#[derive(Debug)]
+struct CountingStorage {
+    inner: MemoryStorage,
+    segment_creates: AtomicUsize,
+    segment_syncs: Arc<AtomicUsize>,
+}
+
+impl CountingStorage {
+    fn new() -> Self {
+        Self {
+            inner: MemoryStorage::new(MemoryStorageConfig::default()),
+            segment_creates: AtomicUsize::new(0),
+            segment_syncs: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+/// Output decorator counting `flush_and_sync` calls.
+#[derive(Debug)]
+struct CountingOutput {
+    inner: Box<dyn laurus::storage::StorageOutput>,
+    syncs: Arc<AtomicUsize>,
+}
+
+impl std::io::Write for CountingOutput {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.inner.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl std::io::Seek for CountingOutput {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+impl laurus::storage::StorageOutput for CountingOutput {
+    fn flush_and_sync(&mut self) -> laurus::Result<()> {
+        self.syncs.fetch_add(1, Ordering::SeqCst);
+        self.inner.flush_and_sync()
+    }
+    fn position(&self) -> laurus::Result<u64> {
+        self.inner.position()
+    }
+    fn close(&mut self) -> laurus::Result<()> {
+        self.inner.close()
+    }
+}
+
+impl Storage for CountingStorage {
+    fn open_input(&self, name: &str) -> laurus::Result<Box<dyn laurus::storage::StorageInput>> {
+        self.inner.open_input(name)
+    }
+    fn create_output(&self, name: &str) -> laurus::Result<Box<dyn laurus::storage::StorageOutput>> {
+        if name.starts_with("segment_") || name.starts_with("merged_") {
+            self.segment_creates.fetch_add(1, Ordering::SeqCst);
+            let inner = self.inner.create_output(name)?;
+            return Ok(Box::new(CountingOutput {
+                inner,
+                syncs: Arc::clone(&self.segment_syncs),
+            }));
+        }
+        self.inner.create_output(name)
+    }
+    fn create_output_append(
+        &self,
+        name: &str,
+    ) -> laurus::Result<Box<dyn laurus::storage::StorageOutput>> {
+        self.inner.create_output_append(name)
+    }
+    fn file_exists(&self, name: &str) -> bool {
+        self.inner.file_exists(name)
+    }
+    fn delete_file(&self, name: &str) -> laurus::Result<()> {
+        self.inner.delete_file(name)
+    }
+    fn rename_file(&self, a: &str, b: &str) -> laurus::Result<()> {
+        self.inner.rename_file(a, b)
+    }
+    fn list_files(&self) -> laurus::Result<Vec<String>> {
+        self.inner.list_files()
+    }
+    fn file_size(&self, name: &str) -> laurus::Result<u64> {
+        self.inner.file_size(name)
+    }
+    fn metadata(&self, name: &str) -> laurus::Result<laurus::storage::FileMetadata> {
+        self.inner.metadata(name)
+    }
+    fn create_temp_output(
+        &self,
+        prefix: &str,
+    ) -> laurus::Result<(String, Box<dyn laurus::storage::StorageOutput>)> {
+        self.inner.create_temp_output(prefix)
+    }
+    fn sync(&self) -> laurus::Result<()> {
+        self.inner.sync()
+    }
+    fn close(&mut self) -> laurus::Result<()> {
+        Ok(())
+    }
+}
+
+/// The #554 gate, phrased structurally rather than as a hardcoded 8→1
+/// (the part count depends on the corpus — one `.bkd` per numeric/geo
+/// field): a flush creates exactly ONE segment-prefixed file, and that
+/// file is fsynced exactly once. The `.delmap` (a deletion, not a flush)
+/// is the one sanctioned extra create.
+#[test]
+fn a_flush_creates_and_syncs_exactly_one_segment_file() {
+    let counting = Arc::new(CountingStorage::new());
+    let storage: Arc<dyn Storage> = counting.clone();
+    let index = InvertedIndex::create(storage, compound_config()).unwrap();
+    let mut writer = index.writer().unwrap();
+
+    writer.upsert_document(1, doc("alpha", 1)).unwrap();
+    writer.commit().unwrap();
+
+    assert_eq!(
+        counting.segment_creates.load(Ordering::SeqCst),
+        1,
+        "one flush = one segment-prefixed create (the .cfs container)"
+    );
+    assert_eq!(
+        counting.segment_syncs.load(Ordering::SeqCst),
+        1,
+        "one flush = one fsync on the container"
+    );
+
+    // A deleting commit adds only the loose `.delmap`.
+    writer.upsert_document(1, doc("alpha-v2", 1)).unwrap();
+    writer.commit().unwrap();
+    assert_eq!(
+        counting.segment_creates.load(Ordering::SeqCst),
+        3,
+        "second flush = its container + the first segment's .delmap"
+    );
+}
+
+/// `LAURUS_NO_COMPOUND=1` restores the loose layout — the one-release
+/// escape hatch. Env-var reads happen at config construction, so the
+/// test scopes the variable tightly.
+#[test]
+fn escape_hatch_restores_the_loose_layout() {
+    // SAFETY: test-only env mutation, scoped to this test; the suite
+    // runs tests in threads but no other test reads this variable at
+    // config-construction time concurrently with meaningful timing.
+    unsafe { std::env::set_var("LAURUS_NO_COMPOUND", "1") };
+    let escaped = InvertedIndexConfig::default();
+    unsafe { std::env::remove_var("LAURUS_NO_COMPOUND") };
+    let normal = InvertedIndexConfig::default();
+
+    assert!(!escaped.use_compound, "the escape hatch must restore loose");
+    assert!(normal.use_compound, "compound is the default (#554)");
 }

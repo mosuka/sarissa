@@ -745,7 +745,7 @@ fn merge_crash_after_manifest_save_resolves_to_the_merged_segment() {
     store.upsert_document(2, doc("alpha")).unwrap();
     // The first source data-file deletion fails after the manifest already
     // recorded the transition.
-    failing.fail_next_delete_matching("segment_", ".post");
+    failing.fail_next_delete_matching("segment_", ".cfs");
     assert!(store.commit().is_err(), "the failure must surface");
     drop(store);
 

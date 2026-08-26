@@ -201,8 +201,9 @@ fn failed_merge_must_not_publish_a_segment() {
 /// manifest entry, and publication happens only after every data file
 /// exists — there is no `.meta` to order against any more).
 ///
-/// Kills the merged segment's `.bkd` write; the manifest must not list
-/// the merged segment afterwards.
+/// Kills the merged segment's `.cfs` container write — the one data file
+/// a compound-layout merge produces; the manifest must not list the
+/// merged segment afterwards.
 #[test]
 fn segment_meta_is_written_after_every_data_file() {
     let inner: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
@@ -210,7 +211,7 @@ fn segment_meta_is_written_after_every_data_file() {
     let storage: Arc<dyn Storage> = failing.clone();
 
     let store = LexicalStore::new(storage.clone(), merging_config()).unwrap();
-    // Numeric field so the segment has a `.bkd` to fail.
+    // Numeric field so the container carries BKD data as well.
     let numbered = |body: &str, n: i64| {
         Document::builder()
             .add_text("body", body)
@@ -221,10 +222,10 @@ fn segment_meta_is_written_after_every_data_file() {
     store.commit().unwrap();
     store.upsert_document(2, numbered("banana", 2)).unwrap();
 
-    failing.fail_next_create_matching("merged_", ".bkd");
+    failing.fail_next_create_matching("merged_", ".cfs");
     assert!(
         store.commit().is_err(),
-        "the injected .bkd failure must surface"
+        "the injected .cfs failure must surface"
     );
     drop(store);
 

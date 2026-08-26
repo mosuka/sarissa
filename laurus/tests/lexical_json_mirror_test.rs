@@ -68,7 +68,17 @@ fn titles_by_id(store: &LexicalStore) -> BTreeMap<u64, String> {
 #[test]
 fn drops_json_mirror_and_reads_stored_fields_from_docs() {
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let store = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
+    // Loose layout, explicitly: this test pins the #756 loose-file
+    // contract (a `.docs` file and no `.json` mirror). Under the compound
+    // default there are no loose files at all.
+    let store = LexicalStore::new(
+        storage.clone(),
+        LexicalIndexConfig::Inverted(laurus::lexical::InvertedIndexConfig {
+            use_compound: false,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
 
     // Non-contiguous ids: the old positional `.json` read would map these wrong.
     store.upsert_document(10, doc("ten")).unwrap();

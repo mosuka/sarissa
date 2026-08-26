@@ -28,9 +28,18 @@ use std::sync::Arc;
 fn index_writer(
     storage: Arc<dyn laurus::storage::Storage>,
 ) -> Box<dyn laurus::lexical::writer::LexicalIndexWriter> {
-    let index =
-        laurus::lexical::index::inverted::InvertedIndex::create(storage, Default::default())
-            .unwrap();
+    let index = laurus::lexical::index::inverted::InvertedIndex::create(
+        storage,
+        // Loose layout, explicitly: this suite pins the on-disk BKD
+        // FILE format (header bytes, per-field `.bkd` names), which
+        // only exists as loose files. Compound-layout BKD behavior is
+        // covered by `compound_segment_test.rs`.
+        laurus::lexical::InvertedIndexConfig {
+            use_compound: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     use laurus::lexical::index::LexicalIndex;
     index.writer().unwrap()
 }

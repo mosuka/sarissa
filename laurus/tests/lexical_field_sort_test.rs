@@ -320,7 +320,14 @@ fn doc_values_load_once_per_segment() {
         inner: Arc::new(MemoryStorage::new(MemoryStorageConfig::default())),
         dv_opens: dv_opens.clone(),
     });
-    let config = LexicalIndexConfig::builder().max_segments(1000).build();
+    // Loose layout, explicitly: the gate counts raw `.dv` opens, which a
+    // compound segment serves from its container (the caching property is
+    // layout-independent; this pins it where it is observable).
+    let config = LexicalIndexConfig::Inverted(laurus::lexical::InvertedIndexConfig {
+        use_compound: false,
+        max_segments: 1000,
+        ..Default::default()
+    });
     let store = LexicalStore::new(storage, config).unwrap();
 
     store.upsert_document(1, doc(10)).unwrap();

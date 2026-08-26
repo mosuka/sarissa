@@ -15,6 +15,11 @@ use crate::lexical::core::field::FieldOption;
 ///
 /// These settings control the behavior of the inverted index implementation,
 /// including segment management, buffering, compression, and term storage options.
+/// serde default for [`InvertedIndexConfig::use_compound`].
+fn default_use_compound() -> bool {
+    crate::lexical::index::inverted::compound::default_use_compound()
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InvertedIndexConfig {
     /// Write flushed segments as one compound `.cfs` container instead of
@@ -22,9 +27,10 @@ pub struct InvertedIndexConfig {
     ///
     /// One `create` + one fsync per segment instead of one per part.
     /// Readers detect the layout per segment, so loose and compound
-    /// segments coexist freely. Off by default until the #554 rollout
-    /// flips it.
-    #[serde(default)]
+    /// segments coexist freely. On by default;
+    /// `LAURUS_NO_COMPOUND=1` restores the loose layout for one release
+    /// as an escape hatch.
+    #[serde(default = "default_use_compound")]
     pub use_compound: bool,
 
     /// Maximum number of documents per segment.
@@ -118,7 +124,7 @@ fn default_parsed_query_cache_capacity() -> usize {
 impl Default for InvertedIndexConfig {
     fn default() -> Self {
         InvertedIndexConfig {
-            use_compound: false,
+            use_compound: default_use_compound(),
             max_docs_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             compress_stored_fields: false,

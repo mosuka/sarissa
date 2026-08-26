@@ -237,6 +237,17 @@ listing, no per-segment metadata parse. There are no per-segment `.meta`
 files any more: the manifest is the only record, files it does not list are
 reclaimed at the next open, and an index written before the manifest existed
 is migrated by a one-time read of its legacy `.meta` files when opened.
+
+Segment data itself is written as one **compound container** per segment
+(`segment_<N>.cfs` — postings, term dictionary, stored documents, field
+lengths and statistics, doc values and per-field BKD trees, concatenated
+with a trailing part table): one file create and one fsync per flush instead
+of one per part. The deletion bitmap (`.delmap`) stays a separate file, as
+the only per-segment data rewritten after sealing. Readers detect the layout
+per segment, so indexes with older loose-file segments keep working
+unchanged, and merges rewrite them into containers over time.
+`LAURUS_NO_COMPOUND=1` restores the loose layout as a transitional escape
+hatch.
 Opening an index whose `segments.json` is missing while segment files are
 present is refused loudly rather than served as silently empty. Three
 consequences worth knowing: at most **one writing store instance per
