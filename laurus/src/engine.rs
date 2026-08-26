@@ -355,6 +355,11 @@ impl Drop for CommitTimer {
     }
 }
 
+/// Number of shards in [`Engine::id_locks`]. Fixed rather than derived from
+/// the core count so behavior is identical everywhere; a power of two keeps
+/// the hash-to-shard mapping cheap and even.
+const ID_LOCK_SHARDS: usize = 64;
+
 /// Unified Engine that manages both Lexical and Vector indices.
 ///
 /// This engine acts as a facade, coordinating document ingestion and search
@@ -407,6 +412,20 @@ pub struct Engine {
     /// record appended by a mutation racing the commit is preserved instead of
     /// being wiped by the truncate. `Arc` so the [`CommitTimer`] shares it.
     applied_seq: Arc<AtomicU64>,
+    /// Per-external-id serialization for the delete-then-add upsert (#1049).
+    ///
+    /// [`Self::index_internal`] deletes any existing versions of an id and
+    /// then indexes the new one; every step takes the underlying store locks
+    /// separately, so without this two threads upserting the same id both
+    /// find-and-delete, then both add, and the id ends up with several live
+    /// versions. Sharded by hash so only genuine same-id contention
+    /// serializes — distinct ids keep ingesting in parallel.
+    ///
+    /// A `tokio::sync::Mutex` because the guard is held across `await`
+    /// points. It is the OUTERMOST lock wherever it is taken, so it cannot
+    /// invert against the lexical writer → searcher order that
+    /// [`LexicalStore::find_doc_ids_by_term`] maintains.
+    id_locks: Arc<Vec<tokio::sync::Mutex<()>>>,
     /// Background WAL flush timer for a [`WalSyncPolicy::Group`] configured with
     /// a `max_interval`. `None` when no interval is set. Held only to keep the
     /// timer thread alive for the engine's lifetime; dropping the engine stops
@@ -814,6 +833,14 @@ impl Engine {
         // DynamicFieldPolicy to add / coerce / drop user fields.
         self.apply_dynamic_schema(&mut doc).await?;
 
+        // Serialize everything that follows against other mutations of this
+        // same id (#1049). The delete and the add below take the store locks
+        // separately, so without this guard two concurrent upserts of one id
+        // both delete-then-add and leave two live versions. Held across the
+        // whole sequence, including the WAL append, so the log's record order
+        // for an id matches the order the stores applied them in.
+        let _id_guard = self.id_lock(id).lock().await;
+
         if !as_chunk {
             self.delete_documents_internal(id).await?;
         }
@@ -1071,6 +1098,11 @@ impl Engine {
     /// Returns an error if the WAL write, lexical deletion, or vector
     /// deletion fails for any matched document.
     pub async fn delete_documents(&self, id: &str) -> Result<()> {
+        // Same-id serialization as the upsert path (#1049): without it a
+        // delete can interleave between a concurrent upsert's own delete and
+        // its add, so the upsert's new version outlives the delete that was
+        // acknowledged after it.
+        let _id_guard = self.id_lock(id).lock().await;
         self.delete_documents_internal(id).await?;
         // Re-assert per-record durability: a concurrent batch may hold a WAL
         // sync-deferral scope, which would otherwise leave these acknowledged
@@ -1092,6 +1124,23 @@ impl Engine {
     ///
     /// Returns an error if the WAL write, lexical deletion, or vector
     /// deletion fails for any matched document.
+    /// The shard serializing mutations of `id` (#1049).
+    ///
+    /// # Parameters
+    ///
+    /// - `id` - The external document identifier to map to a shard.
+    ///
+    /// # Returns
+    ///
+    /// The [`tokio::sync::Mutex`] guarding every mutation of this id.
+    fn id_lock(&self, id: &str) -> &tokio::sync::Mutex<()> {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = ahash::AHasher::default();
+        id.hash(&mut hasher);
+        // ID_LOCK_SHARDS is a power of two, so the mask is exact.
+        &self.id_locks[hasher.finish() as usize & (ID_LOCK_SHARDS - 1)]
+    }
+
     async fn delete_documents_internal(&self, id: &str) -> Result<()> {
         let doc_ids = self.lexical.find_doc_ids_by_term("_id", id)?;
         for doc_id in doc_ids {
@@ -2766,6 +2815,11 @@ impl EngineBuilder {
             commit_policy: self.commit_policy,
             docs_since_commit,
             applied_seq,
+            id_locks: Arc::new(
+                (0..ID_LOCK_SHARDS)
+                    .map(|_| tokio::sync::Mutex::new(()))
+                    .collect(),
+            ),
             #[cfg(not(target_arch = "wasm32"))]
             _wal_flush_timer: wal_flush_timer,
             #[cfg(not(target_arch = "wasm32"))]
