@@ -1659,10 +1659,17 @@ impl InvertedIndexWriter {
     /// after the persist succeeds, inside this method, because `Drop` runs
     /// the whole commit ladder a second time after every explicit
     /// [`Self::commit`] — a delta applied twice would double every count.
-    /// On a failed persist the deltas survive for the retry, matching the
-    /// crash contract of the rest of the ladder: the lock then runs ahead
-    /// of the file by exactly this commit, and the retry re-snapshots the
-    /// same converged state rather than re-applying the delta.
+    /// On a failed persist the shared metadata is rolled back to its
+    /// persisted state and the deltas survive, so the retry re-applies
+    /// them exactly once (#1044).
+    ///
+    /// A pass with nothing to record — zero deltas and the shared WAL
+    /// checkpoint already at or ahead of the writer's — skips the persist
+    /// entirely (#1041): `Drop`'s second ladder run and idle closes used
+    /// to rewrite a byte-equivalent file (one create + rename + fsync per
+    /// commit) whose only changes were `generation`, which nothing reads,
+    /// and the `modified` timestamp. The failed-persist retry is never
+    /// skipped: the rollback leaves its deltas unconsumed.
     ///
     /// # Errors
     ///
@@ -1676,8 +1683,17 @@ impl InvertedIndexWriter {
         // `parking_lot::RwLock` is not reentrant and the `Debug` impls read
         // this lock, so holding it across a failing write would deadlock
         // the moment an error path formatted the index or store.
-        let snapshot = {
+        let (previous, snapshot) = {
             let mut meta = handle.write();
+            // Nothing to record: skip the persist (#1041). `generation` and
+            // `modified` intentionally do not advance on a skipped pass.
+            if self.stats.docs_added == 0
+                && self.stats.deleted_count == 0
+                && meta.last_wal_seq >= self.last_wal_seq
+            {
+                return Ok(());
+            }
+            let previous = meta.clone();
             meta.doc_count += self.stats.docs_added;
             meta.deleted_count += self.stats.deleted_count;
             meta.modified = crate::util::time::now_secs();
@@ -1686,17 +1702,26 @@ impl InvertedIndexWriter {
             // of the shared one (it was seeded from it and only ever raised
             // by `set_last_wal_seq`), but `max` makes the invariant local.
             meta.last_wal_seq = meta.last_wal_seq.max(self.last_wal_seq);
-            meta.clone()
+            (previous, meta.clone())
         };
 
         // Atomic and checksummed (#1023): a torn write here would leave the
         // index unopenable, not merely lose a counter.
-        crate::storage::manifest::save_checksummed_json(
+        if let Err(e) = crate::storage::manifest::save_checksummed_json(
             self.storage.as_ref(),
             "metadata.json",
             None,
             &snapshot,
-        )?;
+        ) {
+            // Roll the shared state back to what the file still holds, so
+            // the retained deltas are re-applied exactly once by the retry
+            // (#1044). Restoring wholesale is race-free: `LexicalStore`
+            // holds the writer-cache lock across the whole commit ladder,
+            // and every other mutation path (`set_last_wal_seq`,
+            // `optimize`/`update_metadata`) takes that same lock.
+            *handle.write() = previous;
+            return Err(e);
+        }
 
         // Consume the applied deltas so the next commit — including the
         // implicit one `Drop` runs — starts from zero.

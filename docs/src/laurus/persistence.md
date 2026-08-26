@@ -224,7 +224,10 @@ shared handle to it, applies its per-commit deltas (documents added, documents
 deleted, the WAL checkpoint) under that lock, and persists a snapshot — so no
 code path can overwrite the file from a stale copy, and internal writers (such
 as the merge engine's segment-replay writer) have no handle and cannot touch
-the file at all.
+the file at all. A pass with nothing to record skips the persist, and a failed
+persist rolls the in-memory copy back to the persisted state with the deltas
+retained — the retry re-applies them exactly once, mirroring the manifest's
+failure contract below.
 
 Lexical segment **discovery** follows the same authority model through
 `segments.json`, an atomically replaced, checksummed manifest of the committed

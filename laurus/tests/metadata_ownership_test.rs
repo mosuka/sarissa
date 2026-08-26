@@ -241,6 +241,169 @@ fn last_wal_seq_accessor_must_return_the_persisted_value() {
 }
 
 // ---------------------------------------------------------------------------
+// #1041 — one metadata persist per committing commit, zero per no-op commit.
+// ---------------------------------------------------------------------------
+
+/// Storage decorator counting `create_output` calls that target
+/// `metadata.json` (its atomic write creates `metadata.json.tmp` and
+/// renames it, so the tmp create is the one observable per persist).
+#[derive(Debug)]
+struct MetadataCountingStorage {
+    inner: Arc<dyn Storage>,
+    metadata_creates: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Storage for MetadataCountingStorage {
+    fn create_output(&self, name: &str) -> LaurusResult<Box<dyn laurus::storage::StorageOutput>> {
+        if name.starts_with("metadata.json") {
+            self.metadata_creates
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        self.inner.create_output(name)
+    }
+
+    fn create_output_append(
+        &self,
+        name: &str,
+    ) -> LaurusResult<Box<dyn laurus::storage::StorageOutput>> {
+        self.inner.create_output_append(name)
+    }
+
+    fn open_input(&self, name: &str) -> LaurusResult<Box<dyn laurus::storage::StorageInput>> {
+        self.inner.open_input(name)
+    }
+
+    fn file_exists(&self, name: &str) -> bool {
+        self.inner.file_exists(name)
+    }
+
+    fn delete_file(&self, name: &str) -> LaurusResult<()> {
+        self.inner.delete_file(name)
+    }
+
+    fn rename_file(&self, old_name: &str, new_name: &str) -> LaurusResult<()> {
+        self.inner.rename_file(old_name, new_name)
+    }
+
+    fn list_files(&self) -> LaurusResult<Vec<String>> {
+        self.inner.list_files()
+    }
+
+    fn file_size(&self, name: &str) -> LaurusResult<u64> {
+        self.inner.file_size(name)
+    }
+
+    fn sync(&self) -> LaurusResult<()> {
+        self.inner.sync()
+    }
+
+    fn metadata(&self, name: &str) -> LaurusResult<laurus::storage::FileMetadata> {
+        self.inner.metadata(name)
+    }
+
+    fn create_temp_output(
+        &self,
+        prefix: &str,
+    ) -> LaurusResult<(String, Box<dyn laurus::storage::StorageOutput>)> {
+        self.inner.create_temp_output(prefix)
+    }
+
+    fn close(&mut self) -> LaurusResult<()> {
+        Ok(())
+    }
+}
+
+/// #1041 — a committing commit must persist `metadata.json` exactly once.
+///
+/// `LexicalStore::commit` runs the writer's explicit `commit()` and then
+/// drops the writer; `Drop → close() → commit()` re-runs the ladder with
+/// every delta already consumed, and `write_metadata_json` used to persist
+/// that zero-delta snapshot anyway — a full create + rename + fsync per
+/// commit for a byte-equivalent file (modulo `generation`, which nothing
+/// reads).
+#[test]
+fn a_committing_commit_persists_metadata_exactly_once() {
+    let creates = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let storage: Arc<dyn Storage> = Arc::new(MetadataCountingStorage {
+        inner: memory_storage(),
+        metadata_creates: creates.clone(),
+    });
+    let store = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
+
+    let before = creates.load(std::sync::atomic::Ordering::SeqCst);
+    store.upsert_document(1, doc("alpha")).unwrap();
+    store.commit().unwrap();
+
+    assert_eq!(
+        creates.load(std::sync::atomic::Ordering::SeqCst) - before,
+        1,
+        "a committing commit must persist metadata.json exactly once, \
+         not once per ladder run"
+    );
+    assert_eq!(
+        read_meta(&storage)["doc_count"],
+        1,
+        "the single persist must carry the commit's delta"
+    );
+}
+
+/// #1041 — a no-op commit must not persist `metadata.json` at all.
+///
+/// A registered writer with nothing buffered, no deletions, and an
+/// unchanged WAL seq has nothing to record; committing and dropping it
+/// must leave the file untouched.
+#[test]
+fn a_noop_commit_skips_the_metadata_persist() {
+    let creates = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let storage: Arc<dyn Storage> = Arc::new(MetadataCountingStorage {
+        inner: memory_storage(),
+        metadata_creates: creates.clone(),
+    });
+    let index = laurus::lexical::index::inverted::InvertedIndex::create(
+        storage,
+        laurus::lexical::InvertedIndexConfig::default(),
+    )
+    .unwrap();
+    use laurus::lexical::index::LexicalIndex;
+
+    let before = creates.load(std::sync::atomic::Ordering::SeqCst);
+    let mut writer = index.writer().unwrap();
+    writer.commit().unwrap();
+    drop(writer);
+
+    assert_eq!(
+        creates.load(std::sync::atomic::Ordering::SeqCst) - before,
+        0,
+        "a zero-delta commit (and the Drop re-run) must skip the metadata persist"
+    );
+}
+
+/// #1041 regression guard for the #875 retry contract: a FAILED persist
+/// leaves the deltas unconsumed, so the retried commit is not zero-delta
+/// and must still write.
+#[test]
+fn a_failed_metadata_persist_still_writes_on_the_retry() {
+    let inner = memory_storage();
+    let failing = Arc::new(FailingStorage::new(inner.clone()));
+    let storage: Arc<dyn Storage> = failing.clone();
+    let store = LexicalStore::new(storage.clone(), LexicalIndexConfig::default()).unwrap();
+
+    store.upsert_document(1, doc("alpha")).unwrap();
+    failing.fail_next_create_of("metadata.json.tmp");
+    assert!(
+        store.commit().is_err(),
+        "the injected metadata persist failure must surface"
+    );
+
+    store.commit().unwrap();
+    assert_eq!(
+        read_meta(&storage)["doc_count"],
+        1,
+        "the retried commit must persist the unconsumed delta, not skip as zero-delta"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // R5 — Engine::recover with a REAL lexical checkpoint.
 // ---------------------------------------------------------------------------
 
