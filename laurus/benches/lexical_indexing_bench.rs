@@ -430,6 +430,84 @@ fn bench_multi_segment_commit(c: &mut Criterion) {
     group.finish();
 }
 
+/// Thread counts swept by `ingest/concurrent`.
+fn concurrency_levels() -> Vec<usize> {
+    let cores = std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(4);
+    // Include one level past the core count: the interesting question is
+    // whether added threads help, plateau, or actively hurt.
+    [1usize, 2, 4, 8, 16]
+        .into_iter()
+        .filter(|&t| t <= (cores * 2).max(2))
+        .collect()
+}
+
+/// `add_document` × N spread over T threads sharing one `Engine` (#546).
+///
+/// This is the ceiling probe for parallel ingestion. Today the lexical
+/// writer sits behind a single mutex in `LexicalStore` that is held across
+/// tokenization, so the expected shape is flat-or-worse as T rises — the
+/// baseline every later phase is measured against.
+///
+/// `iter_custom` rather than `iter`: the work has to be timed around a
+/// `thread::scope`, and the per-iteration engine setup must stay outside
+/// the measured span.
+fn bench_concurrent_ingest(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("ingest/concurrent");
+    group.sample_size(SAMPLE_SIZE_SLOW);
+
+    // One corpus size only: the sweep of interest is T, not N, and the
+    // cross product would make the bench unusably slow.
+    const DOCS: usize = 2_000;
+
+    for t in concurrency_levels() {
+        group.throughput(Throughput::Elements(DOCS as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(t), &t, |b, &t| {
+            b.iter_custom(|iters| {
+                let mut total = std::time::Duration::ZERO;
+                for _ in 0..iters {
+                    let engine = Arc::new(rt.block_on(build_empty_engine()).unwrap());
+                    let docs = build_documents(DOCS);
+                    // Contiguous slices per thread: every document is
+                    // ingested exactly once, by exactly one thread.
+                    let per_thread = DOCS.div_ceil(t);
+                    let chunks: Vec<Vec<(String, Document)>> =
+                        docs.chunks(per_thread).map(<[_]>::to_vec).collect();
+
+                    let start = std::time::Instant::now();
+                    std::thread::scope(|scope| {
+                        for chunk in chunks {
+                            let engine = Arc::clone(&engine);
+                            scope.spawn(move || {
+                                // Each thread drives its own current-thread
+                                // runtime, so the measurement reflects the
+                                // engine's own serialization rather than a
+                                // shared executor's scheduling.
+                                let rt = tokio::runtime::Builder::new_current_thread()
+                                    .enable_all()
+                                    .build()
+                                    .unwrap();
+                                rt.block_on(async {
+                                    for (id, doc) in chunk {
+                                        engine.add_document(&id, doc).await.unwrap();
+                                    }
+                                });
+                            });
+                        }
+                    });
+                    rt.block_on(engine.commit()).unwrap();
+                    total += start.elapsed();
+                }
+                total
+            });
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_add_documents,
@@ -437,5 +515,6 @@ criterion_group!(
     bench_bulk_ingest,
     bench_bulk_ingest_batch_api,
     bench_multi_segment_commit,
+    bench_concurrent_ingest,
 );
 criterion_main!(benches);
