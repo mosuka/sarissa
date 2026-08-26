@@ -936,7 +936,8 @@ mod tests {
         assert!(
             files
                 .iter()
-                .any(|f| f.starts_with("segment_") && f.ends_with(".post"))
+                .any(|f| f.starts_with("segment_") && f.ends_with(".cfs")),
+            "the default layout is the compound container (#554)"
         );
     }
 

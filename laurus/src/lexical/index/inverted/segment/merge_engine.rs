@@ -50,7 +50,7 @@ pub struct MergeConfig {
 impl Default for MergeConfig {
     fn default() -> Self {
         MergeConfig {
-            use_compound: false,
+            use_compound: crate::lexical::index::inverted::compound::default_use_compound(),
             max_memory_mb: 256,
             batch_size: 10000,
             enable_compression: true,

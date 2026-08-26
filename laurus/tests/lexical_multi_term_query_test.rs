@@ -105,7 +105,7 @@ fn multi_term_queries_hit_on_single_segment() {
         .list_files()
         .unwrap()
         .iter()
-        .filter(|f| f.starts_with("segment_") && f.ends_with(".post"))
+        .filter(|f| f.starts_with("segment_") && f.ends_with(".cfs"))
         .count();
     assert_eq!(segs, 1, "harness must produce exactly 1 segment");
     assert_multi_term_hits(&store, "single-segment");
@@ -122,7 +122,7 @@ fn multi_term_queries_hit_on_multi_segment() {
         .list_files()
         .unwrap()
         .iter()
-        .filter(|f| f.starts_with("segment_") && f.ends_with(".post"))
+        .filter(|f| f.starts_with("segment_") && f.ends_with(".cfs"))
         .count();
     assert_eq!(segs, 2, "harness must produce exactly 2 segments");
     assert_multi_term_hits(&store, "multi-segment");

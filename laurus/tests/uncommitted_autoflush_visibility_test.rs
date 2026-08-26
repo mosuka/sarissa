@@ -53,7 +53,7 @@ async fn engine_past_auto_flush() -> laurus::Result<(Engine, Arc<dyn Storage>)> 
     let flushed: Vec<String> = storage
         .list_files()?
         .into_iter()
-        .filter(|f| f.contains("segment_") && f.ends_with(".post"))
+        .filter(|f| f.contains("segment_") && (f.ends_with(".post") || f.ends_with(".cfs")))
         .collect();
     assert!(
         !flushed.is_empty(),

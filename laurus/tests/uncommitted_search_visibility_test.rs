@@ -74,7 +74,7 @@ async fn engine_past_auto_flush() -> laurus::Result<(Engine, Arc<dyn Storage>)> 
     let flushed = storage
         .list_files()?
         .iter()
-        .any(|f| f.contains("segment_") && f.ends_with(".post"));
+        .any(|f| f.contains("segment_") && (f.ends_with(".post") || f.ends_with(".cfs")));
     assert!(
         flushed,
         "automatic flush_segment must fire at max_buffered_docs"

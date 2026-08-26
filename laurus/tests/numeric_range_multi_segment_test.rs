@@ -177,7 +177,13 @@ fn stored_documents_decode_once_per_segment() {
         inner: Arc::new(MemoryStorage::new(MemoryStorageConfig::default())),
         docs_opens: docs_opens.clone(),
     });
-    let store = LexicalStore::new(storage, store_config()).unwrap();
+    // Loose layout, explicitly: the gate counts raw `.docs` opens, which a
+    // compound segment serves from its container (the decode-once property
+    // is layout-independent; this pins it where it is observable).
+    let mut config = store_config();
+    let LexicalIndexConfig::Inverted(inner) = &mut config;
+    inner.use_compound = false;
+    let store = LexicalStore::new(storage, config).unwrap();
 
     store.upsert_document(1, chars_doc(10)).unwrap();
     store.upsert_document(2, chars_doc(20)).unwrap();

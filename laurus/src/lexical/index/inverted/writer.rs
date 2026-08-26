@@ -40,8 +40,9 @@ pub struct InvertedIndexWriterConfig {
     ///
     /// One `create` + one fsync per segment instead of one per part.
     /// Readers detect the layout per segment, so loose and compound
-    /// segments coexist freely in one index. Off by default until the
-    /// #554 rollout flips it.
+    /// segments coexist freely in one index. On by default;
+    /// `LAURUS_NO_COMPOUND=1` restores the loose layout for one release
+    /// as an escape hatch.
     pub use_compound: bool,
 
     /// Maximum number of documents to buffer before flushing to disk.
@@ -85,7 +86,7 @@ impl std::fmt::Debug for InvertedIndexWriterConfig {
 impl Default for InvertedIndexWriterConfig {
     fn default() -> Self {
         InvertedIndexWriterConfig {
-            use_compound: false,
+            use_compound: super::compound::default_use_compound(),
             max_buffered_docs: 10000,
             max_buffer_memory: 64 * 1024 * 1024, // 64MB
             segment_prefix: "segment".to_string(),

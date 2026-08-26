@@ -48,6 +48,16 @@ const COMPOUND_VERSION: u32 = 1;
 /// magic (4).
 const TRAILER_LEN: u64 = 20;
 
+/// The default for the `use_compound` layout knobs (#554).
+///
+/// `true` — new flushes write compound `.cfs` containers — unless
+/// `LAURUS_NO_COMPOUND=1` is set, a one-release escape hatch mirroring
+/// `LAURUS_NO_MMAP`. Readers detect the layout per segment either way,
+/// so flipping the knob never affects existing segments.
+pub(crate) fn default_use_compound() -> bool {
+    !matches!(std::env::var("LAURUS_NO_COMPOUND").as_deref(), Ok("1"))
+}
+
 /// The container file name for a segment.
 pub(crate) fn container_name(segment_id: &str) -> String {
     format!("{segment_id}.{COMPOUND_SUFFIX}")
