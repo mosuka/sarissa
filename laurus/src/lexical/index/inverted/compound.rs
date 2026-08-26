@@ -420,14 +420,19 @@ impl CompoundSegmentStorage {
                 base: entry.offset,
                 len: entry.len,
                 pos: 0,
+                handle_pos: entry.offset,
             })),
             ContainerHandle::PerOpen => {
-                let input = self.inner.open_input(&self.container)?;
+                let mut input = self.inner.open_input(&self.container)?;
+                // Establish the alignment invariant `as_slice` relies on:
+                // the handle sits at the window's cursor from the start.
+                input.seek(SeekFrom::Start(entry.offset))?;
                 Ok(Box::new(PartInput {
                     backing: WindowBacking::Handle(input),
                     base: entry.offset,
                     len: entry.len,
                     pos: 0,
+                    handle_pos: entry.offset,
                 }))
             }
         }
@@ -530,6 +535,15 @@ impl std::fmt::Debug for WindowBacking {
 /// `as_slice` is clamped on BOTH ends — the #504 zero-copy posting
 /// decode only checks that the slice is long *enough*, so an unclamped
 /// tail would hand it the next part's bytes.
+///
+/// A `Handle` window keeps the container handle parked at `base + pos`
+/// (#1046). `as_slice` takes `&self` and so cannot seek, and the inner
+/// slice starts at the inner cursor — without the invariant the window
+/// could only decline, which routed every posting-block decode through
+/// the heap-allocating fallback once the compound layout became the
+/// default. The seek is issued only when the handle has drifted: a
+/// buffered file input discards its whole read buffer on every `Seek`,
+/// so reseeking before each sequential read would thrash it.
 #[derive(Debug)]
 struct PartInput {
     backing: WindowBacking,
@@ -537,6 +551,23 @@ struct PartInput {
     len: u64,
     /// Cursor within the window.
     pos: u64,
+    /// Absolute container position the `Handle` currently sits at.
+    /// Unused for `Buffered` backing, which needs no cursor.
+    handle_pos: u64,
+}
+
+impl PartInput {
+    /// Park the container handle at `base + pos` if it has drifted.
+    fn align_handle(&mut self) -> std::io::Result<()> {
+        let target = self.base + self.pos;
+        if let WindowBacking::Handle(input) = &mut self.backing
+            && self.handle_pos != target
+        {
+            input.seek(SeekFrom::Start(target))?;
+            self.handle_pos = target;
+        }
+        Ok(())
+    }
 }
 
 impl Read for PartInput {
@@ -546,6 +577,7 @@ impl Read for PartInput {
             return Ok(0);
         }
         let want = buf.len().min(remaining as usize);
+        self.align_handle()?;
         let read = match &mut self.backing {
             WindowBacking::Buffered(bytes) => {
                 let start = (self.base + self.pos) as usize;
@@ -553,12 +585,10 @@ impl Read for PartInput {
                 buf[..want].copy_from_slice(&bytes[start..end]);
                 want
             }
-            WindowBacking::Handle(input) => {
-                input.seek(SeekFrom::Start(self.base + self.pos))?;
-                input.read(&mut buf[..want])?
-            }
+            WindowBacking::Handle(input) => input.read(&mut buf[..want])?,
         };
         self.pos += read as u64;
+        self.handle_pos += read as u64;
         Ok(read)
     }
 }
@@ -577,6 +607,9 @@ impl Seek for PartInput {
             ));
         }
         self.pos = target as u64;
+        // Keep the handle parked at the new cursor: `as_slice` cannot seek
+        // and reads from wherever the handle sits (#1046).
+        self.align_handle()?;
         Ok(self.pos)
     }
 }
@@ -589,13 +622,20 @@ impl StorageInput for PartInput {
     fn clone_input(&self) -> Result<Box<dyn StorageInput>> {
         let backing = match &self.backing {
             WindowBacking::Buffered(bytes) => WindowBacking::Buffered(Arc::clone(bytes)),
-            WindowBacking::Handle(input) => WindowBacking::Handle(input.clone_input()?),
+            WindowBacking::Handle(input) => {
+                // A cloned handle restarts at the container base, so park
+                // it at this part's base to hold the alignment invariant.
+                let mut cloned = input.clone_input()?;
+                cloned.seek(SeekFrom::Start(self.base))?;
+                WindowBacking::Handle(cloned)
+            }
         };
         Ok(Box::new(PartInput {
             backing,
             base: self.base,
             len: self.len,
             pos: 0,
+            handle_pos: self.base,
         }))
     }
 
@@ -609,14 +649,16 @@ impl StorageInput for PartInput {
         match &self.backing {
             WindowBacking::Buffered(bytes) => bytes.get(start..end),
             WindowBacking::Handle(input) => {
-                // The inner slice starts at the inner cursor, which this
-                // window does not control; recover the absolute view via
-                // pointer arithmetic-free slicing is impossible here, so
-                // only serve the fast path when the inner input exposes the
-                // whole container from position 0 semantics. Conservative:
-                // decline (the sequential read path stays correct).
-                let _ = input;
-                None
+                // The handle is parked at `base + pos` (see `align_handle`),
+                // so the inner slice already starts at this window's cursor;
+                // clamp its tail to the window end. Without the clamp the
+                // #504 decode — which only checks the slice is long *enough*
+                // — would run into the next part's bytes.
+                if self.handle_pos != self.base + self.pos {
+                    return None;
+                }
+                let remaining = self.len.saturating_sub(self.pos) as usize;
+                input.as_slice().and_then(|slice| slice.get(..remaining))
             }
         }
     }
@@ -779,10 +821,14 @@ mod tests {
         assert_eq!(input.read(&mut buf).unwrap(), 0, "EOF at the window end");
 
         // as_slice starts at the cursor and clamps at the window end.
+        // Asserted unconditionally: an `if let Some(..)` here passes
+        // vacuously the moment the fast path stops being served (#1046).
         input.seek(SeekFrom::Start(1)).unwrap();
-        if let Some(slice) = input.as_slice() {
-            assert_eq!(slice, b"AAA", "as_slice must clamp both ends");
-        }
+        assert_eq!(
+            input.as_slice(),
+            Some(&b"AAA"[..]),
+            "as_slice must clamp both ends"
+        );
 
         // Seek relative to the window end.
         let pos = input.seek(SeekFrom::End(-2)).unwrap();
@@ -790,6 +836,128 @@ mod tests {
         let mut two = [0u8; 2];
         input.read_exact(&mut two).unwrap();
         assert_eq!(&two, b"AA");
+    }
+
+    /// A storage that reports `Lazy` so `try_open` picks
+    /// [`ContainerHandle::PerOpen`], reproducing the mmap-backed
+    /// `FileStorage` configuration while staying deterministic. Its inner
+    /// inputs still lend slices, exactly as `MmapInput` does.
+    #[derive(Debug)]
+    struct LazyStorage {
+        inner: Arc<dyn Storage>,
+    }
+
+    impl Storage for LazyStorage {
+        fn loading_mode(&self) -> LoadingMode {
+            LoadingMode::Lazy
+        }
+        fn create_output(&self, name: &str) -> Result<Box<dyn StorageOutput>> {
+            self.inner.create_output(name)
+        }
+        fn create_output_append(&self, name: &str) -> Result<Box<dyn StorageOutput>> {
+            self.inner.create_output_append(name)
+        }
+        fn open_input(&self, name: &str) -> Result<Box<dyn StorageInput>> {
+            self.inner.open_input(name)
+        }
+        fn file_exists(&self, name: &str) -> bool {
+            self.inner.file_exists(name)
+        }
+        fn delete_file(&self, name: &str) -> Result<()> {
+            self.inner.delete_file(name)
+        }
+        fn rename_file(&self, old_name: &str, new_name: &str) -> Result<()> {
+            self.inner.rename_file(old_name, new_name)
+        }
+        fn list_files(&self) -> Result<Vec<String>> {
+            self.inner.list_files()
+        }
+        fn file_size(&self, name: &str) -> Result<u64> {
+            self.inner.file_size(name)
+        }
+        fn sync(&self) -> Result<()> {
+            self.inner.sync()
+        }
+        fn metadata(&self, name: &str) -> Result<FileMetadata> {
+            self.inner.metadata(name)
+        }
+        fn create_temp_output(&self, prefix: &str) -> Result<(String, Box<dyn StorageOutput>)> {
+            self.inner.create_temp_output(prefix)
+        }
+        fn close(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    /// #1046 — a paging-backed container must still lend the #504
+    /// zero-copy slice.
+    ///
+    /// `ContainerHandle::PerOpen` (what every mmap-backed `FileStorage`
+    /// gets) used to decline `as_slice` outright, so making the compound
+    /// layout the default silently routed every posting-block decode
+    /// through the heap-allocating fallback in
+    /// [`crate::storage::structured::StructReader::read_raw_with`].
+    #[test]
+    fn a_paging_backed_window_still_lends_a_zero_copy_slice() {
+        let backing = memory();
+        let storage: Arc<dyn Storage> = Arc::new(LazyStorage {
+            inner: Arc::clone(&backing),
+        });
+        let mut writer = CompoundSegmentWriter::create(storage.as_ref(), "segment_000009").unwrap();
+        let mut p = writer.begin_part("a").unwrap();
+        p.write_all(b"AAAA").unwrap();
+        writer.end_part().unwrap();
+        let mut p = writer.begin_part("b").unwrap();
+        p.write_all(b"BBBB").unwrap();
+        writer.end_part().unwrap();
+        writer.finish().unwrap();
+
+        let facade = CompoundSegmentStorage::try_open(storage, "segment_000009")
+            .unwrap()
+            .expect("container must be detected");
+        assert!(
+            matches!(facade.handle, ContainerHandle::PerOpen),
+            "precondition: a Lazy inner must select the per-open handle"
+        );
+
+        let mut input = facade.open_input("segment_000009.a").unwrap();
+        assert_eq!(
+            input.as_slice(),
+            Some(&b"AAAA"[..]),
+            "a fresh window must lend the whole part, not decline"
+        );
+
+        // The slice tracks the window cursor and stops at the window end —
+        // an unclamped tail would feed the decoder part b's bytes.
+        input.seek(SeekFrom::Start(1)).unwrap();
+        assert_eq!(
+            input.as_slice(),
+            Some(&b"AAA"[..]),
+            "the slice must start at the cursor and clamp at the window end"
+        );
+
+        // A window reached through `clone_input` starts over at its own
+        // part base, not at the container base. Probed on part `b`, whose
+        // base is non-zero — on part `a` (base 0) the two coincide and the
+        // assertion would pass without exercising anything.
+        let b = facade.open_input("segment_000009.b").unwrap();
+        assert_eq!(
+            b.as_slice(),
+            Some(&b"BBBB"[..]),
+            "a window at a non-zero base must lend its own part"
+        );
+        let cloned = b.clone_input().unwrap();
+        assert_eq!(
+            cloned.as_slice(),
+            Some(&b"BBBB"[..]),
+            "a cloned window must lend its own part from position 0"
+        );
+
+        // Reads still work after the slice hand-out.
+        input.seek(SeekFrom::Start(0)).unwrap();
+        let mut buf = Vec::new();
+        input.read_to_end(&mut buf).unwrap();
+        assert_eq!(&buf, b"AAAA");
     }
 
     /// The facade is table-then-passthrough: part names resolve virtually,
