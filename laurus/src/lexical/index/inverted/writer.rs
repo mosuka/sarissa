@@ -497,10 +497,13 @@ impl InvertedIndexWriter {
             self.next_doc_id = doc_id + 1;
         }
 
-        // Add field values to DocValues
+        // Add field values to DocValues, skipping payloads no consumer of
+        // DocValues can use (#1047).
         for (field_name, value) in &analyzed_doc.stored_fields {
-            self.doc_values_writer
-                .add_value(doc_id, field_name, value.clone());
+            if Self::is_doc_values_candidate(value) {
+                self.doc_values_writer
+                    .add_value(doc_id, field_name, value.clone());
+            }
         }
 
         // Add to inverted index
@@ -925,6 +928,24 @@ impl InvertedIndexWriter {
     }
 
     /// Check if we should flush the current segment.
+    /// Whether a stored value is worth a DocValues column (#1047).
+    ///
+    /// DocValues serves sorting and faceting only. Sorting cannot order
+    /// `Bytes` or `Vector` values — [`sort_type_rank`] gives each variant a
+    /// single rank with no inner comparison, so every value of such a field
+    /// compares equal — and faceting reads the stored document when a column
+    /// is absent. Copying these payloads into a second on-disk structure
+    /// therefore doubles what the segment writes and buys nothing; a
+    /// thumbnail or an embedding is often the largest value in the document.
+    ///
+    /// [`sort_type_rank`]: crate::lexical::query::collector
+    fn is_doc_values_candidate(value: &crate::data::DataValue) -> bool {
+        !matches!(
+            value,
+            crate::data::DataValue::Bytes(_, _) | crate::data::DataValue::Vector(_)
+        )
+    }
+
     /// Estimate the heap an [`AnalyzedDocument`] occupies while buffered.
     ///
     /// Deliberately an estimate, not an exact accounting: it exists to keep
@@ -1940,10 +1961,13 @@ impl InvertedIndexWriter {
         // Re-add all buffered analyzed docs
         let buffered_snapshot = self.buffered_docs.clone();
         for (id, analyzed_doc) in buffered_snapshot {
-            // Re-add stored fields to DocValues
+            // Re-add stored fields to DocValues, under the same filter as
+            // the ingest path (#1047) so a rebuild cannot reintroduce them.
             for (field_name, value) in &analyzed_doc.stored_fields {
-                self.doc_values_writer
-                    .add_value(id, field_name, value.clone());
+                if Self::is_doc_values_candidate(value) {
+                    self.doc_values_writer
+                        .add_value(id, field_name, value.clone());
+                }
             }
 
             // Re-add postings
@@ -2454,6 +2478,99 @@ mod tests {
         assert!(
             three_d > one_d,
             "3D points must estimate above 1D points, got {three_d} vs {one_d}"
+        );
+    }
+
+    /// #1047 gate: the DocValues payload must not scale with binary
+    /// stored fields.
+    #[test]
+    fn doc_values_payload_does_not_scale_with_binary_fields() {
+        let build = |payload: usize| -> usize {
+            let storage = Arc::new(crate::storage::memory::MemoryStorage::new(
+                crate::storage::memory::MemoryStorageConfig::default(),
+            ));
+            let mut writer =
+                InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+            for i in 0..20u64 {
+                let doc = Document::builder()
+                    .add_field("title", crate::data::DataValue::Text(format!("doc {i}")))
+                    .add_field(
+                        "blob",
+                        crate::data::DataValue::Bytes(vec![7u8; payload], None),
+                    )
+                    .build();
+                writer.upsert_document(i, doc).unwrap();
+            }
+            let mut out: Vec<u8> = Vec::new();
+            writer.doc_values_writer.write_to_output(&mut out).unwrap();
+            out.len()
+        };
+
+        let small = build(64);
+        let large = build(16 * 1024);
+        assert_eq!(
+            small, large,
+            "the DocValues payload must be identical regardless of binary field size, \
+             got {small} vs {large}"
+        );
+    }
+
+    /// #1047: binary payloads must not be copied into DocValues.
+    ///
+    /// DocValues exists to serve sorting and faceting. Neither can do
+    /// anything with a `Bytes` or `Vector` value — `sort_type_rank` gives
+    /// every such value the same rank with no inner comparison, and facet
+    /// values are read from the stored document when a column is absent —
+    /// so copying multi-kilobyte payloads into a second on-disk structure
+    /// buys nothing and doubles what the segment writes.
+    ///
+    /// Asserted on the serialized DocValues payload rather than on writer
+    /// internals: bytes on disk are what this is about.
+    #[test]
+    fn binary_payloads_are_kept_out_of_doc_values() {
+        let storage = Arc::new(crate::storage::memory::MemoryStorage::new(
+            crate::storage::memory::MemoryStorageConfig::default(),
+        ));
+        let mut writer =
+            InvertedIndexWriter::new(storage, InvertedIndexWriterConfig::default()).unwrap();
+
+        const PAYLOAD: usize = 32 * 1024;
+        let doc = Document::builder()
+            .add_field("title", crate::data::DataValue::Text("sortable".into()))
+            .add_field(
+                "thumbnail",
+                crate::data::DataValue::Bytes(vec![7u8; PAYLOAD], None),
+            )
+            .add_field(
+                "embedding",
+                crate::data::DataValue::Vector(vec![0.5f32; 4096]),
+            )
+            .build();
+        writer.add_document(doc).unwrap();
+
+        let mut serialized: Vec<u8> = Vec::new();
+        writer
+            .doc_values_writer
+            .write_to_output(&mut serialized)
+            .unwrap();
+
+        let names = String::from_utf8_lossy(&serialized).to_string();
+        assert!(
+            names.contains("title"),
+            "a sortable field must still get a DocValues column"
+        );
+        assert!(
+            !names.contains("thumbnail"),
+            "a Bytes payload must not be copied into DocValues"
+        );
+        assert!(
+            !names.contains("embedding"),
+            "a Vector payload must not be copied into DocValues"
+        );
+        assert!(
+            serialized.len() < PAYLOAD,
+            "the DocValues payload must not carry the binary blob: {} bytes",
+            serialized.len()
         );
     }
 
