@@ -915,6 +915,52 @@ mod tests {
         assert!(files.iter().any(|f| f.contains("segment_000000")));
     }
 
+    /// #557: the flush memory budget must account for a document's actual
+    /// buffered size, not a flat per-document constant.
+    ///
+    /// `estimate_memory_usage` charged 1 KB per document plus 256 bytes per
+    /// distinct term, so a document carrying thousands of BKD points — a
+    /// multi-valued numeric or geo field — slipped past `max_buffer_memory`
+    /// entirely. The repeated values keep the term vocabulary small and
+    /// constant, so the term half of the old estimate cannot compensate:
+    /// only the point/term *instances* grow, and those were uncounted.
+    #[test]
+    fn flush_budget_counts_multi_valued_point_data() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let config = InvertedIndexWriterConfig {
+            // Effectively disable the count trigger so only the memory
+            // budget can fire.
+            max_buffered_docs: 100_000,
+            max_buffer_memory: 1024 * 1024,
+            ..Default::default()
+        };
+
+        let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
+
+        // Each document carries 2000 points drawn from a 100-value
+        // vocabulary: ~64 KB of real point data per document, while the
+        // distinct-term count stays pinned at 100 for the whole run.
+        let values: Vec<i64> = (0..2000).map(|i| i % 100).collect();
+        for _ in 0..40 {
+            let doc = Document::builder()
+                .add_field(
+                    "readings",
+                    crate::data::DataValue::Int64Array(values.clone()),
+                )
+                .build();
+            writer.add_document(doc).unwrap();
+        }
+
+        // 40 documents x ~64 KB is far past the 1 MB budget, so the writer
+        // must have flushed at least once instead of buffering all of them.
+        assert!(
+            writer.stats().segments_created >= 1,
+            "the memory budget must fire on point-heavy documents: \
+             {} docs still buffered, no segment flushed",
+            writer.pending_docs()
+        );
+    }
+
     #[test]
     fn test_commit() {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

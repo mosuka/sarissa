@@ -138,6 +138,11 @@ pub struct InvertedIndexWriter {
 
     /// Buffered analyzed documents with their assigned doc IDs.
     buffered_docs: Vec<(u64, AnalyzedDocument)>,
+    /// Running estimate of the heap `buffered_docs` occupies (#557).
+    ///
+    /// Maintained incrementally because `should_flush` consults it on every
+    /// document; walking the buffer instead would make ingestion quadratic.
+    buffered_bytes: usize,
 
     /// Whether [`Self::inverted_index`] / [`Self::doc_values_writer`] are stale
     /// relative to [`Self::buffered_docs`] and need a rebuild before flush.
@@ -406,6 +411,7 @@ impl InvertedIndexWriter {
             config,
             inverted_index: TermPostingIndex::new(),
             buffered_docs: Vec::new(),
+            buffered_bytes: 0,
             index_dirty: false,
             buffered_doc_ids: AHashSet::new(),
             doc_values_writer,
@@ -501,6 +507,7 @@ impl InvertedIndexWriter {
         self.add_analyzed_document_to_index(doc_id, &analyzed_doc)?;
 
         // Buffer the document with its assigned ID
+        self.track_buffered(&analyzed_doc);
         self.buffered_docs.push((doc_id, analyzed_doc));
         self.buffered_doc_ids.insert(doc_id);
         self.stats.docs_added += 1;
@@ -918,17 +925,82 @@ impl InvertedIndexWriter {
     }
 
     /// Check if we should flush the current segment.
+    /// Estimate the heap an [`AnalyzedDocument`] occupies while buffered.
+    ///
+    /// Deliberately an estimate, not an exact accounting: it exists to keep
+    /// `max_buffer_memory` proportional to what a document actually costs, so
+    /// point-heavy or text-heavy documents cannot slip past the flush budget
+    /// (#557). The three terms that scale with document content are counted —
+    /// BKD points, analyzed terms, and stored values — plus a small constant
+    /// for the per-field map entries.
+    fn estimate_analyzed_size(doc: &AnalyzedDocument) -> usize {
+        /// Per-field overhead: the name plus its slot in each of the maps.
+        const FIELD_OVERHEAD: usize = 64;
+
+        let mut bytes = 0usize;
+
+        for (name, points) in &doc.point_values {
+            // A point is a `Vec<f64>`: its header plus `dims` doubles.
+            let dims = points.first().map_or(0, Vec::len);
+            let per_point = std::mem::size_of::<Vec<f64>>() + dims * std::mem::size_of::<f64>();
+            bytes += FIELD_OVERHEAD + name.len() + points.len() * per_point;
+        }
+
+        for (name, terms) in &doc.field_terms {
+            bytes +=
+                FIELD_OVERHEAD + name.len() + terms.len() * std::mem::size_of::<AnalyzedTerm>();
+            // The term strings themselves live on the heap.
+            bytes += terms.iter().map(|t| t.term.len()).sum::<usize>();
+        }
+
+        for (name, value) in &doc.stored_fields {
+            bytes += FIELD_OVERHEAD + name.len() + Self::estimate_value_size(value);
+        }
+
+        bytes
+    }
+
+    /// Estimate the heap a stored [`DataValue`] occupies.
+    fn estimate_value_size(value: &crate::data::DataValue) -> usize {
+        use crate::data::DataValue;
+
+        let inline = std::mem::size_of::<DataValue>();
+        let heap = match value {
+            DataValue::Text(s) => s.len(),
+            DataValue::Bytes(b, mime) => b.len() + mime.as_ref().map_or(0, String::len),
+            DataValue::Vector(v) => v.len() * std::mem::size_of::<f32>(),
+            DataValue::Int64Array(v) => v.len() * std::mem::size_of::<i64>(),
+            DataValue::Float64Array(v) => v.len() * std::mem::size_of::<f64>(),
+            // The remaining variants are fixed-size and already covered by
+            // `size_of::<DataValue>()`.
+            _ => 0,
+        };
+        inline + heap
+    }
+
     fn should_flush(&self) -> bool {
         self.buffered_docs.len() >= self.config.max_buffered_docs
             || self.estimate_memory_usage() >= self.config.max_buffer_memory
     }
 
     /// Estimate current memory usage.
+    ///
+    /// The buffered-document half is a running total maintained by
+    /// [`Self::track_buffered`] and the removal path, not a walk of
+    /// `buffered_docs`: this runs from [`Self::should_flush`] on every
+    /// document, so recomputing it would make ingestion quadratic.
     fn estimate_memory_usage(&self) -> usize {
-        // Rough estimation
-        let doc_memory = self.buffered_docs.len() * 1024; // 1KB per doc estimate
-        let index_memory = self.inverted_index.term_count() as usize * 256; // 256 bytes per term estimate
-        doc_memory + index_memory
+        // 256 bytes per distinct term covers the in-memory posting index,
+        // whose size tracks the vocabulary rather than the document count.
+        let index_memory = self.inverted_index.term_count() as usize * 256;
+        self.buffered_bytes + index_memory
+    }
+
+    /// Add `doc`'s estimated footprint to the buffered total.
+    fn track_buffered(&mut self, doc: &AnalyzedDocument) {
+        self.buffered_bytes = self
+            .buffered_bytes
+            .saturating_add(Self::estimate_analyzed_size(doc));
     }
 
     /// Flush the current segment to disk.
@@ -981,6 +1053,7 @@ impl InvertedIndexWriter {
 
         // Clear buffers
         self.buffered_docs.clear();
+        self.buffered_bytes = 0;
         self.buffered_doc_ids.clear();
         self.index_dirty = false;
         self.inverted_index = TermPostingIndex::new();
@@ -1070,6 +1143,7 @@ impl InvertedIndexWriter {
         let paths = self.write_segment_files(segment_name)?;
         self.extend_segment_cache(segment_name);
         self.buffered_docs.clear();
+        self.buffered_bytes = 0;
         self.buffered_doc_ids.clear();
         self.index_dirty = false;
         self.inverted_index = TermPostingIndex::new();
@@ -1742,6 +1816,7 @@ impl InvertedIndexWriter {
 
         // Clear all buffers
         self.buffered_docs.clear();
+        self.buffered_bytes = 0;
         self.buffered_doc_ids.clear();
         self.index_dirty = false;
         self.inverted_index = TermPostingIndex::new();
@@ -1828,6 +1903,17 @@ impl InvertedIndexWriter {
         // buffer is O(M)+O(N) instead of O(M·N) (Issue #828). Until the rebuild,
         // the in-memory index still holds this doc's postings; the NRT lookups
         // filter them out via `buffered_doc_ids`.
+        // Drop the removed documents' footprint from the running total
+        // before they go (#557). Summed over every match, because `retain`
+        // below removes all of them, and computed first so the immutable
+        // borrow ends before `buffered_bytes` is written.
+        let removed_bytes: usize = self
+            .buffered_docs
+            .iter()
+            .filter(|(id, _)| *id == doc_id)
+            .map(|(_, doc)| Self::estimate_analyzed_size(doc))
+            .sum();
+        self.buffered_bytes = self.buffered_bytes.saturating_sub(removed_bytes);
         self.buffered_docs.retain(|(id, _)| *id != doc_id);
         self.index_dirty = true;
 
@@ -2318,5 +2404,84 @@ impl PartSink<'_> {
                 Ok(vec![container])
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::DataValue;
+
+    /// An `AnalyzedDocument` carrying only `point_values`.
+    fn doc_with_points(count: usize, dims: usize) -> AnalyzedDocument {
+        let mut point_values = AHashMap::new();
+        point_values.insert(
+            "coords".to_string(),
+            (0..count).map(|i| vec![i as f64; dims]).collect(),
+        );
+        AnalyzedDocument {
+            field_terms: AHashMap::new(),
+            stored_fields: AHashMap::new(),
+            field_lengths: AHashMap::new(),
+            point_values,
+        }
+    }
+
+    /// #557: the size estimate must scale with the number of BKD points.
+    ///
+    /// Probed on a document with *no* terms and *no* stored fields, because
+    /// every field type that produces points also produces terms — so an
+    /// end-to-end test is satisfied by the term half alone and would pass
+    /// even with the point accounting removed.
+    #[test]
+    fn size_estimate_scales_with_point_count() {
+        let few = InvertedIndexWriter::estimate_analyzed_size(&doc_with_points(10, 2));
+        let many = InvertedIndexWriter::estimate_analyzed_size(&doc_with_points(1000, 2));
+
+        assert!(
+            many > few * 50,
+            "1000 points must estimate far above 10 points, got {many} vs {few}"
+        );
+    }
+
+    /// #557: dimensionality is part of a point's cost — a 3D point holds
+    /// more doubles than a 1D one.
+    #[test]
+    fn size_estimate_scales_with_point_dimensionality() {
+        let one_d = InvertedIndexWriter::estimate_analyzed_size(&doc_with_points(1000, 1));
+        let three_d = InvertedIndexWriter::estimate_analyzed_size(&doc_with_points(1000, 3));
+
+        assert!(
+            three_d > one_d,
+            "3D points must estimate above 1D points, got {three_d} vs {one_d}"
+        );
+    }
+
+    /// #557: stored values count too. A `Bytes` field is the clean probe —
+    /// it is stored but never lexically indexed, so it contributes no terms
+    /// and no points.
+    #[test]
+    fn size_estimate_scales_with_stored_payload() {
+        let mut small = AnalyzedDocument {
+            field_terms: AHashMap::new(),
+            stored_fields: AHashMap::new(),
+            field_lengths: AHashMap::new(),
+            point_values: AHashMap::new(),
+        };
+        let mut large = small.clone();
+        small
+            .stored_fields
+            .insert("blob".to_string(), DataValue::Bytes(vec![0u8; 16], None));
+        large.stored_fields.insert(
+            "blob".to_string(),
+            DataValue::Bytes(vec![0u8; 64 * 1024], None),
+        );
+
+        let small_estimate = InvertedIndexWriter::estimate_analyzed_size(&small);
+        let large_estimate = InvertedIndexWriter::estimate_analyzed_size(&large);
+        assert!(
+            large_estimate > small_estimate + 60_000,
+            "a 64 KiB payload must dominate the estimate, got {large_estimate} vs {small_estimate}"
+        );
     }
 }
