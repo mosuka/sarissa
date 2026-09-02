@@ -1,16 +1,21 @@
 //! Python wrapper for the Laurus [`Schema`] type.
 
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use laurus::{
-    AnalyzerSpec, BooleanOption, BuiltinAnalyzerSpec, BytesOption, DateTimeOption, DistanceMetric,
-    DynamicFieldPolicy, EmbedderDefinition, FieldOption, FlatOption, FloatOption, Geo3dOption,
-    GeoOption, HnswOption, IntegerOption, IvfOption, QuantizationMethod, RerankStorageKind, Schema,
-    TextOption,
+    AnalyzerDefinition, AnalyzerSpec, BooleanOption, BuiltinAnalyzerSpec, BytesOption,
+    CharFilterConfig, DateTimeOption, DistanceMetric, DynamicFieldPolicy, EmbedderDefinition,
+    FieldOption, FlatOption, FloatOption, Geo3dOption, GeoOption, HnswOption, IntegerOption,
+    IvfOption, QuantizationMethod, RerankStorageKind, Schema, TextOption, TokenFilterConfig,
+    TokenizerConfig,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+
+use crate::convert::py_to_json_value;
+use crate::errors::io_err_with_path;
 
 /// Convert a Python analyzer reference into an [`AnalyzerSpec`].
 ///
@@ -62,6 +67,47 @@ fn analyzer_spec_from_py(py: Python<'_>, obj: Py<PyAny>) -> PyResult<AnalyzerSpe
     Err(PyValueError::new_err(
         "analyzer must be a str or a dict (e.g. {'language': 'japanese', 'dict': '/path'})",
     ))
+}
+
+/// Convert a Python dict into a [`TokenizerConfig`], using the same
+/// `{"type": "..."}`-tagged shape as the schema TOML/JSON format.
+fn tokenizer_from_py(obj: &Bound<PyAny>) -> PyResult<TokenizerConfig> {
+    let value = py_to_json_value(obj)?;
+    serde_json::from_value(value)
+        .map_err(|e| PyValueError::new_err(format!("invalid tokenizer: {e}")))
+}
+
+/// Convert a Python dict into a [`CharFilterConfig`].
+fn char_filter_from_py(obj: &Bound<PyAny>, index: usize) -> PyResult<CharFilterConfig> {
+    let value = py_to_json_value(obj)?;
+    serde_json::from_value(value)
+        .map_err(|e| PyValueError::new_err(format!("invalid char_filters[{index}]: {e}")))
+}
+
+/// Convert a Python dict into a [`TokenFilterConfig`].
+fn token_filter_from_py(obj: &Bound<PyAny>, index: usize) -> PyResult<TokenFilterConfig> {
+    let value = py_to_json_value(obj)?;
+    serde_json::from_value(value)
+        .map_err(|e| PyValueError::new_err(format!("invalid token_filters[{index}]: {e}")))
+}
+
+/// Convert an optional Python list of dicts into a `Vec<T>`, defaulting to
+/// an empty vector when `None` (mirroring the core's `#[serde(default)]`
+/// on `AnalyzerDefinition::char_filters`/`token_filters`).
+fn filter_list_from_py<T>(
+    obj: Option<&Bound<PyAny>>,
+    label: &str,
+    convert: impl Fn(&Bound<PyAny>, usize) -> PyResult<T>,
+) -> PyResult<Vec<T>> {
+    let Some(obj) = obj else {
+        return Ok(Vec::new());
+    };
+    let seq = obj
+        .try_iter()
+        .map_err(|_| PyValueError::new_err(format!("{label} must be a list of dicts")))?;
+    seq.enumerate()
+        .map(|(i, item)| convert(&item?, i))
+        .collect()
 }
 
 /// Parse a distance metric string into [`DistanceMetric`].
@@ -489,6 +535,151 @@ impl PySchema {
         };
 
         self.inner.embedders.insert(name.to_string(), definition);
+        Ok(())
+    }
+
+    /// Register a custom analyzer definition composed of a tokenizer and
+    /// optional char/token filter chains.
+    ///
+    /// Each of `tokenizer`, `char_filters`, and `token_filters` uses the
+    /// same `{"type": "..."}`-tagged dict shape as the schema TOML/JSON
+    /// format (see [`Schema.from_toml`]), so a definition can be copied
+    /// verbatim between a `schema.toml` file and Python code.
+    ///
+    /// | tokenizer type   | required keys                | optional keys  |
+    /// |-------------------|-------------------------------|-----------------|
+    /// | `"whitespace"`    | —                              | —               |
+    /// | `"unicode_word"`  | —                              | —               |
+    /// | `"regex"`         | —                              | `pattern`, `gaps` |
+    /// | `"ngram"`         | `min_gram`, `max_gram`         | —               |
+    /// | `"lindera"`       | `mode`, `dict`                 | `user_dict`     |
+    /// | `"whole"`         | —                              | —               |
+    ///
+    /// | char filter type              | required keys           |
+    /// |----------------------------------|-------------------------|
+    /// | `"unicode_normalization"`        | `form`                  |
+    /// | `"pattern_replace"`              | `pattern`, `replacement` |
+    /// | `"mapping"`                      | `mapping`               |
+    /// | `"japanese_iteration_mark"`      | — (optional `kanji`, `kana`) |
+    ///
+    /// | token filter type   | required keys | optional keys |
+    /// |-----------------------|----------------|-----------------|
+    /// | `"lowercase"`          | —              | —               |
+    /// | `"stop"`               | —              | `words`         |
+    /// | `"stem"`               | —              | `stem_type`     |
+    /// | `"boost"`              | `boost`        | —               |
+    /// | `"limit"`              | `limit`        | —               |
+    /// | `"strip"`              | —              | —               |
+    /// | `"remove_empty"`       | —              | —               |
+    /// | `"flatten_graph"`      | —              | —               |
+    ///
+    /// Args:
+    ///     name: Unique analyzer name, referenced from
+    ///         ``add_text_field(analyzer=...)``.
+    ///     tokenizer: Dict describing the tokenizer, e.g.
+    ///         ``{"type": "ngram", "min_gram": 2, "max_gram": 3}``.
+    ///     char_filters: Optional list of dicts applied to raw text before
+    ///         tokenization (default: none).
+    ///     token_filters: Optional list of dicts applied to the token
+    ///         stream after tokenization (default: none).
+    ///
+    /// Raises:
+    ///     ValueError: if any component has an unknown ``type`` or is
+    ///         missing a required key.
+    ///
+    /// Note:
+    ///     Semantic validity (e.g. a malformed regex pattern, or
+    ///     ``min_gram > max_gram``) is not checked here; it is validated
+    ///     when the analyzer is compiled, which happens when a
+    ///     ``laurus.Index`` is built from this schema.
+    ///
+    /// Example:
+    ///     ```python
+    ///     schema.add_analyzer(
+    ///         "ja_ipadic",
+    ///         {"type": "lindera", "mode": "normal", "dict": "/var/lib/lindera/ipadic"},
+    ///         char_filters=[
+    ///             {"type": "unicode_normalization", "form": "nfkc"},
+    ///             {"type": "japanese_iteration_mark"},
+    ///         ],
+    ///         token_filters=[{"type": "lowercase"}],
+    ///     )
+    ///     schema.add_text_field("title", analyzer="ja_ipadic")
+    ///     ```
+    #[pyo3(signature = (name, tokenizer, *, char_filters=None, token_filters=None))]
+    pub fn add_analyzer(
+        &mut self,
+        name: &str,
+        tokenizer: &Bound<PyAny>,
+        char_filters: Option<&Bound<PyAny>>,
+        token_filters: Option<&Bound<PyAny>>,
+    ) -> PyResult<()> {
+        let definition = AnalyzerDefinition {
+            char_filters: filter_list_from_py(char_filters, "char_filters", char_filter_from_py)?,
+            tokenizer: tokenizer_from_py(tokenizer)?,
+            token_filters: filter_list_from_py(
+                token_filters,
+                "token_filters",
+                token_filter_from_py,
+            )?,
+        };
+        self.inner.analyzers.insert(name.to_string(), definition);
+        Ok(())
+    }
+
+    /// Return the names of custom analyzers registered in this schema, via
+    /// [`Schema.add_analyzer`] or loaded from TOML.
+    pub fn analyzer_names(&self) -> Vec<String> {
+        self.inner.analyzers.keys().cloned().collect()
+    }
+
+    /// Parse a schema from a TOML string, using the same format accepted
+    /// by ``laurus-cli create index --schema``.
+    ///
+    /// Raises:
+    ///     ValueError: if the TOML is malformed or does not match the
+    ///         schema shape.
+    #[staticmethod]
+    pub fn from_toml(toml_str: &str) -> PyResult<Self> {
+        let inner: Schema = toml::from_str(toml_str).map_err(|e| {
+            PyValueError::new_err(format!("invalid schema TOML: {}", e.to_string().trim_end()))
+        })?;
+        Ok(Self { inner })
+    }
+
+    /// Load a schema from a TOML file, e.g. one written by
+    /// ``laurus-cli create index --schema`` or by
+    /// [`Schema.to_toml_file`].
+    ///
+    /// Args:
+    ///     path: Filesystem path (``str`` or ``os.PathLike``).
+    ///
+    /// Raises:
+    ///     FileNotFoundError: if the file does not exist.
+    ///     ValueError: if the file's contents are not valid schema TOML.
+    #[staticmethod]
+    pub fn from_toml_file(path: PathBuf) -> PyResult<Self> {
+        let content = std::fs::read_to_string(&path).map_err(|e| io_err_with_path(&path, e))?;
+        Self::from_toml(&content)
+    }
+
+    /// Serialize this schema to a TOML string, in the same format
+    /// ``laurus-cli create index --schema`` accepts — so an index created
+    /// from Python can also be opened with ``laurus-cli``.
+    ///
+    /// Note:
+    ///     Table order in the output is not stable across calls (the
+    ///     underlying maps are unordered); compare parsed structures
+    ///     rather than raw text when round-tripping.
+    pub fn to_toml(&self) -> PyResult<String> {
+        toml::to_string_pretty(&self.inner)
+            .map_err(|e| PyValueError::new_err(format!("failed to serialize schema to TOML: {e}")))
+    }
+
+    /// Write this schema to a TOML file (see [`Schema.to_toml`]).
+    pub fn to_toml_file(&self, path: PathBuf) -> PyResult<()> {
+        let content = self.to_toml()?;
+        std::fs::write(&path, content).map_err(|e| io_err_with_path(&path, e))?;
         Ok(())
     }
 

@@ -1,5 +1,8 @@
 //! Error conversion between Laurus errors and Python exceptions.
 
+use std::io;
+use std::path::Path;
+
 use laurus::LaurusError;
 use pyo3::PyErr;
 use pyo3::exceptions::{PyIOError, PyRuntimeError, PyValueError};
@@ -13,4 +16,15 @@ pub fn laurus_err(err: LaurusError) -> PyErr {
         LaurusError::Field(m) => PyValueError::new_err(format!("Field error: {m}")),
         other => PyRuntimeError::new_err(other.to_string()),
     }
+}
+
+/// Wrap a filesystem I/O error with the path that caused it, then convert
+/// it via PyO3's built-in `io::Error` -> Python exception mapping (which
+/// picks `FileNotFoundError`/`PermissionError`/etc. based on `e.kind()`).
+///
+/// Intentionally does NOT go through [`laurus_err`]: `LaurusError::Io`
+/// always maps to the generic `OSError`, which would prevent callers from
+/// writing `except FileNotFoundError:` for a missing file.
+pub fn io_err_with_path(path: &Path, e: io::Error) -> PyErr {
+    io::Error::new(e.kind(), format!("{}: {e}", path.display())).into()
 }

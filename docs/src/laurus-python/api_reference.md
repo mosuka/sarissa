@@ -210,6 +210,12 @@ class Schema:
 | Method | Description |
 | :--- | :--- |
 | `add_embedder(name, config)` | Register a named embedder definition. `config` is a dict with a `"type"` key (see below). |
+| `add_analyzer(name, tokenizer, *, char_filters=None, token_filters=None)` | Register a custom analyzer definition. `tokenizer` is required; `char_filters`/`token_filters` are optional lists of dicts. Each dict uses the same `{"type": "..."}` shape as the schema TOML/JSON format (see below). Semantic validity (e.g. a malformed regex) is checked when the schema is used to build an `Index`, not here. |
+| `analyzer_names()` | Return the names of custom analyzers registered via `add_analyzer` or loaded from TOML. |
+| `Schema.from_toml(toml_str)` *(static)* | Parse a schema from a TOML string, in the same format `laurus-cli create index --schema` accepts. |
+| `Schema.from_toml_file(path)` *(static)* | Load a schema from a TOML file (`path` accepts `str` or `os.PathLike`). |
+| `to_toml()` | Serialize this schema to a TOML string in the same format `laurus-cli` accepts. |
+| `to_toml_file(path)` | Write this schema to a TOML file. |
 | `set_default_fields(fields)` | Set default search fields (list of strings). |
 | `set_dynamic_field_policy(policy)` | Set how undeclared fields are handled. `policy` is `"strict"`, `"dynamic"` (default), or `"ignore"`. See notes below. |
 | `dynamic_field_policy()` | Return the current policy as a lowercase string. |
@@ -238,6 +244,59 @@ the full behaviour matrix.
 | `"candle_bert"` | `"model"` | `embeddings-candle` |
 | `"candle_clip"` | `"model"` | `embeddings-multimodal` |
 | `"openai"` | `"model"` | `embeddings-openai` |
+
+### Analyzer components
+
+Used by `add_analyzer(name, tokenizer, *, char_filters=None, token_filters=None)`
+and by the `[analyzers.<name>]` TOML section. `tokenizer` is a single dict;
+`char_filters`/`token_filters` are lists of dicts, applied in list order.
+
+**Tokenizers** (`tokenizer`, exactly one):
+
+| `"type"` | Required keys | Optional keys |
+| :--- | :--- | :--- |
+| `"whitespace"` | -- | -- |
+| `"unicode_word"` | -- | -- |
+| `"regex"` | -- | `"pattern"` (default `\w+`), `"gaps"` (default `false`) |
+| `"ngram"` | `"min_gram"`, `"max_gram"` | -- |
+| `"lindera"` | `"mode"`, `"dict"` | `"user_dict"` |
+| `"whole"` | -- | -- |
+
+**Char filters** (`char_filters`, applied to raw text before tokenization):
+
+| `"type"` | Required keys | Optional keys |
+| :--- | :--- | :--- |
+| `"unicode_normalization"` | `"form"` (`"nfc"`/`"nfd"`/`"nfkc"`/`"nfkd"`) | -- |
+| `"pattern_replace"` | `"pattern"`, `"replacement"` | -- |
+| `"mapping"` | `"mapping"` (dict of string replacements) | -- |
+| `"japanese_iteration_mark"` | -- | `"kanji"` (default `true`), `"kana"` (default `true`) |
+
+**Token filters** (`token_filters`, applied to the token stream after tokenization):
+
+| `"type"` | Required keys | Optional keys |
+| :--- | :--- | :--- |
+| `"lowercase"` | -- | -- |
+| `"stop"` | -- | `"words"` (default: English stop words) |
+| `"stem"` | -- | `"stem_type"` (`"porter"`/`"simple"`/`"identity"`) |
+| `"boost"` | `"boost"` | -- |
+| `"limit"` | `"limit"` | -- |
+| `"strip"` | -- | -- |
+| `"remove_empty"` | -- | -- |
+| `"flatten_graph"` | -- | -- |
+
+```python
+schema = laurus.Schema()
+schema.add_analyzer(
+    "ja_ipadic",
+    {"type": "lindera", "mode": "normal", "dict": "/var/lib/lindera/ipadic"},
+    char_filters=[
+        {"type": "unicode_normalization", "form": "nfkc"},
+        {"type": "japanese_iteration_mark"},
+    ],
+    token_filters=[{"type": "lowercase"}],
+)
+schema.add_text_field("title", analyzer="ja_ipadic")
+```
 
 ### Distance metrics
 
