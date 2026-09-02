@@ -2,9 +2,9 @@
 
 use chrono::{DateTime, Utc};
 use laurus::{DataValue, Document};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
 /// Convert a Python `dict` to a [`Document`].
 pub fn dict_to_document(py: Python, dict: &Bound<PyDict>) -> PyResult<Document> {
@@ -138,4 +138,99 @@ pub fn data_value_to_py(py: Python, value: &DataValue) -> PyResult<Py<PyAny>> {
         DataValue::Int64Array(arr) => Ok(arr.clone().into_pyobject(py)?.unbind().into_any()),
         DataValue::Float64Array(arr) => Ok(arr.clone().into_pyobject(py)?.unbind().into_any()),
     }
+}
+
+/// Maximum nesting depth accepted by [`py_to_json_value`].
+///
+/// Guards against a self-referential container (e.g. `d = {}; d["x"] = d`)
+/// blowing the Rust call stack, which would abort the process rather than
+/// raise a Python exception.
+const MAX_JSON_VALUE_DEPTH: usize = 32;
+
+/// Convert an arbitrary Python object into a [`serde_json::Value`].
+///
+/// Used to bridge Python `dict`/`list` literals (e.g. the `tokenizer` /
+/// `char_filters` / `token_filters` arguments of `Schema.add_analyzer`)
+/// into serde-deserializable JSON so they can be decoded with exactly the
+/// same semantics (field defaults, `snake_case` variant names, etc.) as the
+/// TOML schema format.
+///
+/// Type mapping:
+/// - `None`         → `Value::Null`
+/// - `bool`         → `Value::Bool`  (must be checked before int)
+/// - `int`          → `Value::Number` (rejected if it fits neither `i64` nor `u64`)
+/// - `float`        → `Value::Number` (rejected if NaN or infinite)
+/// - `str`          → `Value::String`
+/// - `list`/`tuple` → `Value::Array`
+/// - `dict`         → `Value::Object` (keys must be `str`)
+///
+/// Any other type, or nesting deeper than [`MAX_JSON_VALUE_DEPTH`], is
+/// rejected with a `ValueError`/`TypeError`.
+pub fn py_to_json_value(obj: &Bound<PyAny>) -> PyResult<serde_json::Value> {
+    py_to_json_value_inner(obj, 0)
+}
+
+fn py_to_json_value_inner(obj: &Bound<PyAny>, depth: usize) -> PyResult<serde_json::Value> {
+    if depth > MAX_JSON_VALUE_DEPTH {
+        return Err(PyValueError::new_err(format!(
+            "value is nested too deeply (max depth: {MAX_JSON_VALUE_DEPTH})"
+        )));
+    }
+    if obj.is_none() {
+        return Ok(serde_json::Value::Null);
+    }
+    // bool must come before int because Python bool is a subclass of int.
+    if obj.is_instance_of::<PyBool>() {
+        let b: bool = obj.extract()?;
+        return Ok(serde_json::Value::Bool(b));
+    }
+    if obj.is_instance_of::<PyInt>() {
+        // Try i64 first, then fall back to u64 for large unsigned values;
+        // anything wider than that has no lossless serde_json representation.
+        if let Ok(i) = obj.extract::<i64>() {
+            return Ok(serde_json::Value::Number(i.into()));
+        }
+        let u: u64 = obj.extract().map_err(|_| {
+            PyValueError::new_err("integer is too large to represent in a schema value")
+        })?;
+        return Ok(serde_json::Value::Number(u.into()));
+    }
+    if obj.is_instance_of::<PyFloat>() {
+        let f: f64 = obj.extract()?;
+        let n = serde_json::Number::from_f64(f)
+            .ok_or_else(|| PyValueError::new_err("float value must be finite (not NaN or inf)"))?;
+        return Ok(serde_json::Value::Number(n));
+    }
+    if obj.is_instance_of::<PyString>() {
+        let s: String = obj.extract()?;
+        return Ok(serde_json::Value::String(s));
+    }
+    if obj.is_instance_of::<PyList>() || obj.is_instance_of::<PyTuple>() {
+        let items: Vec<serde_json::Value> = obj
+            .try_iter()?
+            .map(|item| py_to_json_value_inner(&item?, depth + 1))
+            .collect::<PyResult<_>>()?;
+        return Ok(serde_json::Value::Array(items));
+    }
+    if obj.is_instance_of::<PyDict>() {
+        let dict = obj.cast::<PyDict>()?;
+        let mut map = serde_json::Map::with_capacity(dict.len());
+        for (key, value) in dict.iter() {
+            let key: String = key.extract().map_err(|_| {
+                PyTypeError::new_err(format!(
+                    "dict keys must be str, got {}",
+                    key.get_type()
+                        .name()
+                        .map(|n| n.to_string())
+                        .unwrap_or_default()
+                ))
+            })?;
+            map.insert(key, py_to_json_value_inner(&value, depth + 1)?);
+        }
+        return Ok(serde_json::Value::Object(map));
+    }
+    Err(PyValueError::new_err(format!(
+        "Cannot convert Python value of type {} to a schema value",
+        obj.get_type().name()?
+    )))
 }

@@ -2927,7 +2927,9 @@ dependencies = [
  "chrono",
  "laurus",
  "pyo3",
+ "serde_json",
  "tokio",
+ "toml",
 ]
 
 [[package]]
