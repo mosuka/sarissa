@@ -129,10 +129,12 @@ test-laurus-ruby: ## Test laurus-ruby (Rust unit tests + Ruby minitest)
 test-laurus-php: ## Test laurus-php (build + PHPUnit)
 ifeq ($(shell uname -s),Darwin)
 	RUSTFLAGS="-C link-args=-Wl,-undefined,dynamic_lookup" cargo build -p laurus-php --release
+	$(eval LAURUS_PHP_EXT := ../target/release/liblaurus_php.dylib)
 else
 	cargo build -p laurus-php --release
+	$(eval LAURUS_PHP_EXT := ../target/release/liblaurus_php.so)
 endif
-	cd laurus-php && composer install --quiet && php -d extension=../target/release/liblaurus_php.so vendor/bin/phpunit tests/LaurusTest.php
+	cd laurus-php && composer install --quiet && php -d extension=$(LAURUS_PHP_EXT) vendor/bin/phpunit tests/LaurusTest.php
 
 test-laurus-wasm: ## Build-test laurus-wasm (wasm32 target)
 	cargo build -p laurus-wasm --target wasm32-unknown-unknown
