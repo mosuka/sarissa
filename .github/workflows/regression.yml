@@ -521,7 +521,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-        node: ["22"]
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Run checkout
@@ -534,7 +533,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version-file: ".nvmrc"
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@v1
