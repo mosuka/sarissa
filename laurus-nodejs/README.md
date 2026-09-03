@@ -60,7 +60,8 @@ for (const r of results) {
 ```javascript
 // Create index (in-memory or file-based)
 const index = await Index.create();                    // in-memory
-const index = await Index.create("./myindex", schema); // persistent
+const index = await Index.create("./myindex", schema); // persistent (writes ./myindex/schema.toml + ./myindex/store/)
+const reopened = await Index.create("./myindex");       // reopen: omit `schema`, it's loaded from disk
 
 // Document CRUD
 await index.putDocument("id", { field: "value" });     // upsert

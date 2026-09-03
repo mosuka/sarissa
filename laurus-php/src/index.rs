@@ -12,7 +12,7 @@ use laurus::{
 };
 
 use crate::convert::{document_to_hashtable, hashtable_to_document};
-use crate::errors::laurus_err;
+use crate::errors::{index_dir_err, laurus_err};
 use crate::schema::PhpSchema;
 use crate::search::{PhpSearchResult, build_request_from_php, to_php_search_result};
 
@@ -283,13 +283,29 @@ pub struct PhpIndex {
 
 #[php_impl]
 impl PhpIndex {
-    /// Create a new index.
+    /// Create a new index, or reopen an existing one.
+    ///
+    /// When `path` is given, the directory follows the same
+    /// `<path>/schema.toml` + `<path>/store/` layout `laurus-cli create
+    /// index`/`--index-dir` uses, so an index built here can be opened by
+    /// the CLI (and vice versa) without any path juggling.
+    ///
+    /// * If `<path>/schema.toml` does not yet exist, this **creates** a new
+    ///   index: the given `schema` (or an empty one, if omitted) is
+    ///   persisted to `<path>/schema.toml`.
+    /// * If `<path>/schema.toml` already exists, this **reopens** the
+    ///   index: `schema` must be omitted (null) — the persisted schema is
+    ///   loaded instead. Passing an explicit `schema` here throws a
+    ///   `ValueError`, since it would be ambiguous which one should win.
     ///
     /// # Arguments
     ///
     /// * `path` - Directory path for persistent storage. Pass null (default)
     ///   for an ephemeral in-memory index.
-    /// * `schema` - Schema definition (optional).
+    /// * `schema` - Schema definition. Required (or optional) only when
+    ///   *creating* a new index; must be omitted when reopening an existing
+    ///   one. If omitted for both an in-memory index and a brand-new
+    ///   file-backed one, an empty schema is used.
     /// * `wal_sync_policy` - Optional [`PhpWalSyncPolicy`] controlling when the
     ///   write-ahead log is forced durable. Defaults to per-record durability
     ///   ([`WalSyncPolicy::PerRecord`]) when null. Use
@@ -298,6 +314,12 @@ impl PhpIndex {
     ///   commits during ingestion. Defaults to manual (caller-driven commits)
     ///   when null. Use [`PhpCommitPolicy::every_docs`] to auto-commit every
     ///   `n` documents.
+    ///
+    /// # Exceptions
+    ///
+    /// Throws a `ValueError` if `path` points at an existing index and
+    /// `schema` was also given, or if `path` contains an index in the
+    /// pre-existing (pre-Issue-1059) flat layout.
     pub fn __construct(
         path: Option<String>,
         schema: Option<&PhpSchema>,
@@ -307,12 +329,8 @@ impl PhpIndex {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| ext_php_rs::exception::PhpException::default(e.to_string()))?;
 
-        let storage = create_storage(path.as_deref())?;
-
-        let schema_val = match schema {
-            Some(php_schema) => php_schema.inner.borrow().clone(),
-            None => laurus::Schema::default(),
-        };
+        let schema_val = schema.map(|php_schema| php_schema.inner.borrow().clone());
+        let (schema_val, storage) = resolve_storage_and_schema(path.as_deref(), schema_val)?;
 
         let mut builder = Engine::builder(storage, schema_val);
         if let Some(policy) = wal_sync_policy {
@@ -640,7 +658,6 @@ impl PhpIndex {
 // Storage factory helper
 // ---------------------------------------------------------------------------
 
-/// Create a storage backend from an optional path.
 /// Convert an array of `[id, doc]` pairs into the engine's
 /// `(String, Document)` batch, raising an exception that names the offending
 /// position on any entry that is not a two-element `[string, array]` pair.
@@ -675,21 +692,34 @@ fn pairs_to_documents(docs: &Zval) -> PhpResult<Vec<(String, laurus::Document)>>
     Ok(batch)
 }
 
+/// Resolve the `(Schema, Storage)` pair for [`PhpIndex::__construct`].
+///
+/// `path=None` keeps the pre-existing in-memory behavior (schema defaults
+/// to empty, no persistence, no conflict checking). `path=Some(p)` defers
+/// to [`laurus::index_dir::open_or_create`], which applies the
+/// `<p>/schema.toml` + `<p>/store/` convention shared with `laurus-cli`.
 ///
 /// # Arguments
 ///
 /// * `path` - Optional directory path. `None` means in-memory storage.
+/// * `schema` - Schema explicitly passed by the caller, if any, prior to
+///   defaulting. Must stay `None` (rather than a defaulted `Schema`) so
+///   `open_or_create` can distinguish "no schema passed" from "schema
+///   explicitly passed" for its reopen-conflict check.
 ///
 /// # Returns
 ///
-/// An `Arc<dyn Storage>` for the engine.
-fn create_storage(path: Option<&str>) -> PhpResult<Arc<dyn Storage>> {
-    let config = match path {
-        None => StorageConfig::Memory(Default::default()),
-        Some(p) => {
-            use laurus::storage::file::FileStorageConfig;
-            StorageConfig::File(FileStorageConfig::new(Path::new(p)))
+/// The resolved `(Schema, Storage)` pair for the engine builder.
+fn resolve_storage_and_schema(
+    path: Option<&str>,
+    schema: Option<laurus::Schema>,
+) -> PhpResult<(laurus::Schema, Arc<dyn Storage>)> {
+    match path {
+        None => {
+            let storage = StorageFactory::create(StorageConfig::Memory(Default::default()))
+                .map_err(laurus_err)?;
+            Ok((schema.unwrap_or_default(), storage))
         }
-    };
-    StorageFactory::create(config).map_err(laurus_err)
+        Some(p) => laurus::index_dir::open_or_create(Path::new(p), schema).map_err(index_dir_err),
+    }
 }

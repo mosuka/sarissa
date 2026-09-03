@@ -2852,6 +2852,7 @@ dependencies = [
  "tokenizers 0.23.1",
  "tokio",
  "tokio-test",
+ "toml",
  "unicode-normalization",
  "unicode-segmentation",
  "uuid",
@@ -2929,7 +2930,6 @@ dependencies = [
  "pyo3",
  "serde_json",
  "tokio",
- "toml",
 ]
 
 [[package]]

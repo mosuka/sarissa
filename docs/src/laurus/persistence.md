@@ -339,6 +339,18 @@ The engine uses `PrefixedStorage` to organize data:
 └── engine.wal        # Write-ahead log
 ```
 
+`<storage root>` is a layout-agnostic abstraction: the engine itself has no
+concept of `schema.toml` or where its storage root sits within a larger
+directory. `laurus-cli`, `laurus-server`, and the language bindings
+(Python, Node.js, Ruby, PHP) all place `<storage root>` at
+`<index_dir>/store/`, alongside a `<index_dir>/schema.toml` holding the
+schema — a convention owned by those entry points, not the engine. This
+means an index directory created by one of them can be opened by any of
+the others without restructuring anything on disk; see each binding's
+`Index`/`create index` documentation for the exact create-vs-reopen
+semantics (in particular, reopening an existing index only needs the
+directory path — the persisted schema is loaded automatically).
+
 ## Next Steps
 
 - How deletions are handled: [Deletions & Compaction](deletions.md)

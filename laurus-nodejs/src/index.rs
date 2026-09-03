@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::commit::JsCommitPolicy;
 use crate::convert::{data_value_to_json, json_to_document};
-use crate::errors::laurus_err;
+use crate::errors::{index_dir_err, laurus_err};
 use crate::query::{JsQuery, JsTermQuery, JsVectorQuery, JsVectorQueryInner, JsVectorTextQuery};
 use crate::schema::JsSchema;
 use crate::search::{
@@ -13,7 +13,7 @@ use crate::search::{
     build_vector_request, to_js_search_result,
 };
 use crate::wal::JsWalSyncPolicy;
-use laurus::{Engine, Storage, StorageConfig, StorageFactory};
+use laurus::{Engine, Schema, Storage, StorageConfig, StorageFactory};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::Value;
@@ -69,13 +69,29 @@ pub struct JsIndex {
 
 #[napi]
 impl JsIndex {
-    /// Create a new index.
+    /// Create a new index, or reopen an existing one.
+    ///
+    /// When `path` is given, the directory follows the same
+    /// `<path>/schema.toml` + `<path>/store/` layout `laurus-cli create
+    /// index`/`--index-dir` uses, so an index built here can be opened by
+    /// the CLI (and vice versa) without any path juggling.
+    ///
+    /// * If `<path>/schema.toml` does not yet exist, this **creates** a new
+    ///   index: the given `schema` (or an empty one, if omitted) is
+    ///   persisted to `<path>/schema.toml`.
+    /// * If `<path>/schema.toml` already exists, this **reopens** the
+    ///   index: `schema` must be omitted — the persisted schema is loaded
+    ///   instead. Passing an explicit `schema` here throws, since it would
+    ///   be ambiguous which one should win.
     ///
     /// # Arguments
     ///
     /// * `path` - Directory path for persistent storage.
     ///     Pass `null` or omit for an ephemeral in-memory index.
-    /// * `schema` - Schema definition. If omitted, an empty schema is used.
+    /// * `schema` - Schema definition. Only meaningful when *creating* a
+    ///     new index; must be omitted when reopening an existing one. If
+    ///     omitted for both an in-memory index and a brand-new file-backed
+    ///     one, an empty schema is used.
     /// * `wal_sync_policy` - Optional WAL durability policy (see
     ///     `WalSyncPolicy`). When omitted, the default per-record policy is
     ///     used, where every append is fsync'd before it returns.
@@ -86,6 +102,12 @@ impl JsIndex {
     /// # Returns
     ///
     /// A new `Index` instance.
+    ///
+    /// # Errors
+    ///
+    /// Throws if `path` points at an existing index and `schema` was also
+    /// given, or if `path` contains an index in the pre-existing
+    /// (pre-Issue-1059) flat layout.
     #[napi(factory)]
     pub async fn create(
         path: Option<String>,
@@ -93,8 +115,8 @@ impl JsIndex {
         wal_sync_policy: Option<&JsWalSyncPolicy>,
         commit_policy: Option<&JsCommitPolicy>,
     ) -> Result<Self> {
-        let storage = create_storage(path.as_deref())?;
-        let schema = schema.map(|s| s.inner.clone()).unwrap_or_default();
+        let schema = schema.map(|s| s.inner.clone());
+        let (schema, storage) = resolve_storage_and_schema(path.as_deref(), schema)?;
 
         let mut builder = Engine::builder(storage, schema);
         if let Some(policy) = wal_sync_policy {
@@ -497,13 +519,22 @@ fn pairs_to_documents(docs: Vec<(String, Value)>) -> Result<Vec<(String, laurus:
 // Storage factory helper
 // ---------------------------------------------------------------------------
 
-fn create_storage(path: Option<&str>) -> Result<Arc<dyn Storage>> {
-    let config = match path {
-        None => StorageConfig::Memory(Default::default()),
-        Some(p) => {
-            use laurus::storage::file::FileStorageConfig;
-            StorageConfig::File(FileStorageConfig::new(Path::new(p)))
+/// Resolve the `(Schema, Storage)` pair for [`JsIndex::create`].
+///
+/// `path=None` keeps the pre-existing in-memory behavior (schema defaults
+/// to empty, no persistence, no conflict checking). `path=Some(p)` defers
+/// to [`laurus::index_dir::open_or_create`], which applies the
+/// `<p>/schema.toml` + `<p>/store/` convention shared with `laurus-cli`.
+fn resolve_storage_and_schema(
+    path: Option<&str>,
+    schema: Option<Schema>,
+) -> Result<(Schema, Arc<dyn Storage>)> {
+    match path {
+        None => {
+            let storage = StorageFactory::create(StorageConfig::Memory(Default::default()))
+                .map_err(laurus_err)?;
+            Ok((schema.unwrap_or_default(), storage))
         }
-    };
-    StorageFactory::create(config).map_err(laurus_err)
+        Some(p) => laurus::index_dir::open_or_create(Path::new(p), schema).map_err(index_dir_err),
+    }
 }

@@ -12,10 +12,17 @@ use Laurus\Schema;
 $index = new Index();
 
 // File-based index (persistent)
+// Writes `./myindex/schema.toml` and `./myindex/store/` -- the same layout
+// `laurus-cli create index --schema` uses, so this directory can also be
+// opened with the CLI (or vice versa).
 $schema = new Schema();
 $schema->addTextField("title");
 $schema->addTextField("body");
 $index = new Index("./myindex", $schema);
+
+// Reopening it later only needs the path -- passing `$schema` again would
+// throw, since the schema is already persisted.
+$index = new Index("./myindex");
 ```
 
 ## 2. Index documents

@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use crate::commit_policy::RbCommitPolicy;
 use crate::convert::{document_to_hash, hash_to_document};
-use crate::errors::laurus_err;
+use crate::errors::{index_dir_err, laurus_err};
 use crate::schema::RbSchema;
 use crate::search::{build_request_from_rb, to_rb_search_result};
 use crate::wal::RbWalSyncPolicy;
-use laurus::{Engine, EngineStats, Storage, StorageConfig, StorageFactory};
+use laurus::{Engine, EngineStats, Schema, Storage, StorageConfig, StorageFactory};
 use magnus::prelude::*;
 use magnus::scan_args::{get_kwargs, scan_args};
 use magnus::{Error, RArray, RHash, RModule, Ruby, TryConvert, Value};
@@ -48,14 +48,30 @@ pub struct RbIndex {
 }
 
 impl RbIndex {
-    /// Create a new index.
+    /// Create a new index, or reopen an existing one.
+    ///
+    /// When `path:` is given, the directory follows the same
+    /// `<path>/schema.toml` + `<path>/store/` layout `laurus-cli create
+    /// index`/`--index-dir` uses, so an index built here can be opened by
+    /// the CLI (and vice versa) without any path juggling.
+    ///
+    /// * If `<path>/schema.toml` does not yet exist, this **creates** a new
+    ///   index: the given `schema:` (or an empty one, if omitted) is
+    ///   persisted to `<path>/schema.toml`.
+    /// * If `<path>/schema.toml` already exists, this **reopens** the
+    ///   index: `schema:` must be omitted (`nil`) — the persisted schema is
+    ///   loaded instead. Passing an explicit `schema:` here raises
+    ///   `ArgumentError`, since it would be ambiguous which one should win.
     ///
     /// # Arguments
     ///
     /// * `args` - Keyword arguments:
     ///   - `path:` (String, optional): Directory path for persistent storage.
     ///     Pass `nil` (default) for an ephemeral in-memory index.
-    ///   - `schema:` (Schema, optional): Schema definition.
+    ///   - `schema:` (Schema, optional): Schema definition. Required (or
+    ///     optional) only when *creating* a new index; must be omitted when
+    ///     reopening an existing one. If omitted for both an in-memory index
+    ///     and a brand-new file-backed one, an empty schema is used.
     ///   - `wal_sync_policy:` (WalSyncPolicy, optional): WAL durability policy.
     ///     Defaults to per-record fsync (highest durability). Pass
     ///     `Laurus::WalSyncPolicy.group(...)` to enable group commit for higher
@@ -64,6 +80,12 @@ impl RbIndex {
     ///     Defaults to manual (the caller drives every commit). Pass
     ///     `Laurus::CommitPolicy.every_docs(n)` to auto-commit every `n`
     ///     applied documents.
+    ///
+    /// # Errors
+    ///
+    /// Raises a Ruby `ArgumentError` if `path:` points at an existing index
+    /// and `schema:` was also given, or if `path:` contains an index in the
+    /// pre-existing (pre-Issue-1059) flat layout.
     fn new(args: &[Value]) -> Result<Self, Error> {
         let ruby = Ruby::get().expect("called from Ruby thread");
         let args = scan_args::<(), (), (), (), RHash, ()>(args)?;
@@ -91,10 +113,8 @@ impl RbIndex {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
 
-        let storage = create_storage(path.as_deref())?;
-        let schema = schema_ref
-            .map(|s| s.inner.borrow().clone())
-            .unwrap_or_default();
+        let schema = schema_ref.map(|s| s.inner.borrow().clone());
+        let (schema, storage) = resolve_storage_and_schema(path.as_deref(), schema)?;
 
         let mut builder = Engine::builder(storage, schema);
         if let Some(policy) = wal_sync_policy {
@@ -418,13 +438,9 @@ impl RbIndex {
 }
 
 // ---------------------------------------------------------------------------
-// Storage factory helper
+// Batch-ingestion helper
 // ---------------------------------------------------------------------------
 
-/// Create a storage backend from an optional path.
-///
-/// # Arguments
-///
 /// Convert an Array of `[id, hash]` pairs into the engine's
 /// `(String, Document)` batch, raising an ArgumentError that names the
 /// offending position on any entry that is not a two-element `[String, Hash]`
@@ -466,20 +482,39 @@ fn pairs_to_documents(ruby: &Ruby, docs: RArray) -> Result<Vec<(String, laurus::
     Ok(batch)
 }
 
+// ---------------------------------------------------------------------------
+// Storage factory helper
+// ---------------------------------------------------------------------------
+
+/// Resolve the `(Schema, Storage)` pair for [`RbIndex::new`].
+///
+/// `path: nil` keeps the pre-existing in-memory behavior (schema defaults
+/// to empty, no persistence, no conflict checking). `path: Some(p)` defers
+/// to `laurus::index_dir::open_or_create`, which applies the
+/// `<p>/schema.toml` + `<p>/store/` convention shared with `laurus-cli`.
+///
+/// # Arguments
+///
 /// * `path` - Optional directory path. `None` means in-memory storage.
+/// * `schema` - Optional schema. Only meaningful when creating a new
+///   file-backed index; see `laurus::index_dir::open_or_create` for the
+///   reopen-conflict rule.
 ///
 /// # Returns
 ///
-/// An `Arc<dyn Storage>` for the engine.
-fn create_storage(path: Option<&str>) -> Result<Arc<dyn Storage>, Error> {
-    let config = match path {
-        None => StorageConfig::Memory(Default::default()),
-        Some(p) => {
-            use laurus::storage::file::FileStorageConfig;
-            StorageConfig::File(FileStorageConfig::new(Path::new(p)))
+/// The resolved `Schema` and an `Arc<dyn Storage>` for the engine.
+fn resolve_storage_and_schema(
+    path: Option<&str>,
+    schema: Option<Schema>,
+) -> Result<(Schema, Arc<dyn Storage>), Error> {
+    match path {
+        None => {
+            let storage = StorageFactory::create(StorageConfig::Memory(Default::default()))
+                .map_err(laurus_err)?;
+            Ok((schema.unwrap_or_default(), storage))
         }
-    };
-    StorageFactory::create(config).map_err(laurus_err)
+        Some(p) => laurus::index_dir::open_or_create(Path::new(p), schema).map_err(index_dir_err),
+    }
 }
 
 // ---------------------------------------------------------------------------

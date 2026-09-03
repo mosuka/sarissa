@@ -28,3 +28,22 @@ pub fn laurus_err(err: LaurusError) -> PyErr {
 pub fn io_err_with_path(path: &Path, e: io::Error) -> PyErr {
     io::Error::new(e.kind(), format!("{}: {e}", path.display())).into()
 }
+
+/// Convert a [`laurus::index_dir::IndexDirError`] into a Python exception.
+///
+/// `SchemaConflict`/`LegacyFlatLayout` are both caller-fixable misuse, so
+/// they become `ValueError` (matching how [`laurus_err`] treats
+/// `LaurusError::Schema`). `Io` goes through [`io_err_with_path`] rather
+/// than `laurus_err` for the same reason `laurus_err` isn't used for plain
+/// I/O elsewhere in this crate: it preserves `FileNotFoundError` etc.
+/// instead of flattening to a generic `OSError`.
+pub fn index_dir_err(err: laurus::index_dir::IndexDirError) -> PyErr {
+    use laurus::index_dir::IndexDirError;
+    match err {
+        IndexDirError::SchemaConflict { .. } | IndexDirError::LegacyFlatLayout { .. } => {
+            PyValueError::new_err(err.to_string())
+        }
+        IndexDirError::Io { path, source } => io_err_with_path(&path, source),
+        IndexDirError::Core(e) => laurus_err(e),
+    }
+}

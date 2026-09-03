@@ -69,6 +69,16 @@ fn analyzer_spec_from_py(py: Python<'_>, obj: Py<PyAny>) -> PyResult<AnalyzerSpe
     ))
 }
 
+/// Convert a [`laurus::LaurusError`] from [`Schema::from_toml`]/[`Schema::to_toml`]
+/// into a `ValueError`, preserving their message text as-is (both always
+/// return the `Schema` variant; the fallback exists only for type safety).
+fn schema_toml_err(e: laurus::LaurusError) -> PyErr {
+    match e {
+        laurus::LaurusError::Schema(m) => PyValueError::new_err(m),
+        other => crate::errors::laurus_err(other),
+    }
+}
+
 /// Convert a Python dict into a [`TokenizerConfig`], using the same
 /// `{"type": "..."}`-tagged shape as the schema TOML/JSON format.
 fn tokenizer_from_py(obj: &Bound<PyAny>) -> PyResult<TokenizerConfig> {
@@ -641,9 +651,7 @@ impl PySchema {
     ///         schema shape.
     #[staticmethod]
     pub fn from_toml(toml_str: &str) -> PyResult<Self> {
-        let inner: Schema = toml::from_str(toml_str).map_err(|e| {
-            PyValueError::new_err(format!("invalid schema TOML: {}", e.to_string().trim_end()))
-        })?;
+        let inner = Schema::from_toml(toml_str).map_err(schema_toml_err)?;
         Ok(Self { inner })
     }
 
@@ -672,8 +680,7 @@ impl PySchema {
     ///     underlying maps are unordered); compare parsed structures
     ///     rather than raw text when round-tripping.
     pub fn to_toml(&self) -> PyResult<String> {
-        toml::to_string_pretty(&self.inner)
-            .map_err(|e| PyValueError::new_err(format!("failed to serialize schema to TOML: {e}")))
+        self.inner.to_toml().map_err(schema_toml_err)
     }
 
     /// Write this schema to a TOML file (see [`Schema.to_toml`]).

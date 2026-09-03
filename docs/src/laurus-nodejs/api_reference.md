@@ -19,10 +19,12 @@ class Index {
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `path` | `string \| null` | `null` | Directory for persistent storage. `null` creates an in-memory index. |
-| `schema` | `Schema` | empty | Schema definition. |
+| `path` | `string \| null` | `null` | Directory for persistent storage. `null` creates an in-memory index. When given, the directory follows the `<path>/schema.toml` + `<path>/store/` layout `laurus-cli create index`/`--index-dir` uses, so an index built here can also be opened by the CLI (and vice versa). See below. |
+| `schema` | `Schema` | empty | Schema definition. Only meaningful when *creating* a new file-backed index (or an in-memory one); must be omitted when reopening an existing file-backed index -- the persisted schema is loaded instead. An empty schema is used when omitted for a new index. |
 | `walSyncPolicy` | `WalSyncPolicy` | per-record | WAL durability policy. Omit to keep the default per-record `fsync`. See [WAL sync policy / durability](#wal-sync-policy--durability). |
 | `commitPolicy` | `CommitPolicy` | manual | Auto-commit policy. Omit to keep the default manual policy (the caller drives every `commit()`). See [Commit policy / auto-commit](#commit-policy--auto-commit). |
+
+**Creating vs. reopening a file-backed index** (`path` given): if `<path>/schema.toml` does not yet exist, this call **creates** a new index and persists `schema` (or an empty schema, if omitted) to it. If `<path>/schema.toml` already exists, this call **reopens** the index -- `schema` must be omitted, or the call throws (it would be ambiguous which schema should win). It also throws if `path` contains an index in the layout used before this convention was introduced (segment files directly under `path`, no `schema.toml`).
 
 ### Methods
 

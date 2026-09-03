@@ -4,12 +4,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::convert::{dict_to_document, document_to_dict};
-use crate::errors::laurus_err;
+use crate::errors::{index_dir_err, laurus_err};
 use crate::schema::PySchema;
 use crate::search::{PySearchResult, build_request_from_py, to_py_search_result};
 use laurus::{
-    CommitPolicy, DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Engine, EngineStats, Storage,
-    StorageConfig, StorageFactory, WalSyncPolicy,
+    CommitPolicy, DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Engine, EngineStats, Schema,
+    Storage, StorageConfig, StorageFactory, WalSyncPolicy,
 };
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -296,12 +296,28 @@ pub struct PyIndex {
 
 #[pymethods]
 impl PyIndex {
-    /// Create a new index.
+    /// Create a new index, or reopen an existing one.
+    ///
+    /// When `path` is given, the directory follows the same
+    /// `<path>/schema.toml` + `<path>/store/` layout `laurus-cli create
+    /// index`/`--index-dir` uses, so an index built here can be opened by
+    /// the CLI (and vice versa) without any path juggling.
+    ///
+    /// * If `<path>/schema.toml` does not yet exist, this **creates** a new
+    ///   index: the given `schema` (or an empty one, if omitted) is
+    ///   persisted to `<path>/schema.toml`.
+    /// * If `<path>/schema.toml` already exists, this **reopens** the
+    ///   index: `schema` must be omitted (`None`) — the persisted schema
+    ///   is loaded instead. Passing an explicit `schema` here raises
+    ///   `ValueError`, since it would be ambiguous which one should win.
     ///
     /// Args:
     ///     path: Directory path for persistent storage.
     ///           Pass `None` (default) for an ephemeral in-memory index.
-    ///     schema: Schema definition.  If omitted, an empty schema is used.
+    ///     schema: Schema definition. Required (or optional) only when
+    ///           *creating* a new index; must be omitted when reopening an
+    ///           existing one. If omitted for both an in-memory index and a
+    ///           brand-new file-backed one, an empty schema is used.
     ///     wal_sync_policy: Optional [`WalSyncPolicy`] controlling when WAL
     ///           appends are fsync'd. When `None` (the default), laurus uses
     ///           per-record durability (every append is fsync'd before it
@@ -309,6 +325,11 @@ impl PyIndex {
     ///     commit_policy: Optional [`CommitPolicy`] controlling automatic
     ///           commits during ingestion. When `None` (the default), the
     ///           engine is manual — the caller drives every `commit()`.
+    ///
+    /// Raises:
+    ///     ValueError: if `path` points at an existing index and `schema`
+    ///         was also given, or if `path` contains an index in the
+    ///         pre-existing (pre-Issue-1059) flat layout.
     #[new]
     #[pyo3(signature = (path=None, schema=None, wal_sync_policy=None, commit_policy=None))]
     pub fn new(
@@ -320,8 +341,8 @@ impl PyIndex {
         let rt =
             tokio::runtime::Runtime::new().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
-        let storage = create_storage(path.as_deref())?;
-        let schema = schema.map(|s| s.inner.clone()).unwrap_or_default();
+        let schema = schema.map(|s| s.inner.clone());
+        let (schema, storage) = resolve_storage_and_schema(path.as_deref(), schema)?;
 
         let mut builder = Engine::builder(storage, schema);
         if let Some(p) = wal_sync_policy {
@@ -643,13 +664,22 @@ fn pairs_to_documents(
 // Storage factory helper
 // ---------------------------------------------------------------------------
 
-fn create_storage(path: Option<&str>) -> PyResult<Arc<dyn Storage>> {
-    let config = match path {
-        None => StorageConfig::Memory(Default::default()),
-        Some(p) => {
-            use laurus::storage::file::FileStorageConfig;
-            StorageConfig::File(FileStorageConfig::new(Path::new(p)))
+/// Resolve the `(Schema, Storage)` pair for [`PyIndex::new`].
+///
+/// `path=None` keeps the pre-existing in-memory behavior (schema defaults
+/// to empty, no persistence, no conflict checking). `path=Some(p)` defers
+/// to [`laurus::index_dir::open_or_create`], which applies the
+/// `<p>/schema.toml` + `<p>/store/` convention shared with `laurus-cli`.
+fn resolve_storage_and_schema(
+    path: Option<&str>,
+    schema: Option<Schema>,
+) -> PyResult<(Schema, Arc<dyn Storage>)> {
+    match path {
+        None => {
+            let storage = StorageFactory::create(StorageConfig::Memory(Default::default()))
+                .map_err(laurus_err)?;
+            Ok((schema.unwrap_or_default(), storage))
         }
-    };
-    StorageFactory::create(config).map_err(laurus_err)
+        Some(p) => laurus::index_dir::open_or_create(Path::new(p), schema).map_err(index_dir_err),
+    }
 }

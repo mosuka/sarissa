@@ -69,6 +69,15 @@ schema.add_hnsw_field("embedding", dimension=384)
 index = laurus.Index(path="./myindex", schema=schema)
 ```
 
+This writes `./myindex/schema.toml` and `./myindex/store/` -- the same
+layout `laurus-cli create index --schema` uses, so the directory can be
+opened by either. Reopening it later only needs the path (`schema` must be
+omitted, since it's loaded from the persisted `schema.toml`):
+
+```python
+index = laurus.Index(path="./myindex")
+```
+
 ## Durability / WAL
 
 A persistent index writes every change to a write-ahead log (WAL). By default

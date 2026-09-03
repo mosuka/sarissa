@@ -9,10 +9,17 @@ import { Index, Schema } from "laurus-nodejs";
 const index = await Index.create();
 
 // ファイルベースインデックス（永続化）
+// `./myindex/schema.toml` と `./myindex/store/` を書き込む -- これは
+// `laurus-cli create index --schema` と同じレイアウトなので、このディレクトリは
+// CLI からも開ける（逆も同様）。
 const schema = new Schema();
 schema.addTextField("name");
 schema.addTextField("description");
 const persistentIndex = await Index.create("./myindex", schema);
+
+// 後で再オープンする際はパスだけで済む -- schema を再度渡すとエラーになる
+// （スキーマは既に永続化されているため）。
+const reopened = await Index.create("./myindex");
 ```
 
 ## 2. ドキュメントのインデックス

@@ -95,6 +95,15 @@ $schema->addHnswField("embedding", 384);
 $index = new Index("./myindex", $schema);
 ```
 
+This writes `./myindex/schema.toml` and `./myindex/store/` -- the same
+layout `laurus-cli create index --schema` uses, so the directory can be
+opened by either. Reopening it later only needs the path (`$schema` must
+be omitted, since it's loaded from the persisted `schema.toml`):
+
+```php
+$index = new Index("./myindex");
+```
+
 ## Schema
 
 The `Schema` class defines the structure of your index. Use the following methods to add fields:
