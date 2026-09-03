@@ -28,4 +28,4 @@ rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
 # (cargo [env] cannot read external files, so this is a manual mirror.)
 [env]
 PYENV_VERSION = "3.13.5"
-RBENV_VERSION = "4.0.2"
+RBENV_VERSION = "4.0.6"
