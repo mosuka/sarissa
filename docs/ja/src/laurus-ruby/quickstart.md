@@ -9,10 +9,17 @@ require "laurus"
 index = Laurus::Index.new
 
 # ファイルベースインデックス（永続的）
+# `./myindex/schema.toml` と `./myindex/store/` を書き込む -- これは
+# `laurus-cli create index --schema` と同じレイアウトなので、このディレクトリは
+# CLI からも開ける（逆も同様）。
 schema = Laurus::Schema.new
 schema.add_text_field("title")
 schema.add_text_field("body")
 index = Laurus::Index.new(path: "./myindex", schema: schema)
+
+# 後で再オープンする際はパスだけで済む -- schema: を再度渡すとエラーになる
+# （スキーマは既に永続化されているため）。
+index = Laurus::Index.new(path: "./myindex")
 ```
 
 ## 2. ドキュメントをインデックスする

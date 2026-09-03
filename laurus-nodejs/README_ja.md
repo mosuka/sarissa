@@ -58,7 +58,8 @@ for (const r of results) {
 ```javascript
 // インデックス作成（インメモリまたはファイルベース）
 const index = await Index.create();                    // インメモリ
-const index = await Index.create("./myindex", schema); // 永続化
+const index = await Index.create("./myindex", schema); // 永続化（./myindex/schema.toml + ./myindex/store/ を書き込む）
+const reopened = await Index.create("./myindex");       // 再オープン: schema は省略（ディスクから読み込まれる）
 
 // ドキュメント CRUD
 await index.putDocument("id", { field: "value" });     // 上書き

@@ -12,10 +12,17 @@ use Laurus\Schema;
 $index = new Index();
 
 // ファイルベースインデックス（永続的）
+// `./myindex/schema.toml` と `./myindex/store/` を書き込む -- これは
+// `laurus-cli create index --schema` と同じレイアウトなので、このディレクトリは
+// CLI からも開ける（逆も同様）。
 $schema = new Schema();
 $schema->addTextField("title");
 $schema->addTextField("body");
 $index = new Index("./myindex", $schema);
+
+// 後で再オープンする際はパスだけで済む -- $schema を再度渡すとエラーになる
+// （スキーマは既に永続化されているため）。
+$index = new Index("./myindex");
 ```
 
 ## 2. ドキュメントをインデックスする

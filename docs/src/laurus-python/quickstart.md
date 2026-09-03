@@ -9,10 +9,17 @@ import laurus
 index = laurus.Index()
 
 # File-based index (persistent)
+# Writes `./myindex/schema.toml` and `./myindex/store/` -- the same layout
+# `laurus-cli create index --schema` uses, so this directory can also be
+# opened with the CLI (or vice versa).
 schema = laurus.Schema()
 schema.add_text_field("title")
 schema.add_text_field("body")
 index = laurus.Index(path="./myindex", schema=schema)
+
+# Reopening it later only needs the path -- passing `schema` again would
+# raise, since the schema is already persisted.
+index = laurus.Index(path="./myindex")
 ```
 
 ## 2. Index documents

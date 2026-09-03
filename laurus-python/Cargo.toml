@@ -27,4 +27,3 @@ pyo3 = { version = "0.29.2", features = ["extension-module"] }
 tokio = { workspace = true }
 chrono = { workspace = true }
 serde_json = { workspace = true }
-toml = { workspace = true }

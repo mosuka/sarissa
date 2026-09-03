@@ -848,4 +848,94 @@ class LaurusTest extends TestCase
         $idx->putDocument("d1", ["title" => "Auto"]);
         $this->assertCount(1, $idx->getDocuments("d1"));
     }
+
+    // ── Index directory layout (Issue #1059) ──────────────────────────────
+    //
+    // Before this change, `new Laurus\Index($path)` wrote segment files
+    // directly under $path, incompatible with laurus-cli's
+    // <path>/schema.toml + <path>/store/ convention. These tests verify the
+    // new shared layout: schema auto-persistence, auto-loading on reopen,
+    // the reopen-with-schema conflict error, and legacy-layout detection.
+
+    public function testFileBackedIndexWritesSchemaTomlAndStore(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_indexdir_" . uniqid();
+        mkdir($dir);
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+
+        new Laurus\Index($dir, $schema);
+
+        $this->assertFileExists($dir . "/schema.toml");
+        $this->assertDirectoryExists($dir . "/store");
+        // No stray top-level segment directories from the old flat layout.
+        $this->assertDirectoryDoesNotExist($dir . "/lexical");
+    }
+
+    public function testReopenWithoutSchemaLoadsPersistedSchemaAndData(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_indexdir_" . uniqid();
+        mkdir($dir);
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+        $schema->setDefaultFields(["title"]);
+
+        $idx = new Laurus\Index($dir, $schema);
+        $idx->putDocument("doc1", ["title" => "hello world"]);
+        $idx->commit();
+        unset($idx);
+
+        $reopened = new Laurus\Index($dir);
+        $results = $reopened->search("title:hello", 5);
+        $this->assertCount(1, $results);
+    }
+
+    public function testReopenWithExplicitSchemaThrowsValueError(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_indexdir_" . uniqid();
+        mkdir($dir);
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+        new Laurus\Index($dir, $schema);
+
+        $this->expectException(\ValueError::class);
+        $this->expectExceptionMessageMatches('/schema\.toml/');
+        new Laurus\Index($dir, $schema);
+    }
+
+    public function testReopenWithNoSchemaAtAllSucceeds(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_indexdir_" . uniqid();
+        mkdir($dir);
+        // First call with no schema creates an empty-schema index (unchanged
+        // default behavior); reopening it (also with no schema) must not
+        // throw.
+        new Laurus\Index($dir);
+        $idx = new Laurus\Index($dir);
+        $this->assertNotNull($idx);
+    }
+
+    public function testLegacyFlatLayoutIsRejected(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_indexdir_" . uniqid();
+        mkdir($dir);
+        // Simulate a directory written by a laurus-php version predating
+        // Issue #1059: segment files directly under the path, no
+        // schema.toml.
+        file_put_contents($dir . "/engine.wal", "");
+
+        $this->expectException(\ValueError::class);
+        $this->expectExceptionMessageMatches('/pre-Issue-1059/');
+        new Laurus\Index($dir);
+    }
+
+    public function testNewEmptyDirectoryIsNotTreatedAsLegacy(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_indexdir_" . uniqid();
+        mkdir($dir);
+        // A directory that merely exists but has no laurus files at all is a
+        // normal fresh-create case, not a legacy-layout error.
+        new Laurus\Index($dir);
+        $this->assertFileExists($dir . "/schema.toml");
+    }
 }

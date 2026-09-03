@@ -61,6 +61,8 @@ mod data;
 pub mod embedding;
 mod engine;
 mod error;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod index_dir;
 pub mod lexical;
 mod maintenance;
 pub mod spelling;

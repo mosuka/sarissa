@@ -69,6 +69,15 @@ schema.add_hnsw_field("embedding", dimension=384)
 index = laurus.Index(path="./myindex", schema=schema)
 ```
 
+これにより `./myindex/schema.toml` と `./myindex/store/` が書き込まれます
+-- `laurus-cli create index --schema` と同じレイアウトなので、どちらでも
+このディレクトリを開けます。後で再オープンする際はパスだけで済みます
+（`schema` は永続化済みの `schema.toml` から読み込まれるため省略します）:
+
+```python
+index = laurus.Index(path="./myindex")
+```
+
 ## 永続性 / WAL
 
 永続インデックスはすべての変更を先行書き込みログ（WAL）に書き込みます。

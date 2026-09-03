@@ -12,10 +12,12 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null, ?WalSyncPolicy $
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `$path` | `string\|null` | `null` | Directory path for persistent storage. `null` creates an in-memory index. |
-| `$schema` | `Schema\|null` | `null` | Schema definition. An empty schema is used when omitted. |
+| `$path` | `string\|null` | `null` | Directory path for persistent storage. `null` creates an in-memory index. When given, the directory follows the `<path>/schema.toml` + `<path>/store/` layout `laurus-cli create index`/`--index-dir` uses, so an index built here can also be opened by the CLI (and vice versa). See below. |
+| `$schema` | `Schema\|null` | `null` | Schema definition. Only meaningful when *creating* a new file-backed index (or an in-memory one); must be omitted (`null`) when reopening an existing file-backed index -- the persisted schema is loaded instead. An empty schema is used when omitted for a new index. |
 | `$wal_sync_policy` | `WalSyncPolicy\|null` | `null` | Write-ahead log (WAL) durability policy. `null` keeps the default per-record fsync. See [WAL sync policy & durability](#wal-sync-policy--durability). |
 | `$commit_policy` | `CommitPolicy\|null` | `null` | Auto-commit policy. `null` keeps the default manual policy (the caller drives every `commit()`). See [Commit policy & auto-commit](#commit-policy--auto-commit). |
+
+**Creating vs. reopening a file-backed index** (`$path` given): if `<path>/schema.toml` does not yet exist, this call **creates** a new index and persists `$schema` (or an empty schema, if omitted) to it. If `<path>/schema.toml` already exists, this call **reopens** the index -- `$schema` must be omitted, or a `ValueError` is thrown (it would be ambiguous which schema should win). A `ValueError` is also thrown if `$path` contains an index in the layout used before this convention was introduced (segment files directly under `$path`, no `schema.toml`).
 
 ### Methods
 

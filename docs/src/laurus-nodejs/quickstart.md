@@ -9,10 +9,17 @@ import { Index, Schema } from "laurus-nodejs";
 const index = await Index.create();
 
 // File-based index (persistent)
+// Writes `./myindex/schema.toml` and `./myindex/store/` -- the same layout
+// `laurus-cli create index --schema` uses, so this directory can also be
+// opened with the CLI (or vice versa).
 const schema = new Schema();
 schema.addTextField("name");
 schema.addTextField("description");
 const persistentIndex = await Index.create("./myindex", schema);
+
+// Reopening it later only needs the path -- passing `schema` again would
+// throw, since the schema is already persisted.
+const reopened = await Index.create("./myindex");
 ```
 
 ## 2. Index documents

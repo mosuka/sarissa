@@ -162,6 +162,40 @@ impl Default for Schema {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl Schema {
+    /// Parse a schema from a TOML string, in the same format
+    /// `laurus-cli create index --schema` accepts (and what
+    /// [`Schema::to_toml`] produces).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::LaurusError::Schema`] if `s` is not valid
+    /// TOML or does not match the schema shape.
+    pub fn from_toml(s: &str) -> crate::error::Result<Self> {
+        toml::from_str(s).map_err(|e| {
+            crate::error::LaurusError::schema(format!(
+                "invalid schema TOML: {}",
+                e.to_string().trim_end()
+            ))
+        })
+    }
+
+    /// Serialize this schema to a TOML string, in the same format
+    /// `laurus-cli create index --schema` accepts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::LaurusError::Schema`] if serialization
+    /// fails (this should not happen for a schema built through the
+    /// public API).
+    pub fn to_toml(&self) -> crate::error::Result<String> {
+        toml::to_string_pretty(self).map_err(|e| {
+            crate::error::LaurusError::schema(format!("failed to serialize schema to TOML: {e}"))
+        })
+    }
+}
+
 /// Options for a single field in the unified schema.
 ///
 /// Each variant directly represents a concrete field type.
