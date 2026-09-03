@@ -5,7 +5,7 @@ This directory contains runnable examples for the `laurus` Python bindings.
 ## Prerequisites
 
 - Rust toolchain (`rustup` — <https://rustup.rs>)
-- Python 3.8+
+- Python 3.10+
 - `maturin` build tool
 
 ```bash

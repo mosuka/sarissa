@@ -36,5 +36,5 @@ print(index)  # Index()
 
 ## Requirements
 
-- Python 3.8 or later
+- Python 3.10 or later
 - No runtime dependencies beyond the compiled native extension

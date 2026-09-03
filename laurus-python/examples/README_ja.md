@@ -5,7 +5,7 @@
 ## 前提条件
 
 - Rust ツールチェーン（`rustup` — <https://rustup.rs>）
-- Python 3.8 以上
+- Python 3.10 以上
 - `maturin` ビルドツール
 
 ```bash

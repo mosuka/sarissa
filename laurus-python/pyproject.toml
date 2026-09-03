@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "laurus"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 description = "Python bindings for the Laurus search library"
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,12 @@ dynamic = ["version"]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Database",
     "Topic :: Text Processing :: Indexing",
 ]
