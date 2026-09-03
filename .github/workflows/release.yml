@@ -718,8 +718,10 @@ jobs:
         platform:
           - runner: ubuntu-latest
             target: x86_64
+            manylinux: "2_28"
           - runner: ubuntu-24.04-arm
             target: aarch64
+            manylinux: "2_28"
           - runner: macos-latest
             target: aarch64
           - runner: macos-15-intel
@@ -733,11 +735,28 @@ jobs:
       - name: Run checkout
         uses: actions/checkout@v7
 
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux }}
           args: --release --out dist --manifest-path laurus-python/Cargo.toml --features embeddings-all
+
+      - name: Verify wheel is abi3
+        shell: bash
+        run: |
+          ls -l dist/
+          for w in dist/*.whl; do
+            case "$w" in
+              *-abi3-*) echo "ok: $w" ;;
+              *) echo "::error::$w is not an abi3 wheel"; exit 1 ;;
+            esac
+          done
 
       - name: Upload wheel
         uses: actions/upload-artifact@v7
