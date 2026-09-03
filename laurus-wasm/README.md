@@ -30,7 +30,9 @@ schema.addTextField("title");
 schema.addTextField("body");
 schema.setDefaultFields(["title", "body"]);
 
-// Create an OPFS-persistent index (survives page reloads)
+// Create an OPFS-persistent index (survives page reloads).
+// The schema is persisted to the index on first use; reopening it later
+// only needs the name (`Index.open("my-index")`) -- see below.
 const index = await Index.open("my-index", schema);
 
 // Index documents
@@ -57,8 +59,9 @@ for (const r of results) {
 
 ```javascript
 // Create index (in-memory or OPFS-persistent)
-const index = await Index.create(schema);              // in-memory (ephemeral)
-const index = await Index.open("my-index", schema);    // OPFS (persistent)
+const index = await Index.create(schema);              // in-memory (ephemeral); schema is optional (default: empty)
+const index = await Index.open("my-index", schema);    // OPFS (persistent), first time: persists schema
+const reopened = await Index.open("my-index");         // OPFS (persistent), later: schema loaded automatically
 
 // Document CRUD
 await index.putDocument("id", { field: "value" });     // upsert

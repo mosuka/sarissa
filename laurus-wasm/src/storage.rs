@@ -10,9 +10,20 @@
 use std::io::{Read, Write};
 use std::sync::Arc;
 
+use laurus::Schema;
 use laurus::storage::Storage;
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use wasm_bindgen::prelude::*;
+
+/// Name of the persisted-schema file inside an OPFS index directory.
+///
+/// This file is managed directly through the OPFS bridge functions, NOT
+/// through the engine's `Storage` trait / `MemoryStorage` -- see
+/// [`OpfsPersistence::resolve_schema`], [`OpfsPersistence::load`], and
+/// [`OpfsPersistence::save`] for why: `save()` deletes any OPFS file that
+/// is not tracked in `MemoryStorage`, so a `schema.json` written outside
+/// that tracking would be deleted on the very next `commit()`.
+const SCHEMA_FILE: &str = "schema.json";
 
 // ---------------------------------------------------------------------------
 // JS FFI: OPFS bridge functions
@@ -87,7 +98,9 @@ impl OpfsPersistence {
     /// Load all files from OPFS into a new [`MemoryStorage`].
     ///
     /// Creates a new `MemoryStorage`, reads every file from the OPFS directory,
-    /// and writes it into the in-memory store.
+    /// and writes it into the in-memory store. Skips [`SCHEMA_FILE`], which is
+    /// managed separately by [`resolve_schema`](Self::resolve_schema) and is
+    /// not part of the engine's storage namespace.
     ///
     /// # Returns
     ///
@@ -101,6 +114,9 @@ impl OpfsPersistence {
             .map_err(|e| JsValue::from_str(&format!("Failed to parse file list: {e}")))?;
 
         for file_name in &file_names {
+            if file_name == SCHEMA_FILE {
+                continue;
+            }
             let data_js = opfs_read_file(&self.dir, file_name).await?;
             let data: Vec<u8> = js_sys::Uint8Array::new(&data_js).to_vec();
 
@@ -122,7 +138,11 @@ impl OpfsPersistence {
     ///
     /// Lists all files in the `MemoryStorage`, reads each one, and writes
     /// it to the OPFS directory. Files in OPFS that no longer exist in
-    /// memory are deleted.
+    /// memory are deleted -- **except** [`SCHEMA_FILE`], which this method
+    /// never touches (it is written directly by
+    /// [`resolve_schema`](Self::resolve_schema), not through
+    /// `MemoryStorage`, so it would otherwise look "stale" here and get
+    /// deleted on every commit).
     ///
     /// # Arguments
     ///
@@ -138,7 +158,7 @@ impl OpfsPersistence {
             .map_err(|e| JsValue::from_str(&format!("Failed to parse OPFS file list: {e}")))?;
 
         for opfs_file in &opfs_files {
-            if !memory_files.contains(opfs_file) {
+            if opfs_file != SCHEMA_FILE && !memory_files.contains(opfs_file) {
                 opfs_delete_file(&self.dir, opfs_file).await?;
             }
         }
@@ -162,5 +182,76 @@ impl OpfsPersistence {
     pub async fn delete(&self) -> Result<(), JsValue> {
         opfs_delete_index(&self.name).await?;
         Ok(())
+    }
+
+    /// Resolve which [`Schema`] to use for this OPFS index, persisting it
+    /// to [`SCHEMA_FILE`] as needed.
+    ///
+    /// Three cases:
+    ///
+    /// - `SCHEMA_FILE` already exists: this is a normal reopen. The
+    ///   persisted schema is loaded and returned; a `schema` passed by the
+    ///   caller is intentionally **ignored** for this purpose (not an
+    ///   error) -- unlike the native bindings' `Schema`, `WasmSchema` also
+    ///   carries per-call JS embedder callbacks and runtime analyzers that
+    ///   can never be persisted, so callers must keep passing a
+    ///   `WasmSchema` on every reopen just to supply those, even once the
+    ///   field-schema part is fully persisted. Rejecting that would make
+    ///   reopening with custom embedders/analyzers impossible.
+    /// - `SCHEMA_FILE` is absent and the directory has no other files
+    ///   either: this is a fresh index. `schema` (or [`Schema::default`]
+    ///   if omitted) is written to `SCHEMA_FILE` and returned.
+    /// - `SCHEMA_FILE` is absent but other files already exist (an index
+    ///   persisted before this method existed): `schema` must be `Some`
+    ///   (an `Err` asking the caller to supply it once is returned
+    ///   otherwise, since guessing would silently mismatch the real,
+    ///   already-persisted data). The given schema is trusted as-is and
+    ///   backfilled into `SCHEMA_FILE` so future reopens don't need it
+    ///   again.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - The schema the caller passed to `Index.open`, if any.
+    pub async fn resolve_schema(&self, schema: Option<Schema>) -> Result<Schema, JsValue> {
+        let schema_file_exists = opfs_file_exists(&self.dir, SCHEMA_FILE)
+            .await?
+            .as_bool()
+            .unwrap_or(false);
+        if schema_file_exists {
+            let data_js = opfs_read_file(&self.dir, SCHEMA_FILE).await?;
+            let bytes = js_sys::Uint8Array::new(&data_js).to_vec();
+            return serde_json::from_slice(&bytes).map_err(|e| {
+                JsValue::from_str(&format!(
+                    "Failed to parse persisted schema for OPFS index '{}': {e}",
+                    self.name
+                ))
+            });
+        }
+
+        let file_names_js = opfs_list_files(&self.dir).await?;
+        let file_names: Vec<String> = serde_wasm_bindgen::from_value(file_names_js)
+            .map_err(|e| JsValue::from_str(&format!("Failed to parse file list: {e}")))?;
+
+        let schema = match schema {
+            Some(schema) => schema,
+            None if file_names.is_empty() => Schema::default(),
+            None => {
+                return Err(JsValue::from_str(&format!(
+                    "OPFS index '{}' contains data persisted before schema tracking was added, \
+                     but no schema was provided; pass the original schema once to migrate this \
+                     index (it will be persisted for future opens)",
+                    self.name
+                )));
+            }
+        };
+
+        let json = serde_json::to_vec(&schema).map_err(|e| {
+            JsValue::from_str(&format!(
+                "Failed to serialize schema for OPFS index '{}': {e}",
+                self.name
+            ))
+        })?;
+        opfs_write_file(&self.dir, SCHEMA_FILE, &json).await?;
+        Ok(schema)
     }
 }

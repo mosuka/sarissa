@@ -219,7 +219,7 @@ impl WasmIndex {
     ///
     /// # Arguments
     ///
-    /// * `schema` - Schema definition.
+    /// * `schema` - Schema definition. An empty schema is used when omitted.
     /// * `wal_sync_policy` - Optional WAL durability policy. Defaults to
     ///   per-record fsync when omitted. Pass `WalSyncPolicy.group()` to opt into
     ///   group-commit batching.
@@ -232,14 +232,19 @@ impl WasmIndex {
     /// A new `Index` instance backed by in-memory storage.
     #[wasm_bindgen]
     pub async fn create(
-        schema: WasmSchema,
+        schema: Option<WasmSchema>,
         wal_sync_policy: Option<WasmWalSyncPolicy>,
         commit_policy: Option<WasmCommitPolicy>,
     ) -> Result<WasmIndex, JsValue> {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let js_embedders = schema.js_embedders;
-        let runtime_analyzers = schema.runtime_analyzers;
-        let schema = schema.inner;
+        let (js_embedders, runtime_analyzers, schema) = match schema {
+            Some(s) => (s.js_embedders, s.runtime_analyzers, s.inner),
+            None => (
+                Default::default(),
+                Default::default(),
+                laurus::Schema::default(),
+            ),
+        };
 
         // Build embedder BEFORE moving schema into EngineBuilder
         let embedder = if js_embedders.is_empty() {
@@ -273,15 +278,27 @@ impl WasmIndex {
 
     /// Open or create a persistent index backed by OPFS.
     ///
-    /// If an index with the given name already exists in OPFS, its data is
-    /// loaded into memory. Otherwise, a new empty index is created.
+    /// If an index with the given name already exists in OPFS, its data
+    /// (and its persisted schema, if any) is loaded. Otherwise, a new
+    /// empty index is created.
+    ///
+    /// The field-schema part of `schema` is only used when *creating* a
+    /// new index (or backfilling one persisted before this method existed
+    /// -- see below); once a schema is persisted for this index, it always
+    /// wins and the `schema` argument's field definitions are ignored on
+    /// subsequent opens. `schema`'s embedder callbacks and runtime
+    /// analyzers, however, are **not** persisted (they can't be) and must
+    /// still be supplied on every call that needs them, including reopens.
     ///
     /// Data is automatically persisted to OPFS on each `commit()` call.
     ///
     /// # Arguments
     ///
     /// * `name` - Index name (used as the OPFS subdirectory name).
-    /// * `schema` - Schema definition.
+    /// * `schema` - Schema definition, plus any embedder callbacks /
+    ///   runtime analyzers this session needs. Required the first time an
+    ///   index is created (or when opening one persisted before schema
+    ///   tracking was added); optional afterwards.
     /// * `wal_sync_policy` - Optional WAL durability policy. Defaults to
     ///   per-record fsync when omitted. Pass `WalSyncPolicy.group()` to opt into
     ///   group-commit batching.
@@ -292,18 +309,26 @@ impl WasmIndex {
     /// # Returns
     ///
     /// A new `Index` instance backed by OPFS-persistent storage.
+    ///
+    /// # Errors
+    ///
+    /// Rejects if this OPFS index has data from before schema tracking was
+    /// added and `schema` was not supplied to complete the one-time
+    /// migration.
     #[wasm_bindgen]
     pub async fn open(
         name: String,
-        schema: WasmSchema,
+        schema: Option<WasmSchema>,
         wal_sync_policy: Option<WasmWalSyncPolicy>,
         commit_policy: Option<WasmCommitPolicy>,
     ) -> Result<WasmIndex, JsValue> {
         let opfs = OpfsPersistence::open(&name).await?;
+        let (js_embedders, runtime_analyzers, schema_candidate) = match schema {
+            Some(s) => (s.js_embedders, s.runtime_analyzers, Some(s.inner)),
+            None => (Default::default(), Default::default(), None),
+        };
+        let schema = opfs.resolve_schema(schema_candidate).await?;
         let storage = opfs.load().await?;
-        let js_embedders = schema.js_embedders;
-        let runtime_analyzers = schema.runtime_analyzers;
-        let schema = schema.inner;
 
         let embedder = if js_embedders.is_empty() {
             None

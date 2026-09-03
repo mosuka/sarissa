@@ -47,7 +47,8 @@ const schema = new Schema();
 schema.addTextField("title");
 schema.addTextField("body");
 
-// Open a persistent index (data survives page reloads)
+// Open a persistent index (data survives page reloads).
+// The first time, the schema is persisted alongside the data.
 const index = await Index.open("my-index", schema);
 
 // Add documents
@@ -59,7 +60,9 @@ await index.putDocument("doc1", {
 // commit() persists to OPFS automatically
 await index.commit();
 
-// On next page load, Index.open("my-index") will restore the data
+// On the next page load, Index.open("my-index") -- with no schema
+// argument -- restores both the data and the persisted schema.
+const reopened = await Index.open("my-index");
 ```
 
 ## Japanese Morphological Search

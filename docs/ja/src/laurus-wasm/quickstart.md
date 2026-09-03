@@ -48,6 +48,7 @@ schema.addTextField("title");
 schema.addTextField("body");
 
 // 永続化インデックスを開く（ページリロード後もデータが保持される）
+// 初回はスキーマもデータと一緒に永続化される。
 const index = await Index.open("my-index", schema);
 
 // ドキュメントを追加
@@ -59,7 +60,9 @@ await index.putDocument("doc1", {
 // commit() で自動的に OPFS に永続化される
 await index.commit();
 
-// 次のページロード時、Index.open("my-index") でデータが復元される
+// 次のページロード時は、schema 引数を省略した Index.open("my-index") で
+// データと永続化済みスキーマの両方が復元される。
+const reopened = await Index.open("my-index");
 ```
 
 ## 日本語形態素検索

@@ -20,7 +20,8 @@ The main entry point for creating and querying search indexes.
 Create a new in-memory (ephemeral) index.
 
 - **Parameters:**
-  - `schema` (Schema, optional) -- Schema definition.
+  - `schema` (Schema, optional) -- Schema definition. An empty schema is
+    used when omitted.
   - `walSyncPolicy` (WalSyncPolicy, optional) -- WAL durability policy. Omit
     to keep the default per-record sync. See
     [WAL sync policy / durability](#wal-sync-policy--durability).
@@ -35,7 +36,16 @@ Open or create a persistent index backed by OPFS.
 
 - **Parameters:**
   - `name` (string) -- Index name (OPFS subdirectory).
-  - `schema` (Schema, optional) -- Schema definition.
+  - `schema` (Schema, optional) -- Schema definition, plus any embedder
+    callbacks / runtime analyzers this session needs. **Required** the
+    first time an index is created, or when opening one persisted before
+    schema tracking was added (see below); **optional** afterwards, since
+    the field-schema part is persisted alongside the index data and
+    reloaded automatically. If `schema` is still passed once a schema is
+    already persisted, its field definitions are ignored in favor of the
+    persisted ones -- only its embedder callbacks / runtime analyzers are
+    used, since those can never be persisted and must be re-supplied every
+    time a session needs them.
   - `walSyncPolicy` (WalSyncPolicy, optional) -- WAL durability policy. Omit
     to keep the default per-record sync. See
     [WAL sync policy / durability](#wal-sync-policy--durability).
@@ -43,6 +53,9 @@ Open or create a persistent index backed by OPFS.
     the default (manual; caller-driven commits). See
     [Commit policy / auto-commit](#commit-policy--auto-commit).
 - **Returns:** `Promise<Index>`
+- **Throws:** if this OPFS index already has data persisted from before
+  schema tracking was added, and `schema` was not supplied to complete
+  the one-time migration (the schema is then persisted for future opens).
 
 ### Instance Methods
 
