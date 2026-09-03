@@ -31,6 +31,8 @@ schema.addTextField("body");
 schema.setDefaultFields(["title", "body"]);
 
 // OPFS 永続化インデックスを作成（ページリロード後もデータ保持）
+// スキーマは初回利用時にインデックスへ永続化される。後で再オープンする際は
+// 名前だけで済む（`Index.open("my-index")`）— 詳細は下記を参照。
 const index = await Index.open("my-index", schema);
 
 // ドキュメントをインデックス
@@ -57,8 +59,9 @@ for (const r of results) {
 
 ```javascript
 // インデックス作成（インメモリまたは OPFS 永続化）
-const index = await Index.create(schema);              // インメモリ（揮発性）
-const index = await Index.open("my-index", schema);    // OPFS（永続化）
+const index = await Index.create(schema);              // インメモリ（揮発性）。schema は省略可能（既定: 空）
+const index = await Index.open("my-index", schema);    // OPFS（永続化）、初回: schema を永続化
+const reopened = await Index.open("my-index");         // OPFS（永続化）、以降: schema は自動的に読み込まれる
 
 // ドキュメント CRUD
 await index.putDocument("id", { field: "value" });     // upsert
