@@ -2803,7 +2803,7 @@ checksum = "e037a2e1d8d5fdbd49b16a4ea09d5d6401c1f29eca5ff29d03d3824dba16256a"
 
 [[package]]
 name = "laurus"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -2861,7 +2861,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-cli"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2881,7 +2881,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-mcp"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2900,7 +2900,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-nodejs"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "chrono",
  "laurus",
@@ -2913,7 +2913,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-php"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "chrono",
  "ext-php-rs",
@@ -2923,7 +2923,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-python"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "chrono",
  "laurus",
@@ -2934,7 +2934,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-ruby"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "chrono",
  "laurus",
@@ -2944,7 +2944,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-server"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2967,7 +2967,7 @@ dependencies = [
 
 [[package]]
 name = "laurus-wasm"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "async-trait",
  "chrono",
