@@ -735,10 +735,15 @@ jobs:
       - name: Run checkout
         uses: actions/checkout@v7
 
+      # 3.11, not 3.10: Windows ARM64 has no official Python 3.10 build
+      # (actions/setup-python's manifest only carries win32/arm64 from
+      # 3.11.0 onward). Any interpreter >= the abi3-py310 floor works here
+      # regardless of platform -- maturin builds the same cp310-abi3 wheel
+      # no matter which newer Python's headers it reads at build time.
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
