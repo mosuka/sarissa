@@ -82,8 +82,17 @@ sed_inplace \
 rm -f Cargo.toml.bak
 
 # --- 2. Cargo.lock: regenerate so every workspace member reflects it ---
-echo "==> Regenerating Cargo.lock (cargo build --workspace, this takes a while)"
-cargo build --workspace --no-default-features >/dev/null
+#
+# `cargo check -p laurus-cli` is enough: Cargo.lock is resolved for the
+# whole workspace regardless of which single member is checked, so every
+# local crate's version gets updated in the lockfile without actually
+# compiling anything else. Building the *whole* workspace here would also
+# try to link laurus-ruby/laurus-php, whose cdylibs only get the linker
+# flags they need (dynamic Ruby/PHP symbol lookup) when driven through
+# their own tooling (`bundle exec rake compile`, or an explicit RUSTFLAGS
+# for PHP) — a bare `cargo build`/`cargo check` on those crates fails.
+echo "==> Regenerating Cargo.lock (cargo check -p laurus-cli)"
+cargo check -p laurus-cli --no-default-features >/dev/null
 
 # --- 3. Documented install examples (major.minor only, no patch) ---
 DOC_FILES=(
