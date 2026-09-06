@@ -96,12 +96,15 @@ pub use engine::schema::analyzer::{
     TokenizerConfig,
 };
 pub use engine::schema::embedder::EmbedderDefinition;
-pub use engine::schema::{DynamicFieldPolicy, FieldOption, Schema};
+pub use engine::schema::{
+    DynamicFieldPolicy, FieldChangeKind, FieldOption, Schema, classify_change,
+};
 pub use engine::search::{
     FusionAlgorithm, HybridMode, LexicalSearchOptions, SearchQuery, SearchRequest,
     SearchRequestBuilder, SearchResult, VectorSearchOptions, VectorSearchQuery,
 };
 pub use engine::type_inference::{InferredValue, infer_from_json, infer_option_from_data_value};
+pub use engine::{UpdateFieldOptions, UpdateFieldOutcome};
 pub use error::{LaurusError, Result};
 pub use lexical::core::field::{
     BooleanOption, BytesOption, DateTimeOption, FloatOption, Geo3dOption, GeoOption, IntegerOption,

@@ -266,6 +266,15 @@ impl LaurusError {
     pub fn cancelled<S: Into<String>>(msg: S) -> Self {
         LaurusError::OperationCancelled(msg.into())
     }
+
+    /// Creates a [`NotImplemented`](Self::NotImplemented) variant with the given message.
+    ///
+    /// # Parameters
+    ///
+    /// - `msg` - A descriptive message about what is not yet implemented.
+    pub fn not_implemented<S: Into<String>>(msg: S) -> Self {
+        LaurusError::NotImplemented(msg.into())
+    }
 }
 
 #[cfg(test)]

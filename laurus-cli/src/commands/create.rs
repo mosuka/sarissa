@@ -281,6 +281,7 @@ pub fn build_schema_interactive() -> Result<Schema> {
         fields,
         default_fields,
         dynamic_field_policy: Default::default(),
+        pending_reindex: Default::default(),
     })
 }
 

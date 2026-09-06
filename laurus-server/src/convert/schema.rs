@@ -39,6 +39,7 @@ pub fn to_proto(schema: &Schema) -> v1::Schema {
         analyzers,
         embedders,
         dynamic_field_policy: dynamic_field_policy_to_proto(&schema.dynamic_field_policy) as i32,
+        pending_reindex: schema.pending_reindex.iter().cloned().collect(),
     }
 }
 
@@ -64,6 +65,7 @@ pub fn from_proto(proto: &v1::Schema) -> Result<Schema, String> {
         fields,
         default_fields: proto.default_fields.clone(),
         dynamic_field_policy: dynamic_field_policy_from_proto(proto.dynamic_field_policy),
+        pending_reindex: proto.pending_reindex.iter().cloned().collect(),
     })
 }
 
