@@ -32,6 +32,11 @@ message Schema {
   // Policy controlling how fields not declared in `fields` are handled
   // during document ingestion. Defaults to DYNAMIC.
   DynamicFieldPolicy dynamic_field_policy = 5;
+  // Fields whose option was changed via UpdateField with a destructive
+  // classification (dimension/embedder/distance change, or a change to a
+  // non-stored field) and therefore no longer have valid on-disk data
+  // matching the current schema. See laurus::Schema::pending_reindex.
+  repeated string pending_reindex = 6;
 }
 
 // Policy for handling undeclared fields during document ingestion.

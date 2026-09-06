@@ -209,6 +209,9 @@ pub fn json_to_proto_schema(json: &Value) -> Result<v1::Schema, String> {
         analyzers,
         embedders,
         dynamic_field_policy,
+        // Not user-supplied at schema-creation time: only `UpdateField`
+        // populates this (Issue #1079).
+        pending_reindex: Vec::new(),
     })
 }
 
@@ -279,6 +282,16 @@ pub fn proto_schema_to_json(schema: &v1::Schema) -> Value {
     }
     if let Some(name) = proto_dynamic_field_policy_to_json(schema.dynamic_field_policy) {
         result["dynamic_field_policy"] = Value::String(name.to_string());
+    }
+    if !schema.pending_reindex.is_empty() {
+        result["pending_reindex"] = Value::Array(
+            schema
+                .pending_reindex
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        );
     }
     result
 }

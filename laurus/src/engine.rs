@@ -43,6 +43,34 @@ use self::schema::Schema;
 /// updated schema instead of leaving persistence to the caller.
 pub type SchemaPersistHook = Arc<dyn Fn(&Schema) -> Result<()> + Send + Sync>;
 
+/// Options for [`Engine::update_field`] (Issue #1079).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UpdateFieldOptions {
+    /// Reserved for Issues #1080/#1081: once vector- and lexical-field
+    /// rebuilding are implemented, this will need to be `true` to actually
+    /// rebuild a [`schema::FieldChangeKind::Reindex`]-classified field from
+    /// its existing data (mirroring Typesense's opt-in reindex step, rather
+    /// than silently doing potentially expensive work on every call).
+    /// Currently has no effect: this phase rejects every `Reindex`/
+    /// `Destructive` change regardless of this flag.
+    pub reindex: bool,
+    /// When `true`, classify the change and report the outcome without
+    /// applying anything — not even a
+    /// [`schema::FieldChangeKind::MetadataOnly`] change.
+    pub dry_run: bool,
+}
+
+/// The outcome of a call to [`Engine::update_field`] (Issue #1079).
+#[derive(Debug, Clone)]
+pub struct UpdateFieldOutcome {
+    /// How the requested change was classified.
+    pub classification: schema::FieldChangeKind,
+    /// The schema as it stands after the call. Unchanged from before the
+    /// call when [`UpdateFieldOptions::dry_run`] was `true`, or when the
+    /// change was rejected.
+    pub schema: Schema,
+}
+
 /// Policy controlling when the engine automatically runs the commit ladder
 /// during ingestion (Issue #890).
 ///
@@ -437,6 +465,17 @@ pub struct Engine {
     /// invert against the lexical writer → searcher order that
     /// [`LexicalStore::find_doc_ids_by_term`] maintains.
     id_locks: Arc<Vec<tokio::sync::Mutex<()>>>,
+    /// Guards ingestion against a concurrent [`Self::update_field`] (Issue
+    /// #1079). Ingestion (`index_internal`, `delete_documents`) takes a
+    /// read lock — any number of writers can ingest concurrently — while
+    /// `update_field` takes a write lock, so a schema change never races a
+    /// document that assumes the old field option.
+    ///
+    /// A `tokio::sync::RwLock` because the guard must be held across
+    /// `await` points (a `parking_lot::RwLock` guard is not `Send` across
+    /// one). Taken *after* an [`Self::id_lock`] guard wherever both are
+    /// held, since `id_locks` is documented as the outermost lock.
+    schema_change_lock: tokio::sync::RwLock<()>,
     /// Background WAL flush timer for a [`WalSyncPolicy::Group`] configured with
     /// a `max_interval`. `None` when no interval is set. Held only to keep the
     /// timer thread alive for the engine's lifetime; dropping the engine stops
@@ -854,6 +893,11 @@ impl Engine {
         // whole sequence, including the WAL append, so the log's record order
         // for an id matches the order the stores applied them in.
         let _id_guard = self.id_lock(id).lock().await;
+        // Block a concurrent `update_field` from swapping the field option
+        // this document was just coerced against (Issue #1079). Taken after
+        // `_id_guard` (the outermost lock) and held for the rest of this
+        // mutation, including the internal delete below.
+        let _schema_guard = self.schema_change_lock.read().await;
 
         if !as_chunk {
             self.delete_documents_internal(id).await?;
@@ -1117,6 +1161,9 @@ impl Engine {
         // its add, so the upsert's new version outlives the delete that was
         // acknowledged after it.
         let _id_guard = self.id_lock(id).lock().await;
+        // See `index_internal`'s comment on `schema_change_lock` (Issue
+        // #1079).
+        let _schema_guard = self.schema_change_lock.read().await;
         self.delete_documents_internal(id).await?;
         // Re-assert per-record durability: a concurrent batch may hold a WAL
         // sync-deferral scope, which would otherwise leave these acknowledged
@@ -1535,6 +1582,106 @@ impl Engine {
         let updated = self.schema.read().clone();
         self.persist_schema(&updated)?;
         Ok(updated)
+    }
+
+    /// Dynamically change an existing field's type or options at runtime
+    /// (Issue #1077/#1079).
+    ///
+    /// Unlike [`Self::add_field`]/[`Self::delete_field`], a field option
+    /// change may or may not require existing on-disk data to be rebuilt.
+    /// [`schema::classify_change`] decides which:
+    ///
+    /// - [`FieldChangeKind::MetadataOnly`](schema::FieldChangeKind::MetadataOnly):
+    ///   applied immediately; no existing data is touched.
+    /// - [`FieldChangeKind::Reindex`](schema::FieldChangeKind::Reindex) /
+    ///   [`FieldChangeKind::Destructive`](schema::FieldChangeKind::Destructive):
+    ///   rejected in this phase — rebuilding vector fields (Issue #1080)
+    ///   and lexical fields (Issue #1081) is not yet implemented. `opts.reindex`
+    ///   is reserved for when those land and has no effect yet.
+    ///
+    /// Blocks concurrently with ingestion via an internal write lock (see
+    /// [`Engine`]'s `schema_change_lock`), so a document is never coerced
+    /// against a field option that is being replaced mid-write.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the field to update. Must already exist.
+    /// * `option` - The new field configuration.
+    /// * `opts` - See [`UpdateFieldOptions`].
+    ///
+    /// # Returns
+    ///
+    /// The classification the change was given, and the schema as it
+    /// stands after the call (unchanged from before the call when
+    /// `opts.dry_run` was `true`, or when the change was rejected).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No field with the given name exists in the schema.
+    /// - The change is classified as [`FieldChangeKind::Reindex`](schema::FieldChangeKind::Reindex)
+    ///   or [`FieldChangeKind::Destructive`](schema::FieldChangeKind::Destructive)
+    ///   (not yet implemented in this phase).
+    /// - A configured schema-persist hook fails (the in-memory schema has
+    ///   already been updated at that point; this is not rolled back).
+    pub async fn update_field(
+        &self,
+        name: &str,
+        option: schema::FieldOption,
+        opts: UpdateFieldOptions,
+    ) -> Result<UpdateFieldOutcome> {
+        // Block ingestion for the duration of the classification + apply so
+        // a document is never coerced against a field option this call is
+        // in the middle of replacing.
+        let _schema_guard = self.schema_change_lock.write().await;
+
+        let old_option = {
+            let schema = self.schema.read();
+            schema.fields.get(name).cloned().ok_or_else(|| {
+                crate::error::LaurusError::invalid_argument(format!(
+                    "Field '{name}' does not exist in the schema"
+                ))
+            })?
+        };
+
+        let classification = schema::classify_change(&old_option, &option);
+
+        if opts.dry_run {
+            return Ok(UpdateFieldOutcome {
+                classification,
+                schema: self.schema.read().clone(),
+            });
+        }
+
+        match classification {
+            schema::FieldChangeKind::MetadataOnly => {
+                {
+                    let mut schema = self.schema.write();
+                    schema.fields.insert(name.to_string(), option);
+                }
+                let updated = self.schema.read().clone();
+                self.persist_schema(&updated)?;
+                Ok(UpdateFieldOutcome {
+                    classification,
+                    schema: updated,
+                })
+            }
+            schema::FieldChangeKind::Reindex => {
+                Err(crate::error::LaurusError::not_implemented(format!(
+                    "updating field '{name}' requires rebuilding existing data, which is not \
+                     yet implemented (see https://github.com/mosuka/laurus/issues/1080 for \
+                     vector fields or https://github.com/mosuka/laurus/issues/1081 for lexical \
+                     fields)"
+                )))
+            }
+            schema::FieldChangeKind::Destructive => {
+                Err(crate::error::LaurusError::not_implemented(format!(
+                    "updating field '{name}' would discard its existing data, which is not yet \
+                     implemented (see https://github.com/mosuka/laurus/issues/1080 for vector \
+                     fields or https://github.com/mosuka/laurus/issues/1081 for lexical fields)"
+                )))
+            }
+        }
     }
 
     /// Resolve a [`LexicalSearchQuery`] into a concrete [`Query`] object.
@@ -2884,6 +3031,7 @@ impl EngineBuilder {
                     .map(|_| tokio::sync::Mutex::new(()))
                     .collect(),
             ),
+            schema_change_lock: tokio::sync::RwLock::new(()),
             #[cfg(not(target_arch = "wasm32"))]
             _wal_flush_timer: wal_flush_timer,
             #[cfg(not(target_arch = "wasm32"))]
@@ -3539,6 +3687,172 @@ mod tests {
         // The in-memory schema was already updated before the hook ran
         // (this phase does not add rollback — see #1077).
         assert!(engine.schema().fields.contains_key("title"));
+    }
+
+    /// Issue #1079: a `MetadataOnly`-classified change (here, an HNSW
+    /// field's `default_ef_search`) is applied and persisted.
+    #[tokio::test]
+    async fn test_update_field_applies_metadata_only_change() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "embedding",
+                schema::FieldOption::Hnsw(
+                    crate::vector::core::field::HnswOption::default().dimension(4),
+                ),
+            )
+            .build();
+
+        let persisted: Arc<parking_lot::Mutex<Vec<Schema>>> =
+            Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let persisted_clone = Arc::clone(&persisted);
+
+        let engine = Engine::builder(storage, schema)
+            .persist_schema_with(Arc::new(move |schema: &Schema| {
+                persisted_clone.lock().push(schema.clone());
+                Ok(())
+            }))
+            .build()
+            .await
+            .unwrap();
+
+        let mut new_option = crate::vector::core::field::HnswOption::default().dimension(4);
+        new_option.default_ef_search = Some(64);
+
+        let outcome = engine
+            .update_field(
+                "embedding",
+                schema::FieldOption::Hnsw(new_option),
+                UpdateFieldOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome.classification,
+            schema::FieldChangeKind::MetadataOnly
+        );
+        match outcome.schema.fields.get("embedding") {
+            Some(schema::FieldOption::Hnsw(opt)) => {
+                assert_eq!(opt.default_ef_search, Some(64));
+            }
+            other => panic!("expected FieldOption::Hnsw, got {other:?}"),
+        }
+        // The hook was invoked with the updated schema.
+        assert_eq!(persisted.lock().len(), 1);
+    }
+
+    /// Issue #1079: a `Reindex`-classified change (here, an analyzer swap)
+    /// is rejected in this phase, and does not mutate the schema.
+    #[tokio::test]
+    async fn test_update_field_rejects_reindex_change() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "title",
+                schema::FieldOption::Text(crate::lexical::core::field::TextOption::default()),
+            )
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        let new_option = schema::FieldOption::Text(
+            crate::lexical::core::field::TextOption::default().analyzer("english"),
+        );
+        let result = engine
+            .update_field("title", new_option, UpdateFieldOptions::default())
+            .await;
+
+        assert!(result.is_err(), "a Reindex change must be rejected");
+        // The schema is untouched: still the original (analyzer: None) option.
+        match engine.schema().fields.get("title") {
+            Some(schema::FieldOption::Text(opt)) => assert!(opt.analyzer.is_none()),
+            other => panic!("expected FieldOption::Text, got {other:?}"),
+        }
+    }
+
+    /// Issue #1079: a `Destructive`-classified change (here, a dimension
+    /// change) is rejected in this phase, and does not mutate the schema.
+    #[tokio::test]
+    async fn test_update_field_rejects_destructive_change() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "embedding",
+                schema::FieldOption::Hnsw(
+                    crate::vector::core::field::HnswOption::default().dimension(4),
+                ),
+            )
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        let new_option = schema::FieldOption::Hnsw(
+            crate::vector::core::field::HnswOption::default().dimension(8),
+        );
+        let result = engine
+            .update_field("embedding", new_option, UpdateFieldOptions::default())
+            .await;
+
+        assert!(result.is_err(), "a Destructive change must be rejected");
+        match engine.schema().fields.get("embedding") {
+            Some(schema::FieldOption::Hnsw(opt)) => assert_eq!(opt.dimension, 4),
+            other => panic!("expected FieldOption::Hnsw, got {other:?}"),
+        }
+    }
+
+    /// Issue #1079: `dry_run: true` reports the classification without
+    /// mutating the schema, even for a `MetadataOnly` change.
+    #[tokio::test]
+    async fn test_update_field_dry_run_does_not_mutate() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "embedding",
+                schema::FieldOption::Hnsw(
+                    crate::vector::core::field::HnswOption::default().dimension(4),
+                ),
+            )
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        let mut new_option = crate::vector::core::field::HnswOption::default().dimension(4);
+        new_option.default_ef_search = Some(64);
+
+        let outcome = engine
+            .update_field(
+                "embedding",
+                schema::FieldOption::Hnsw(new_option),
+                UpdateFieldOptions {
+                    dry_run: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome.classification,
+            schema::FieldChangeKind::MetadataOnly
+        );
+        // Not applied: the schema still has the original (unset) value.
+        match engine.schema().fields.get("embedding") {
+            Some(schema::FieldOption::Hnsw(opt)) => assert_eq!(opt.default_ef_search, None),
+            other => panic!("expected FieldOption::Hnsw, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_field_nonexistent_rejected() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let engine = Engine::new(storage, Schema::new()).await.unwrap();
+
+        let result = engine
+            .update_field(
+                "nonexistent",
+                schema::FieldOption::Text(crate::lexical::core::field::TextOption::default()),
+                UpdateFieldOptions::default(),
+            )
+            .await;
+        assert!(result.is_err(), "updating a nonexistent field should fail");
     }
 
     #[tokio::test]
