@@ -21,6 +21,7 @@ use parking_lot::RwLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::error::{LaurusError, Result};
 use crate::lexical::core::field::FieldOption;
 use crate::lexical::index::LexicalIndex;
@@ -842,6 +843,97 @@ impl LexicalIndex for InvertedIndex {
         // the index level. Fields from the initial config remain in the
         // underlying index data but will be hidden from the engine-level schema.
         self.extra_fields.write().remove(name);
+        Ok(())
+    }
+
+    fn rebuild_field(
+        &self,
+        name: &str,
+        option: FieldOption,
+        analyzer: Option<Arc<dyn Analyzer>>,
+    ) -> Result<()> {
+        self.check_closed()?;
+
+        let segments = self.load_segments()?;
+        if !segments.is_empty() {
+            use self::segment::ManagedSegmentInfo;
+            use self::segment::merge_engine::{MergeConfig, MergeEngine};
+
+            let managed: Vec<ManagedSegmentInfo> = segments
+                .iter()
+                .map(|info| {
+                    let mut mi = ManagedSegmentInfo::new(info.clone());
+                    mi.size_bytes = self.segment_size_bytes(&info.segment_id);
+                    mi
+                })
+                .collect();
+
+            // Reserve one fresh generation per source segment up front, so
+            // every rebuilt segment has a final ID before any I/O runs —
+            // the merge engine writes to `new_segment_ids` directly, no
+            // renumbering needed after the fact.
+            let mut new_segment_ids = Vec::with_capacity(segments.len());
+            for _ in &segments {
+                let generation = self.next_generation()?;
+                new_segment_ids.push(format!("merged_{generation}"));
+            }
+
+            let engine = MergeEngine::new(
+                MergeConfig {
+                    use_compound: self.config.use_compound,
+                    ..MergeConfig::default()
+                },
+                self.storage.clone(),
+            );
+            // Nothing is published yet: a failure here leaves every source
+            // segment and the manifest completely untouched (Issue #1081's
+            // acceptance criterion). Only a partially-written new segment
+            // file might exist on disk, which is not referenced by any
+            // manifest and is swept up as an orphan on next open, the same
+            // as an aborted `perform_merge`.
+            let results = engine.rebuild_field_across_segments(
+                &managed,
+                name,
+                analyzer.as_ref(),
+                &new_segment_ids,
+            )?;
+
+            // Publish the whole batch as ONE manifest write (mirrors
+            // `merge_segment_set`): drop every source and insert every
+            // rebuilt segment, each keeping the generation its own ID
+            // already encodes.
+            let mut new_infos: Vec<SegmentInfo> = Vec::with_capacity(results.len());
+            for (result, new_segment_id) in results.into_iter().zip(&new_segment_ids) {
+                let mut info = result.new_segment.segment_info;
+                if let Some(generation) = segment_manifest::stem_ordinal(new_segment_id) {
+                    info.generation = generation;
+                }
+                new_infos.push(info);
+            }
+            let source_ids: Vec<String> = segments.iter().map(|s| s.segment_id.clone()).collect();
+            segment_manifest::publish_with(
+                self.storage.as_ref(),
+                &self.segment_manifest,
+                |list| {
+                    list.retain(|entry| !source_ids.contains(&entry.segment_id));
+                    for info in new_infos {
+                        segment_manifest::upsert_entry(list, info);
+                    }
+                },
+            )?;
+
+            // Physical cleanup only: the manifest write above already
+            // removed the sources from discovery atomically.
+            for info in &segments {
+                self.delete_segment_files(&info.segment_id)?;
+            }
+        }
+
+        // Update the field's option — same "extra_fields overrides base
+        // config" mechanism `add_field`/`writer()` already rely on (#1081:
+        // this also covers a field originally declared in the base config,
+        // which `add_field` cannot touch since it rejects duplicates).
+        self.extra_fields.write().insert(name.to_string(), option);
         Ok(())
     }
 }
