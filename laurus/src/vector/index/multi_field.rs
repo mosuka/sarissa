@@ -425,11 +425,56 @@ impl VectorIndex for MultiFieldVectorIndex {
         Ok(())
     }
 
-    fn remove_field(&self, name: &str) -> Result<()> {
-        // Unregister only -- mirrors `VectorStore::delete_field`'s existing
-        // contract (does not delete on-disk data), so re-adding the same
-        // field name later recovers it.
+    fn remove_field(&self, name: &str, purge: bool) -> Result<()> {
+        // Unregister first (mirrors `VectorStore::delete_field`'s existing
+        // contract when `purge` is false: does not delete on-disk data, so
+        // re-adding the same field name later recovers it).
         self.fields.write().remove(name);
+
+        if purge {
+            // Issue #1080: physically remove the field's files so a
+            // same-name re-add under a DIFFERENT type cannot misread old
+            // bytes. `list_files` on the field's own `PrefixedStorage`
+            // already returns only this field's (prefix-stripped) names.
+            let field_storage = PrefixedStorage::new(name.to_string(), self.storage.clone());
+            let files = field_storage.list_files()?;
+            try_all(files.iter(), |file| field_storage.delete_file(file))?;
+        }
+        Ok(())
+    }
+
+    fn rebuild_field(&self, name: &str, new_config: VectorIndexTypeConfig) -> Result<()> {
+        if !self.fields.read().contains_key(name) {
+            return Err(LaurusError::invalid_argument(format!(
+                "vector field '{name}' does not exist"
+            )));
+        }
+
+        // Reopen the SAME physical namespace under the new config -- this
+        // does not move or lose any data, it only changes which config the
+        // existing segments are read/merged under. `open_or_create` always
+        // takes the `open` path here (the field's `metadata.json` already
+        // exists), so the existing segment manifest is picked up as-is.
+        let field_storage: Arc<dyn Storage> =
+            Arc::new(PrefixedStorage::new(name.to_string(), self.storage.clone()));
+        let index =
+            VectorIndexFactory::open_or_create(field_storage, SUB_INDEX_NAME, new_config.clone())?;
+
+        // Force-merge every existing segment into one new segment under
+        // the new config. `optimize()` writes the new segment fully before
+        // atomically publishing it (see `SegmentedHnswIndex::optimize`), so
+        // a failure here never touches `self.fields` below -- the field's
+        // existing data is left completely untouched.
+        index.optimize()?;
+
+        self.fields.write().insert(
+            name.to_string(),
+            FieldEntry {
+                dimension: new_config.dimension(),
+                distance_metric: new_config.distance_metric(),
+                index: Arc::from(index),
+            },
+        );
         Ok(())
     }
 

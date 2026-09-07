@@ -290,7 +290,7 @@ fn remove_field_does_not_affect_others() {
         .unwrap();
     writer.commit().unwrap();
 
-    index.remove_field("title_vec").unwrap();
+    index.remove_field("title_vec", false).unwrap();
 
     assert_eq!(
         index.field_dimensions().keys().collect::<Vec<_>>(),
@@ -299,6 +299,234 @@ fn remove_field_does_not_affect_others() {
     );
     let reader = index.reader().unwrap();
     assert_eq!(reader.get_vectors_by_field("body_vec").unwrap().len(), 1);
+}
+
+/// Issue #1080: `remove_field(purge: true)` must physically delete the
+/// field's on-disk data, unlike the `purge: false` case above -- a
+/// same-name re-add must NOT resurrect the old vectors.
+#[test]
+fn remove_field_with_purge_deletes_on_disk_data() {
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        "title_vec".to_string(),
+        hnsw_config(3, DistanceMetric::Cosine),
+    );
+    let index =
+        MultiFieldVectorIndex::open_or_create(storage(), &fields, Arc::new(MockEmbedder)).unwrap();
+
+    let mut writer = index.writer().unwrap();
+    writer
+        .add_vectors(vec![(1, "title_vec".to_string(), vec_of(&[1.0, 0.0, 0.0]))])
+        .unwrap();
+    writer.commit().unwrap();
+
+    index.remove_field("title_vec", true).unwrap();
+    assert!(
+        index.storage().list_files().unwrap().is_empty(),
+        "purge must physically delete every file under the field's prefix"
+    );
+
+    // Re-adding under the same name must start from a clean slate.
+    index
+        .add_field("title_vec", hnsw_config(3, DistanceMetric::Cosine))
+        .unwrap();
+    let reader = index.reader().unwrap();
+    assert_eq!(
+        reader.get_vectors_by_field("title_vec").unwrap().len(),
+        0,
+        "the old vector must not resurface after a purge + re-add"
+    );
+}
+
+/// Issue #1080: `rebuild_field` must preserve existing vectors while
+/// applying the new config, and must reject a field name that does not
+/// exist.
+#[test]
+fn rebuild_field_preserves_vectors_under_new_config() {
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        "title_vec".to_string(),
+        hnsw_config(3, DistanceMetric::Cosine),
+    );
+    let index =
+        MultiFieldVectorIndex::open_or_create(storage(), &fields, Arc::new(MockEmbedder)).unwrap();
+
+    let mut writer = index.writer().unwrap();
+    writer
+        .add_vectors(vec![
+            (1, "title_vec".to_string(), vec_of(&[1.0, 0.0, 0.0])),
+            (2, "title_vec".to_string(), vec_of(&[0.0, 1.0, 0.0])),
+        ])
+        .unwrap();
+    writer.commit().unwrap();
+
+    let mut new_config = hnsw_config(3, DistanceMetric::Cosine);
+    if let VectorIndexTypeConfig::HNSW(c) = &mut new_config {
+        c.m = 32;
+        c.ef_construction = 400;
+    }
+    index.rebuild_field("title_vec", new_config).unwrap();
+
+    let reader = index.reader().unwrap();
+    assert_eq!(
+        reader.get_vectors_by_field("title_vec").unwrap().len(),
+        2,
+        "rebuild must preserve every existing vector, not just re-create an empty field"
+    );
+    assert_eq!(
+        index.field_dimensions()["title_vec"],
+        3,
+        "rebuild must keep reporting the (unchanged) dimension"
+    );
+}
+
+/// Storage decorator failing the next `create_output` whose name has the
+/// armed prefix -- same technique as
+/// `merge_failure_publication_test.rs::FailingStorage`, used here to kill
+/// `rebuild_field`'s internal `optimize()` partway through.
+#[derive(Debug)]
+struct FailingStorage {
+    inner: Arc<dyn Storage>,
+    fail_create_with_prefix: parking_lot::Mutex<Option<String>>,
+}
+
+impl FailingStorage {
+    fn new(inner: Arc<dyn Storage>) -> Self {
+        Self {
+            inner,
+            fail_create_with_prefix: parking_lot::Mutex::new(None),
+        }
+    }
+
+    fn fail_next_create_with_prefix(&self, prefix: &str) {
+        *self.fail_create_with_prefix.lock() = Some(prefix.to_string());
+    }
+}
+
+impl Storage for FailingStorage {
+    fn create_output(&self, name: &str) -> Result<Box<dyn laurus::storage::StorageOutput>> {
+        let armed = {
+            let mut guard = self.fail_create_with_prefix.lock();
+            if guard.as_ref().is_some_and(|p| name.starts_with(p)) {
+                *guard = None;
+                true
+            } else {
+                false
+            }
+        };
+        if armed {
+            return Err(LaurusError::storage(format!(
+                "injected failure creating {name}"
+            )));
+        }
+        self.inner.create_output(name)
+    }
+
+    fn create_output_append(&self, name: &str) -> Result<Box<dyn laurus::storage::StorageOutput>> {
+        self.inner.create_output_append(name)
+    }
+
+    fn open_input(&self, name: &str) -> Result<Box<dyn laurus::storage::StorageInput>> {
+        self.inner.open_input(name)
+    }
+
+    fn file_exists(&self, name: &str) -> bool {
+        self.inner.file_exists(name)
+    }
+
+    fn delete_file(&self, name: &str) -> Result<()> {
+        self.inner.delete_file(name)
+    }
+
+    fn rename_file(&self, old_name: &str, new_name: &str) -> Result<()> {
+        self.inner.rename_file(old_name, new_name)
+    }
+
+    fn list_files(&self) -> Result<Vec<String>> {
+        self.inner.list_files()
+    }
+
+    fn file_size(&self, name: &str) -> Result<u64> {
+        self.inner.file_size(name)
+    }
+
+    fn sync(&self) -> Result<()> {
+        self.inner.sync()
+    }
+
+    fn metadata(&self, name: &str) -> Result<laurus::storage::FileMetadata> {
+        self.inner.metadata(name)
+    }
+
+    fn create_temp_output(
+        &self,
+        prefix: &str,
+    ) -> Result<(String, Box<dyn laurus::storage::StorageOutput>)> {
+        self.inner.create_temp_output(prefix)
+    }
+
+    fn close(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Issue #1080 acceptance criterion: "A failure mid-rebuild leaves the
+/// original field index untouched." Kills the write of the merged
+/// segment `optimize()` (inside `rebuild_field`) produces, and confirms
+/// the field's original vectors and dimension are exactly as they were.
+#[test]
+fn rebuild_field_failure_leaves_original_field_untouched() {
+    let inner: Arc<dyn Storage> = storage();
+    let failing = Arc::new(FailingStorage::new(inner));
+    let storage: Arc<dyn Storage> = failing.clone();
+
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        "title_vec".to_string(),
+        hnsw_config(3, DistanceMetric::Cosine),
+    );
+    let index =
+        MultiFieldVectorIndex::open_or_create(storage, &fields, Arc::new(MockEmbedder)).unwrap();
+
+    let mut writer = index.writer().unwrap();
+    writer
+        .add_vectors(vec![
+            (1, "title_vec".to_string(), vec_of(&[1.0, 0.0, 0.0])),
+            (2, "title_vec".to_string(), vec_of(&[0.0, 1.0, 0.0])),
+        ])
+        .unwrap();
+    writer.commit().unwrap();
+
+    // `rebuild_field` reopens under the field's own `PrefixedStorage`, so
+    // the merged segment's file name is prefixed with the field name.
+    failing.fail_next_create_with_prefix("title_vec/segment_");
+    let mut new_config = hnsw_config(3, DistanceMetric::Cosine);
+    if let VectorIndexTypeConfig::HNSW(c) = &mut new_config {
+        c.m = 32;
+        c.ef_construction = 400;
+    }
+    let result = index.rebuild_field("title_vec", new_config);
+    assert!(result.is_err(), "the injected failure must surface");
+
+    // The field's original data and routing are completely untouched: same
+    // dimension, same vectors, still searchable.
+    assert_eq!(index.field_dimensions()["title_vec"], 3);
+    let reader = index.reader().unwrap();
+    assert_eq!(
+        reader.get_vectors_by_field("title_vec").unwrap().len(),
+        2,
+        "a failed rebuild must not lose or partially apply the original vectors"
+    );
+}
+
+#[test]
+fn rebuild_field_rejects_nonexistent_field() {
+    let fields = BTreeMap::new();
+    let index =
+        MultiFieldVectorIndex::open_or_create(storage(), &fields, Arc::new(MockEmbedder)).unwrap();
+
+    let result = index.rebuild_field("nonexistent", hnsw_config(3, DistanceMetric::Cosine));
+    assert!(result.is_err());
 }
 
 /// `search_batch_with_threshold` must return results in the SAME order as

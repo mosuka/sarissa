@@ -1585,7 +1585,7 @@ impl Engine {
     }
 
     /// Dynamically change an existing field's type or options at runtime
-    /// (Issue #1077/#1079).
+    /// (Issue #1077/#1079/#1080).
     ///
     /// Unlike [`Self::add_field`]/[`Self::delete_field`], a field option
     /// change may or may not require existing on-disk data to be rebuilt.
@@ -1593,11 +1593,24 @@ impl Engine {
     ///
     /// - [`FieldChangeKind::MetadataOnly`](schema::FieldChangeKind::MetadataOnly):
     ///   applied immediately; no existing data is touched.
-    /// - [`FieldChangeKind::Reindex`](schema::FieldChangeKind::Reindex) /
-    ///   [`FieldChangeKind::Destructive`](schema::FieldChangeKind::Destructive):
-    ///   rejected in this phase — rebuilding vector fields (Issue #1080)
-    ///   and lexical fields (Issue #1081) is not yet implemented. `opts.reindex`
-    ///   is reserved for when those land and has no effect yet.
+    /// - [`FieldChangeKind::Reindex`](schema::FieldChangeKind::Reindex) for a
+    ///   **vector** field (e.g. HNSW `m`/`ef_construction`, any index
+    ///   kind's `quantizer`/`rerank_storage`, IVF `n_clusters`): rebuilt in
+    ///   place from the field's existing segments (no document-store
+    ///   read). Requires `opts.reindex == true`.
+    /// - [`FieldChangeKind::Destructive`](schema::FieldChangeKind::Destructive)
+    ///   for a **vector** field (`dimension`/`distance`/`embedder`):
+    ///   existing data is physically discarded and the field recreated
+    ///   empty under the new config (data loss — "warn and proceed", see
+    ///   #1077's investigation). The field is recorded in
+    ///   [`Schema::pending_reindex`](schema::Schema::pending_reindex) so
+    ///   the loss stays discoverable via `GetSchema`. Also requires
+    ///   `opts.reindex == true` — this crate does not gate destructive
+    ///   changes behind a separate flag; see #1077's design discussion.
+    /// - `Reindex`/`Destructive` for a **lexical** field: rejected —
+    ///   rebuilding lexical fields (Issue #1081) is not yet implemented,
+    ///   since the inverted index shares one postings dictionary across
+    ///   every field in a segment.
     ///
     /// Blocks concurrently with ingestion via an internal write lock (see
     /// [`Engine`]'s `schema_change_lock`), so a document is never coerced
@@ -1621,7 +1634,10 @@ impl Engine {
     /// - No field with the given name exists in the schema.
     /// - The change is classified as [`FieldChangeKind::Reindex`](schema::FieldChangeKind::Reindex)
     ///   or [`FieldChangeKind::Destructive`](schema::FieldChangeKind::Destructive)
-    ///   (not yet implemented in this phase).
+    ///   and `opts.reindex` is `false`.
+    /// - The change targets a lexical field and is classified as `Reindex`
+    ///   or `Destructive` (not yet implemented — Issue #1081).
+    /// - The underlying vector rebuild/recreate fails.
     /// - A configured schema-persist hook fails (the in-memory schema has
     ///   already been updated at that point; this is not rolled back).
     pub async fn update_field(
@@ -1666,20 +1682,79 @@ impl Engine {
                     schema: updated,
                 })
             }
-            schema::FieldChangeKind::Reindex => {
-                Err(crate::error::LaurusError::not_implemented(format!(
-                    "updating field '{name}' requires rebuilding existing data, which is not \
-                     yet implemented (see https://github.com/mosuka/laurus/issues/1080 for \
-                     vector fields or https://github.com/mosuka/laurus/issues/1081 for lexical \
-                     fields)"
-                )))
-            }
-            schema::FieldChangeKind::Destructive => {
-                Err(crate::error::LaurusError::not_implemented(format!(
-                    "updating field '{name}' would discard its existing data, which is not yet \
-                     implemented (see https://github.com/mosuka/laurus/issues/1080 for vector \
-                     fields or https://github.com/mosuka/laurus/issues/1081 for lexical fields)"
-                )))
+            schema::FieldChangeKind::Reindex | schema::FieldChangeKind::Destructive => {
+                if !option.is_vector() {
+                    // Lexical rebuild is Issue #1081 (Phase 3): the
+                    // inverted index shares one postings dictionary across
+                    // every field, so this requires full segment
+                    // reconstruction, not yet implemented.
+                    return Err(crate::error::LaurusError::not_implemented(format!(
+                        "updating lexical field '{name}' requires rebuilding existing data, \
+                         which is not yet implemented (see \
+                         https://github.com/mosuka/laurus/issues/1081)"
+                    )));
+                }
+                if !opts.reindex {
+                    return Err(crate::error::LaurusError::invalid_argument(format!(
+                        "updating field '{name}' requires rebuilding or discarding existing \
+                         data (classified as {classification:?}); pass `UpdateFieldOptions {{ \
+                         reindex: true, .. }}` to proceed"
+                    )));
+                }
+
+                let purge = classification == schema::FieldChangeKind::Destructive;
+                if purge {
+                    log::warn!(
+                        "update_field: field '{name}' has a destructive change \
+                         (dimension/distance/embedder); its existing data will be discarded"
+                    );
+                }
+
+                // Same embedder-resolution pattern as `add_field` above:
+                // clone the definition out of the `parking_lot` schema
+                // guard before the `await` (that guard is not `Send`).
+                let field_embedder = if let Some(embedder_name) = option.embedder_name() {
+                    let embedder_def = {
+                        let schema = self.schema.read();
+                        schema.embedders.get(embedder_name).cloned()
+                    };
+                    if let Some(def) = embedder_def {
+                        Some(
+                            crate::embedding::registry::create_embedder_from_definition(
+                                embedder_name,
+                                &def,
+                            )
+                            .await?,
+                        )
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let vector_opt = option
+                    .to_vector()
+                    .expect("is_vector() was true but to_vector() returned None");
+                self.vector
+                    .rebuild_field(name, &vector_opt, field_embedder, purge)
+                    .await?;
+
+                {
+                    let mut schema = self.schema.write();
+                    schema.fields.insert(name.to_string(), option);
+                    if purge {
+                        schema.pending_reindex.insert(name.to_string());
+                    } else {
+                        schema.pending_reindex.remove(name);
+                    }
+                }
+                let updated = self.schema.read().clone();
+                self.persist_schema(&updated)?;
+                Ok(UpdateFieldOutcome {
+                    classification,
+                    schema: updated,
+                })
             }
         }
     }
@@ -3742,8 +3817,10 @@ mod tests {
         assert_eq!(persisted.lock().len(), 1);
     }
 
-    /// Issue #1079: a `Reindex`-classified change (here, an analyzer swap)
-    /// is rejected in this phase, and does not mutate the schema.
+    /// Issue #1079/#1081: a `Reindex`-classified change on a LEXICAL field
+    /// (here, an analyzer swap) is always rejected -- lexical rebuild is
+    /// not yet implemented, regardless of `opts.reindex` -- and does not
+    /// mutate the schema.
     #[tokio::test]
     async fn test_update_field_rejects_reindex_change() {
         let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
@@ -3758,8 +3835,17 @@ mod tests {
         let new_option = schema::FieldOption::Text(
             crate::lexical::core::field::TextOption::default().analyzer("english"),
         );
+        // Even with the opt-in flag set, a lexical rebuild is rejected --
+        // this is a hard "not yet implemented", not a missing opt-in.
         let result = engine
-            .update_field("title", new_option, UpdateFieldOptions::default())
+            .update_field(
+                "title",
+                new_option,
+                UpdateFieldOptions {
+                    reindex: true,
+                    ..Default::default()
+                },
+            )
             .await;
 
         assert!(result.is_err(), "a Reindex change must be rejected");
@@ -3770,8 +3856,10 @@ mod tests {
         }
     }
 
-    /// Issue #1079: a `Destructive`-classified change (here, a dimension
-    /// change) is rejected in this phase, and does not mutate the schema.
+    /// Issue #1080: a `Reindex`/`Destructive`-classified change on a
+    /// VECTOR field is rejected when `opts.reindex` is left at its default
+    /// (`false`) -- the opt-in gate applies to destructive changes too, not
+    /// just expensive-but-safe rebuilds (Issue #1077's design decision).
     #[tokio::test]
     async fn test_update_field_rejects_destructive_change() {
         let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
@@ -3792,11 +3880,125 @@ mod tests {
             .update_field("embedding", new_option, UpdateFieldOptions::default())
             .await;
 
-        assert!(result.is_err(), "a Destructive change must be rejected");
+        assert!(
+            result.is_err(),
+            "a Destructive change without opts.reindex must be rejected"
+        );
         match engine.schema().fields.get("embedding") {
             Some(schema::FieldOption::Hnsw(opt)) => assert_eq!(opt.dimension, 4),
             other => panic!("expected FieldOption::Hnsw, got {other:?}"),
         }
+    }
+
+    /// Issue #1080: a `Reindex`-classified vector change (HNSW `m`) with
+    /// `opts.reindex: true` actually rebuilds the field in place, keeping
+    /// existing vectors and applying the new schema.
+    #[tokio::test]
+    async fn test_update_field_rebuilds_vector_field_reindex_change() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "embedding",
+                schema::FieldOption::Hnsw(
+                    crate::vector::core::field::HnswOption::default().dimension(4),
+                ),
+            )
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        engine
+            .add_document(
+                "doc1",
+                Document::builder()
+                    .add_vector("embedding", vec![1.0, 0.0, 0.0, 0.0])
+                    .build(),
+            )
+            .await
+            .unwrap();
+        engine.commit().await.unwrap();
+
+        let mut new_hnsw = crate::vector::core::field::HnswOption::default().dimension(4);
+        new_hnsw.m = 32;
+        new_hnsw.ef_construction = 400;
+        let outcome = engine
+            .update_field(
+                "embedding",
+                schema::FieldOption::Hnsw(new_hnsw),
+                UpdateFieldOptions {
+                    reindex: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.classification, schema::FieldChangeKind::Reindex);
+        match outcome.schema.fields.get("embedding") {
+            Some(schema::FieldOption::Hnsw(opt)) => assert_eq!(opt.m, 32),
+            other => panic!("expected FieldOption::Hnsw, got {other:?}"),
+        }
+        assert!(
+            outcome.schema.pending_reindex.is_empty(),
+            "a Reindex (non-destructive) change must not appear in pending_reindex"
+        );
+
+        // The existing document's vector survived the rebuild.
+        let docs = engine.get_documents("doc1").await.unwrap();
+        assert_eq!(docs.len(), 1);
+    }
+
+    /// Issue #1080: a `Destructive`-classified vector change (dimension)
+    /// with `opts.reindex: true` discards existing data, applies the new
+    /// schema, and records the field in `pending_reindex` so the loss
+    /// stays discoverable.
+    #[tokio::test]
+    async fn test_update_field_destructive_change_discards_data_and_records_pending_reindex() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "embedding",
+                schema::FieldOption::Hnsw(
+                    crate::vector::core::field::HnswOption::default().dimension(4),
+                ),
+            )
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        engine
+            .add_document(
+                "doc1",
+                Document::builder()
+                    .add_vector("embedding", vec![1.0, 0.0, 0.0, 0.0])
+                    .build(),
+            )
+            .await
+            .unwrap();
+        engine.commit().await.unwrap();
+
+        let new_option = schema::FieldOption::Hnsw(
+            crate::vector::core::field::HnswOption::default().dimension(8),
+        );
+        let outcome = engine
+            .update_field(
+                "embedding",
+                new_option,
+                UpdateFieldOptions {
+                    reindex: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.classification, schema::FieldChangeKind::Destructive);
+        match outcome.schema.fields.get("embedding") {
+            Some(schema::FieldOption::Hnsw(opt)) => assert_eq!(opt.dimension, 8),
+            other => panic!("expected FieldOption::Hnsw, got {other:?}"),
+        }
+        assert!(
+            outcome.schema.pending_reindex.contains("embedding"),
+            "a Destructive change must be recorded in pending_reindex"
+        );
     }
 
     /// Issue #1079: `dry_run: true` reports the classification without

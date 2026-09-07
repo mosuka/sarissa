@@ -235,15 +235,55 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     }
 
     /// Remove a vector field from this index's routing (Issue #948: dynamic
-    /// schema evolution). Does NOT delete the field's on-disk data --
-    /// mirrors [`crate::vector::store::VectorStore`]'s existing
-    /// "unregister only" contract for `delete_field`, so the data can be
-    /// recovered by re-adding the field with the same name.
+    /// schema evolution).
+    ///
+    /// With `purge: false`, this only unregisters the field -- mirrors
+    /// [`crate::vector::store::VectorStore`]'s existing "unregister only"
+    /// contract for `delete_field`, so the data can be recovered by
+    /// re-adding the field with the same name.
+    ///
+    /// With `purge: true` (Issue #1080: `Engine::update_field` rebuilding a
+    /// field under a new type), the field's on-disk data is also
+    /// physically deleted, so a same-name re-add under a different type
+    /// cannot misread the old bytes.
     ///
     /// Defaults to `Ok(())` (a no-op): index types without field boundaries
-    /// have nothing to unregister.
-    fn remove_field(&self, _name: &str) -> Result<()> {
+    /// have nothing to unregister or purge.
+    fn remove_field(&self, _name: &str, _purge: bool) -> Result<()> {
         Ok(())
+    }
+
+    /// Rebuild an existing vector field's on-disk data under a new
+    /// configuration, in place (Issue #1080: `Engine::update_field`'s
+    /// `Reindex`-classified vector changes -- e.g. HNSW `m`/
+    /// `ef_construction`, any index kind's `quantizer`/`rerank_storage`,
+    /// IVF `n_clusters`).
+    ///
+    /// The field keeps its identity and physical storage location; only
+    /// the segments are rewritten under `new_config`. Implementations must
+    /// leave the field's existing data completely untouched if the rebuild
+    /// fails partway through (e.g. by writing new segments before
+    /// atomically publishing them, the way [`Self::optimize`] already
+    /// does).
+    ///
+    /// Only valid for parameters that do not change the meaning of
+    /// already-written vectors (dimension, distance metric, and embedder
+    /// must be unchanged -- callers gate this via
+    /// `laurus::engine::schema::classify_change`). Rebuilding under a
+    /// different `dimension`/`distance`/`embedder` is a
+    /// [`crate::engine::schema::FieldChangeKind::Destructive`] change
+    /// instead, handled by the caller as remove-then-add.
+    ///
+    /// # Errors
+    ///
+    /// The default implementation always errors; callers must gate on
+    /// [`Self::supports_dynamic_fields`] first. Implementations also error
+    /// if no field named `name` is registered, or if the rebuild itself
+    /// fails.
+    fn rebuild_field(&self, _name: &str, _new_config: VectorIndexTypeConfig) -> Result<()> {
+        Err(LaurusError::InvalidOperation(
+            "this index type does not support rebuilding fields dynamically".to_string(),
+        ))
     }
 
     /// The configured vector dimension of every field, keyed by field name
