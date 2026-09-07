@@ -120,7 +120,7 @@ fn removing_the_lagging_field_lifts_the_aggregate_to_the_remaining_fields_minimu
     index.add_field("c", hnsw_config(3)).unwrap();
     assert_eq!(index.last_wal_seq(), 0);
 
-    index.remove_field("c").unwrap();
+    index.remove_field("c", false).unwrap();
     assert_eq!(
         index.last_wal_seq(),
         100,

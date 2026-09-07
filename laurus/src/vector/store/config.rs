@@ -195,6 +195,7 @@ pub fn build_field_index_config(
             dimension: opt.dimension,
             distance_metric: opt.distance,
             rerank_storage: opt.rerank_storage,
+            quantization_method: opt.quantizer,
             normalize_vectors: opt.distance == DistanceMetric::Cosine,
             auto_compaction: deletion_config.auto_compaction,
             compaction_threshold: deletion_config.compaction_threshold,
@@ -213,6 +214,7 @@ pub fn build_field_index_config(
             n_clusters: opt.n_clusters,
             n_probe: opt.n_probe,
             rerank_storage: opt.rerank_storage,
+            quantization_method: opt.quantizer,
             normalize_vectors: opt.distance == DistanceMetric::Cosine,
             auto_compaction: deletion_config.auto_compaction,
             compaction_threshold: deletion_config.compaction_threshold,
@@ -588,6 +590,66 @@ mod tests {
                 assert_eq!(c.default_ef_search, Some(77));
             }
             other => panic!("expected HNSW config, got {other:?}"),
+        }
+    }
+
+    /// Issue #1080: `build_field_index_config`'s Flat and IVF branches used
+    /// to drop `opt.quantizer` on the floor (falling back to
+    /// `..Default::default()`'s `Scalar8Bit`), while the HNSW branch
+    /// propagated it correctly. A `Flat`/`Ivf` field configured with a
+    /// non-default quantizer must convert with that same quantizer, or
+    /// `Engine::update_field` rebuilding a quantizer change would silently
+    /// no-op for these two index kinds.
+    #[test]
+    fn field_index_configs_propagates_quantizer_for_flat_and_ivf() {
+        let flat_config = VectorIndexConfig::builder()
+            .field(
+                "vec",
+                VectorFieldConfig {
+                    vector: Some(FieldOption::Flat(FlatOption {
+                        quantizer: QuantizationMethod::ProductQuantization { subvector_count: 4 },
+                        rerank_storage: Some(RerankStorageKind::F32),
+                        ..Default::default()
+                    })),
+                    lexical: None,
+                },
+            )
+            .build()
+            .unwrap();
+        match &flat_config.field_index_configs()["vec"] {
+            VectorIndexTypeConfig::Flat(c) => {
+                assert_eq!(
+                    c.quantization_method,
+                    QuantizationMethod::ProductQuantization { subvector_count: 4 }
+                );
+                assert_eq!(c.rerank_storage, Some(RerankStorageKind::F32));
+            }
+            other => panic!("expected Flat config, got {other:?}"),
+        }
+
+        let ivf_config = VectorIndexConfig::builder()
+            .field(
+                "vec",
+                VectorFieldConfig {
+                    vector: Some(FieldOption::Ivf(IvfOption {
+                        quantizer: QuantizationMethod::ProductQuantization { subvector_count: 4 },
+                        rerank_storage: Some(RerankStorageKind::F32),
+                        ..Default::default()
+                    })),
+                    lexical: None,
+                },
+            )
+            .build()
+            .unwrap();
+        match &ivf_config.field_index_configs()["vec"] {
+            VectorIndexTypeConfig::IVF(c) => {
+                assert_eq!(
+                    c.quantization_method,
+                    QuantizationMethod::ProductQuantization { subvector_count: 4 }
+                );
+                assert_eq!(c.rerank_storage, Some(RerankStorageKind::F32));
+            }
+            other => panic!("expected IVF config, got {other:?}"),
         }
     }
 

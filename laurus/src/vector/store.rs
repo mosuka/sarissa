@@ -1085,7 +1085,10 @@ impl VectorStore {
     /// Returns an error if unregistering the field from the underlying
     /// index fails.
     pub async fn delete_field(&self, name: &str) -> Result<()> {
-        self.index.remove_field(name)?;
+        // `purge: false` -- this method's existing "unregister only"
+        // contract (documented above) is unchanged; physical deletion is
+        // opt-in via `Self::rebuild_field` (Issue #1080).
+        self.index.remove_field(name, false)?;
 
         // Remove the field-specific embedder from the PerFieldEmbedder if present.
         let index_embedder = self.index.embedder();
@@ -1111,6 +1114,82 @@ impl VectorStore {
             }
             *writer_guard = None;
         }
+        *self.searcher_cache.write() = None;
+        Ok(())
+    }
+
+    /// Rebuild a field's on-disk data under a new type/option configuration
+    /// (Issue #1080: `Engine::update_field`'s `Reindex`/`Destructive`
+    /// classified vector changes).
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The vector field to rebuild. Must already exist.
+    /// * `new_option` - The field's new schema-level vector option.
+    /// * `embedder` - Optional field-specific embedder to register under
+    ///   the new option (same as [`Self::add_field`]).
+    /// * `purge` - `false` for a [`FieldChangeKind::Reindex`]-classified
+    ///   change: rebuilds in place from the field's existing segments via
+    ///   [`VectorIndex::rebuild_field`]. `true` for a
+    ///   [`FieldChangeKind::Destructive`]-classified change: physically
+    ///   discards the field's existing data ([`VectorIndex::remove_field`]
+    ///   with `purge: true`) and recreates it empty under the new config
+    ///   ([`VectorIndex::add_field`]) -- `dimension`/`distance`/`embedder`
+    ///   changes cannot be rebuilt from already-encoded data.
+    ///
+    /// [`FieldChangeKind::Reindex`]: crate::engine::schema::FieldChangeKind::Reindex
+    /// [`FieldChangeKind::Destructive`]: crate::engine::schema::FieldChangeKind::Destructive
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing a cached writer's pending changes
+    /// fails, or if the underlying rebuild (`purge: false`) or purge +
+    /// recreate (`purge: true`) fails. Unlike [`Self::add_field`]/
+    /// [`Self::delete_field`], a flush failure is **propagated**, not
+    /// cached for a later retry — the writer's buffered state is not a
+    /// safe starting point for a rebuild, the same reasoning
+    /// [`Self::optimize`] already applies.
+    pub async fn rebuild_field(
+        &self,
+        name: &str,
+        new_option: &crate::vector::core::field::FieldOption,
+        embedder: Option<Arc<dyn Embedder>>,
+        purge: bool,
+    ) -> Result<()> {
+        let deletion_config = self
+            .config
+            .as_ref()
+            .map(|c| c.deletion_config.clone())
+            .unwrap_or_default();
+        let new_config = self::config::build_field_index_config(
+            new_option,
+            self.index.embedder(),
+            &deletion_config,
+        );
+
+        let mut writer_guard = self.writer_cache.lock().await;
+        let flush_result = match writer_guard.as_mut() {
+            Some(writer) if writer.has_pending_changes() => writer.commit(),
+            _ => Ok(()),
+        };
+        flush_result?;
+        *writer_guard = None;
+
+        if purge {
+            self.index.remove_field(name, true)?;
+            self.index.add_field(name, new_config)?;
+        } else {
+            self.index.rebuild_field(name, new_config)?;
+        }
+
+        if let Some(field_embedder) = embedder {
+            let index_embedder = self.index.embedder();
+            if let Some(pfe) = index_embedder.as_any().downcast_ref::<PerFieldEmbedder>() {
+                pfe.add_embedder(name, field_embedder);
+            }
+        }
+
+        drop(writer_guard);
         *self.searcher_cache.write() = None;
         Ok(())
     }
