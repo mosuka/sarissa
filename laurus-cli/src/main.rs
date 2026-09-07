@@ -26,10 +26,10 @@ use clap::Parser;
 
 use crate::cli::{
     AddResource, Cli, Command, CreateResource, DeleteResource, GetResource, McpCommand,
-    PutResource, TrainResource,
+    PutResource, TrainResource, UpdateResource,
 };
 use crate::commands::{
-    add, bulk, commit, create, delete, get, mcp, put, repl, search, serve, train,
+    add, bulk, commit, create, delete, get, mcp, put, repl, search, serve, train, update,
 };
 
 #[tokio::main]
@@ -93,6 +93,14 @@ async fn main() -> Result<()> {
         Command::Delete(cmd) => match cmd.resource {
             DeleteResource::Docs { id } => delete::run_docs(&id, &index_dir).await,
             DeleteResource::Field { name } => delete::run_field(&name, &index_dir).await,
+        },
+        Command::Update(cmd) => match cmd.resource {
+            UpdateResource::Field {
+                name,
+                field_option,
+                reindex,
+                dry_run,
+            } => update::run_field(&name, &field_option, reindex, dry_run, &index_dir).await,
         },
         Command::Commit => commit::run(&index_dir).await,
         Command::Train(cmd) => match cmd.resource {

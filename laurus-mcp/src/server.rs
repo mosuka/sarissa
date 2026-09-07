@@ -20,10 +20,11 @@ use tracing::info;
 
 use laurus_server::proto::laurus::v1::{
     AddDocumentRequest, AddDocumentsRequest, AddFieldRequest, CommitRequest, CreateIndexRequest,
-    DeleteDocumentsRequest, DeleteFieldRequest, DocumentEntry, GetDocumentsRequest,
-    GetIndexRequest, GetSchemaRequest, PutDocumentRequest, PutDocumentsRequest, SearchBatchRequest,
-    SearchRequest, document_service_client::DocumentServiceClient,
-    index_service_client::IndexServiceClient, search_service_client::SearchServiceClient,
+    DeleteDocumentsRequest, DeleteFieldRequest, DocumentEntry, FieldChangeKind,
+    GetDocumentsRequest, GetIndexRequest, GetSchemaRequest, PutDocumentRequest,
+    PutDocumentsRequest, SearchBatchRequest, SearchRequest, UpdateFieldRequest,
+    document_service_client::DocumentServiceClient, index_service_client::IndexServiceClient,
+    search_service_client::SearchServiceClient,
 };
 
 use crate::convert;
@@ -205,6 +206,36 @@ struct AddFieldParams {
 struct DeleteFieldParams {
     /// The name of the field to remove from the index schema.
     name: String,
+}
+
+/// Parameters for the `update_field` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct UpdateFieldParams {
+    /// The name of the field to update. Must already exist.
+    name: String,
+
+    /// The field's new configuration as a JSON string.
+    ///
+    /// Uses the same externally-tagged serde representation as the schema.
+    /// Example:
+    ///
+    /// ```json
+    /// {"Text": {"indexed": true, "stored": true, "analyzer": "english"}}
+    /// {"Hnsw": {"dimension": 384, "m": 32, "ef_construction": 400}}
+    /// ```
+    field_option_json: String,
+
+    /// Opt in to a change that requires rebuilding or discarding existing
+    /// on-disk data (e.g. a text field's `analyzer`, or a vector field's
+    /// `dimension`). Ignored for a metadata-only change. Defaults to
+    /// `false`, which rejects such a change.
+    #[serde(default)]
+    reindex: bool,
+
+    /// When `true`, classifies the change and reports it without applying
+    /// anything. Defaults to `false`.
+    #[serde(default)]
+    dry_run: bool,
 }
 
 // ── Server struct ─────────────────────────────────────────────────────────────
@@ -480,6 +511,76 @@ impl LaurusMcpServer {
                 )]))
             }
             Err(e) => Ok(Self::tool_error(format!("Failed to delete field: {e}"))),
+        }
+    }
+
+    /// Change an existing field's type/options.
+    #[tool(
+        description = "Change an existing field's type/options (e.g. a text field's analyzer, or a vector field's dimension/m/ef_construction). field_option_json is a JSON string in the same format as add_field's. Metadata-only changes (e.g. default_ef_search) apply immediately; a change that requires rebuilding or discarding existing on-disk data is rejected unless reindex is true. Set dry_run to true to see how a change would be classified (metadata_only / reindex / destructive) without applying it. Returns the classification and the updated schema."
+    )]
+    async fn update_field(
+        &self,
+        Parameters(params): Parameters<UpdateFieldParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let channel = match self.channel.read().await.clone() {
+            Some(ch) => ch,
+            None => {
+                return Ok(Self::tool_error(
+                    "Not connected. Call the connect tool first.",
+                ));
+            }
+        };
+
+        let field_option: laurus::FieldOption =
+            match serde_json::from_str(&params.field_option_json) {
+                Ok(fo) => fo,
+                Err(e) => {
+                    return Ok(Self::tool_error(format!(
+                        "Failed to parse field_option_json: {e}"
+                    )));
+                }
+            };
+
+        let proto_field_option =
+            laurus_server::convert::schema::field_option_to_proto(&field_option);
+        let request = UpdateFieldRequest {
+            name: params.name.clone(),
+            field_option: Some(proto_field_option),
+            reindex: params.reindex,
+            dry_run: params.dry_run,
+        };
+
+        match IndexServiceClient::new(channel).update_field(request).await {
+            Ok(resp) => {
+                let r = resp.into_inner();
+                let classification = match FieldChangeKind::try_from(r.classification) {
+                    Ok(FieldChangeKind::MetadataOnly) => Some("metadata_only"),
+                    Ok(FieldChangeKind::Reindex) => Some("reindex"),
+                    Ok(FieldChangeKind::Destructive) => Some("destructive"),
+                    Ok(FieldChangeKind::Unspecified) | Err(_) => None,
+                };
+                let output = if let Some(schema) = r.schema {
+                    let field_names: Vec<&String> = schema.fields.keys().collect();
+                    json!({
+                        "message": if params.dry_run {
+                            format!("Dry run: change to field '{}' classified.", params.name)
+                        } else {
+                            format!("Field '{}' updated successfully.", params.name)
+                        },
+                        "classification": classification,
+                        "fields": field_names,
+                    })
+                } else {
+                    json!({
+                        "message": format!("Field '{}' updated successfully.", params.name),
+                        "classification": classification,
+                    })
+                };
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    output.to_string(),
+                )]))
+            }
+            Err(e) => Ok(Self::tool_error(format!("Failed to update field: {e}"))),
         }
     }
 
@@ -926,8 +1027,8 @@ impl ServerHandler for LaurusMcpServer {
             .with_instructions(
                 "Laurus search engine MCP server (gRPC client). \
              Tools: connect, create_index, get_stats, get_schema, add_field, delete_field, \
-             put_document, add_document, put_documents, add_documents, get_documents, \
-             delete_documents, commit, search. \
+             update_field, put_document, add_document, put_documents, add_documents, \
+             get_documents, delete_documents, commit, search. \
              Start by calling connect(endpoint) to connect to a running laurus-server, \
              then use the other tools to manage and search the index."
                     .to_string(),

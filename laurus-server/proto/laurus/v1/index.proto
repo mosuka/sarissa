@@ -17,6 +17,10 @@ service IndexService {
 
   // Remove a field from the current index schema.
   rpc DeleteField(DeleteFieldRequest) returns (DeleteFieldResponse);
+
+  // Change an existing field's type/options, optionally rebuilding or
+  // discarding its on-disk data.
+  rpc UpdateField(UpdateFieldRequest) returns (UpdateFieldResponse);
 }
 
 // ---- Schema definitions ----
@@ -37,6 +41,20 @@ message Schema {
   // non-stored field) and therefore no longer have valid on-disk data
   // matching the current schema. See laurus::Schema::pending_reindex.
   repeated string pending_reindex = 6;
+}
+
+// How UpdateField classified a requested field option change. Mirrors
+// laurus::engine::schema::FieldChangeKind.
+enum FieldChangeKind {
+  FIELD_CHANGE_KIND_UNSPECIFIED = 0;
+  // Only a schema-level setting changes; no existing on-disk data needs
+  // to be touched.
+  FIELD_CHANGE_KIND_METADATA_ONLY = 1;
+  // Existing on-disk data is rebuilt from stored values.
+  FIELD_CHANGE_KIND_REINDEX = 2;
+  // The change cannot be applied from existing on-disk data; applying it
+  // discards the field's existing data.
+  FIELD_CHANGE_KIND_DESTRUCTIVE = 3;
 }
 
 // Policy for handling undeclared fields during document ingestion.
@@ -320,4 +338,27 @@ message DeleteFieldRequest {
 message DeleteFieldResponse {
   // The updated schema after the field has been removed.
   Schema schema = 1;
+}
+
+message UpdateFieldRequest {
+  // The name of the field to update. Must already exist.
+  string name = 1;
+  // The field's new configuration.
+  FieldOption field_option = 2;
+  // Required (must be true) to apply a Reindex- or Destructive-classified
+  // change; a MetadataOnly change ignores this flag. Rejected otherwise,
+  // since a reindex may take time and a destructive change discards
+  // existing data.
+  bool reindex = 3;
+  // When true, classifies the change and returns it without applying
+  // anything (the returned schema is the unchanged current schema).
+  bool dry_run = 4;
+}
+
+message UpdateFieldResponse {
+  // How the requested change was classified.
+  FieldChangeKind classification = 1;
+  // The schema after the update, or -- when dry_run was true, or the
+  // change was rejected -- the unchanged current schema.
+  Schema schema = 2;
 }

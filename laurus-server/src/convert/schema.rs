@@ -10,8 +10,9 @@ use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::{
     AnalyzerDefinition, AnalyzerSpec, BooleanOption, BuiltinAnalyzerSpec, BytesOption,
     CharFilterConfig, DateTimeOption, DistanceMetric, DynamicFieldPolicy, EmbedderDefinition,
-    FieldOption, FlatOption, FloatOption, Geo3dOption, GeoOption, HnswOption, IntegerOption,
-    IvfOption, QuantizationMethod, Schema, TextOption, TokenFilterConfig, TokenizerConfig,
+    FieldChangeKind, FieldOption, FlatOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
+    IntegerOption, IvfOption, QuantizationMethod, Schema, TextOption, TokenFilterConfig,
+    TokenizerConfig,
 };
 
 use crate::proto::laurus::v1;
@@ -96,6 +97,20 @@ fn dynamic_field_policy_from_proto(value: i32) -> DynamicFieldPolicy {
         Ok(v1::DynamicFieldPolicy::Dynamic) => DynamicFieldPolicy::Dynamic,
         Ok(v1::DynamicFieldPolicy::Ignore) => DynamicFieldPolicy::Ignore,
         Ok(v1::DynamicFieldPolicy::Unspecified) | Err(_) => DynamicFieldPolicy::default(),
+    }
+}
+
+/// Convert a laurus `FieldChangeKind` (an `Engine::update_field` outcome)
+/// into a proto enum value.
+///
+/// # Arguments
+///
+/// * `kind` - The laurus field change classification.
+pub fn field_change_kind_to_proto(kind: FieldChangeKind) -> v1::FieldChangeKind {
+    match kind {
+        FieldChangeKind::MetadataOnly => v1::FieldChangeKind::MetadataOnly,
+        FieldChangeKind::Reindex => v1::FieldChangeKind::Reindex,
+        FieldChangeKind::Destructive => v1::FieldChangeKind::Destructive,
     }
 }
 
@@ -756,6 +771,33 @@ fn embedder_definition_from_proto(
 mod tests {
     use super::*;
     use laurus::{BooleanOption, FlatOption, IntegerOption, TextOption};
+
+    /// Every `FieldChangeKind` variant maps to its own distinct,
+    /// non-`Unspecified` proto value -- `Unspecified` is reserved for the
+    /// proto3 zero-default (a client that never set the field), which a
+    /// server response never sends.
+    #[test]
+    fn field_change_kind_to_proto_covers_every_variant_distinctly() {
+        let mapped: Vec<v1::FieldChangeKind> = [
+            FieldChangeKind::MetadataOnly,
+            FieldChangeKind::Reindex,
+            FieldChangeKind::Destructive,
+        ]
+        .into_iter()
+        .map(field_change_kind_to_proto)
+        .collect();
+
+        assert!(
+            !mapped.contains(&v1::FieldChangeKind::Unspecified),
+            "no laurus FieldChangeKind should map to Unspecified: {mapped:?}"
+        );
+        let unique: std::collections::HashSet<_> = mapped.iter().collect();
+        assert_eq!(
+            unique.len(),
+            mapped.len(),
+            "every FieldChangeKind variant must map to a distinct proto value: {mapped:?}"
+        );
+    }
 
     /// Round-trip a `DynamicFieldPolicy` through proto and back for every
     /// concrete variant, verifying the enum mapping is complete.

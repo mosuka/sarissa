@@ -9,14 +9,15 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
-use laurus::{CommitPolicy, Engine, WalSyncPolicy};
+use laurus::{CommitPolicy, Engine, UpdateFieldOptions, WalSyncPolicy};
 
 use crate::context;
 use crate::convert::{error, schema as schema_convert};
 use crate::proto::laurus::v1::{
     AddFieldRequest, AddFieldResponse, CreateIndexRequest, CreateIndexResponse, DeleteFieldRequest,
     DeleteFieldResponse, GetIndexRequest, GetIndexResponse, GetSchemaRequest, GetSchemaResponse,
-    VectorFieldStats, index_service_server::IndexService as IndexServiceTrait,
+    UpdateFieldRequest, UpdateFieldResponse, VectorFieldStats,
+    index_service_server::IndexService as IndexServiceTrait,
 };
 
 /// gRPC IndexService implementation.
@@ -161,6 +162,54 @@ impl IndexServiceTrait for IndexService {
         tracing::info!("Field '{}' deleted from index", name);
         let proto_schema = schema_convert::to_proto(&updated_schema);
         Ok(Response::new(DeleteFieldResponse {
+            schema: Some(proto_schema),
+        }))
+    }
+
+    /// Changes an existing field's type/options, optionally rebuilding or
+    /// discarding its on-disk data, and persists the updated schema.
+    async fn update_field(
+        &self,
+        request: Request<UpdateFieldRequest>,
+    ) -> Result<Response<UpdateFieldResponse>, Status> {
+        let req = request.into_inner();
+        let name = req.name;
+        if name.is_empty() {
+            return Err(Status::invalid_argument("field name is required"));
+        }
+        let proto_field_option = req
+            .field_option
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("field_option is required"))?;
+        let field_option = schema_convert::field_option_from_proto(proto_field_option)
+            .ok_or_else(|| Status::invalid_argument("field_option has no option set"))?;
+
+        let guard = self.engine.read().await;
+        let engine = guard
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("No index is open"))?;
+
+        let outcome = engine
+            .update_field(
+                &name,
+                field_option,
+                UpdateFieldOptions {
+                    reindex: req.reindex,
+                    dry_run: req.dry_run,
+                },
+            )
+            .await
+            .map_err(error::to_status)?;
+
+        tracing::info!(
+            "Field '{}' updated (classification: {:?})",
+            name,
+            outcome.classification
+        );
+        let proto_schema = schema_convert::to_proto(&outcome.schema);
+        Ok(Response::new(UpdateFieldResponse {
+            classification: schema_convert::field_change_kind_to_proto(outcome.classification)
+                as i32,
             schema: Some(proto_schema),
         }))
     }

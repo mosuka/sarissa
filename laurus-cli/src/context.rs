@@ -326,4 +326,58 @@ mod tests {
             "delete_field should have persisted schema.toml via the engine's hook"
         );
     }
+
+    /// Issue #1082: like `dynamic_field_add_survives_reopen`, but for
+    /// `update_field` -- it must persist `schema.toml` itself via the same
+    /// hook, so a field's changed option survives closing and reopening
+    /// the index.
+    #[tokio::test]
+    async fn dynamic_field_update_survives_reopen() {
+        let schema = Schema::builder()
+            .add_field(
+                "title",
+                laurus::FieldOption::Text(laurus::TextOption::default()),
+            )
+            .build();
+        let dir = tempfile::tempdir().unwrap();
+        create_index_from_schema(dir.path(), schema).await.unwrap();
+
+        {
+            let engine = open_index(dir.path()).await.unwrap();
+            engine
+                .update_field(
+                    "title",
+                    laurus::FieldOption::Text(laurus::TextOption::default().analyzer("keyword")),
+                    laurus::UpdateFieldOptions {
+                        reindex: true,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+            // No explicit `save_schema` call here — the point of this test.
+        }
+
+        // Reopen as a fresh process would, and confirm the change survived.
+        let reopened_schema = read_schema(dir.path()).unwrap();
+        match reopened_schema.fields.get("title") {
+            Some(laurus::FieldOption::Text(opt)) => assert_eq!(
+                opt.analyzer,
+                Some(laurus::AnalyzerSpec::Named("keyword".into())),
+                "update_field should have persisted schema.toml via the engine's hook"
+            ),
+            other => panic!("expected FieldOption::Text, got {other:?}"),
+        }
+
+        let engine = open_index(dir.path()).await.unwrap();
+        match engine.schema().fields.get("title") {
+            Some(laurus::FieldOption::Text(opt)) => {
+                assert_eq!(
+                    opt.analyzer,
+                    Some(laurus::AnalyzerSpec::Named("keyword".into()))
+                )
+            }
+            other => panic!("expected FieldOption::Text, got {other:?}"),
+        }
+    }
 }

@@ -13,6 +13,7 @@
 //! - [`search`] - One-shot search query execution.
 //! - [`serve`] - gRPC (and optional HTTP gateway) server.
 //! - [`train`] - Train auxiliary index structures (shared PQ codebook).
+//! - [`update`] - Change a resource (an existing field's type/options).
 
 pub mod add;
 pub mod bulk;
@@ -26,3 +27,4 @@ pub mod repl;
 pub mod search;
 pub mod serve;
 pub mod train;
+pub mod update;

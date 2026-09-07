@@ -363,8 +363,7 @@ let schema = Schema::builder()
 
 ## 動的フィールド管理
 
-稼働中のエンジンに対して、フィールドの追加および削除を動的に行えます。
-フィールドの型変更はサポートされていません。
+稼働中のエンジンに対して、フィールドの追加・削除・変更を動的に行えます。
 
 ### フィールドの追加
 
@@ -405,10 +404,34 @@ let updated_schema = engine.delete_field("category").await?;
 - フィールドに紐づくアナライザーおよびエンベッダーの登録が解除されます。
 - 既にインデックスされたデータは物理的に残りますが、スキーマから削除されたフィールドにはアクセスできなくなります。
 
+### フィールドの変更
+
+`Engine::update_field()` を使用すると、既存フィールドの型・オプションを稼働中のエンジンに対して変更できます。
+
+```rust,ignore
+let outcome = engine.update_field(
+    "title",
+    FieldOption::Text(TextOption::default().analyzer("english")),
+    UpdateFieldOptions { reindex: true, ..Default::default() },
+).await?;
+```
+
+変更内容は次の3種類に分類され、`outcome.classification` で確認できます。
+
+- **`MetadataOnly`**（メタデータのみ）: 既存データへの影響がなく、常に適用されます（例: HNSW の `default_ef_search`）。
+- **`Reindex`**（再構築が必要）: 保存済みの元データから再構築が可能です（例: text フィールドの `analyzer` 変更、`indexed: false → true`、HNSW の `m`/`ef_construction` 変更）。
+- **`Destructive`**（破壊的変更）: 元データから再構築できず、既存データを破棄します（例: ベクトルフィールドの `dimension`/`embedder`/`distance` 変更、`stored: false` フィールドの型変更）。
+
+`Reindex` と `Destructive` は、明示的に `UpdateFieldOptions { reindex: true, .. }` を指定しない限り拒否されます（再構築に時間がかかる、あるいはデータを失うため、意図しない実行を防ぐオプトイン方式です）。
+
+`Destructive` な変更を適用すると、対象フィールド名がスキーマの `pending_reindex` に記録されます。これは Solr のように「スキーマとインデックスが静かに食い違う」状態を避けるための可視化機構で、`GetSchema` / `laurus get schema` から確認できます。既存データを失ったフィールドが分かるので、必要に応じてドキュメントの再投入で解消してください。
+
+`UpdateFieldOptions { dry_run: true, .. }` を指定すると、実際には何も適用せずに分類結果だけを確認できます。
+
 ### 共通の注意事項
 
 `Engine::builder().persist_schema_with(hook)` でスキーマ永続化フックを設定していれば、
-`add_field`/`delete_field` は返却前に自らそのフックを呼び出してスキーマを永続化します
+`add_field`/`delete_field`/`update_field` は返却前に自らそのフックを呼び出してスキーマを永続化します
 （`laurus-cli` と `laurus-server` はどちらもこのフックで `schema.toml` への書き出しを
 行っています）。フックを設定していない場合は、従来どおり返却された `Schema` を
 呼び出し側で永続化する必要があります（例: `schema.toml` への書き出し）。

@@ -253,6 +253,21 @@ fn proto_dynamic_field_policy_to_json(value: i32) -> Option<&'static str> {
     }
 }
 
+/// Converts a proto `FieldChangeKind` enum value (an `UpdateField` outcome)
+/// to its JSON string name. Returns `None` if the value is unrecognized.
+///
+/// # Arguments
+///
+/// * `value` - The proto enum value (i32).
+pub fn proto_field_change_kind_to_json(value: i32) -> Option<&'static str> {
+    match v1::FieldChangeKind::try_from(value).ok()? {
+        v1::FieldChangeKind::MetadataOnly => Some("metadata_only"),
+        v1::FieldChangeKind::Reindex => Some("reindex"),
+        v1::FieldChangeKind::Destructive => Some("destructive"),
+        v1::FieldChangeKind::Unspecified => None,
+    }
+}
+
 /// Converts a proto `Schema` to a JSON value.
 pub fn proto_schema_to_json(schema: &v1::Schema) -> Value {
     let fields: Map<String, Value> = schema
@@ -1369,5 +1384,29 @@ mod tests {
         assert_eq!(req.limit, 10);
         assert_eq!(req.offset, 0);
         assert_eq!(*req.field_boosts.get("title").unwrap(), 2.0);
+    }
+
+    /// Every concrete `FieldChangeKind` value maps to its own distinct
+    /// JSON name, and `Unspecified` (the proto3 zero-default, never sent
+    /// by the server) maps to `None`.
+    #[test]
+    fn test_proto_field_change_kind_to_json() {
+        assert_eq!(
+            proto_field_change_kind_to_json(v1::FieldChangeKind::MetadataOnly as i32),
+            Some("metadata_only")
+        );
+        assert_eq!(
+            proto_field_change_kind_to_json(v1::FieldChangeKind::Reindex as i32),
+            Some("reindex")
+        );
+        assert_eq!(
+            proto_field_change_kind_to_json(v1::FieldChangeKind::Destructive as i32),
+            Some("destructive")
+        );
+        assert_eq!(
+            proto_field_change_kind_to_json(v1::FieldChangeKind::Unspecified as i32),
+            None
+        );
+        assert_eq!(proto_field_change_kind_to_json(9999), None);
     }
 }
