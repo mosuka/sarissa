@@ -46,13 +46,15 @@ pub type SchemaPersistHook = Arc<dyn Fn(&Schema) -> Result<()> + Send + Sync>;
 /// Options for [`Engine::update_field`] (Issue #1079).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UpdateFieldOptions {
-    /// Reserved for Issues #1080/#1081: once vector- and lexical-field
-    /// rebuilding are implemented, this will need to be `true` to actually
-    /// rebuild a [`schema::FieldChangeKind::Reindex`]-classified field from
-    /// its existing data (mirroring Typesense's opt-in reindex step, rather
-    /// than silently doing potentially expensive work on every call).
-    /// Currently has no effect: this phase rejects every `Reindex`/
-    /// `Destructive` change regardless of this flag.
+    /// Must be `true` to actually apply a
+    /// [`schema::FieldChangeKind::Reindex`]- or
+    /// [`schema::FieldChangeKind::Destructive`]-classified change
+    /// (mirroring Typesense's opt-in reindex step, rather than silently
+    /// doing potentially expensive -- or destructive -- work on every
+    /// call). Ignored for a [`schema::FieldChangeKind::MetadataOnly`]
+    /// change, which always applies. `false` (the default) rejects both
+    /// `Reindex` and `Destructive` changes with an error naming the
+    /// classification.
     pub reindex: bool,
     /// When `true`, classify the change and report the outcome without
     /// applying anything — not even a

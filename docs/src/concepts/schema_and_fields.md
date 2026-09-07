@@ -383,9 +383,8 @@ returning silently-empty results.
 
 ## Dynamic Field Management
 
-Fields can be added to or removed from a running engine at runtime.
-Type changes are not supported—remove the field and re-add it with the
-new type instead.
+Fields can be added to, removed from, or changed on a running engine at
+runtime.
 
 ### Adding a Field
 
@@ -413,11 +412,11 @@ Existing documents are unaffected—they simply have no value for the new
 field.
 
 If a schema-persist hook was configured via
-`Engine::builder().persist_schema_with(hook)`, `add_field`/`delete_field`
-call it themselves before returning, persisting the schema on the
-caller's behalf (both `laurus-cli` and `laurus-server` configure this
-hook to write `schema.toml`). Otherwise, as before, the returned `Schema`
-should be persisted (e.g., to `schema.toml`) by the caller.
+`Engine::builder().persist_schema_with(hook)`, `add_field`/`delete_field`/
+`update_field` call it themselves before returning, persisting the schema
+on the caller's behalf (both `laurus-cli` and `laurus-server` configure
+this hook to write `schema.toml`). Otherwise, as before, the returned
+`Schema` should be persisted (e.g., to `schema.toml`) by the caller.
 
 ### Removing a Field
 
@@ -435,6 +434,44 @@ When a field is deleted:
 - If the field was listed in `default_fields`, it is automatically removed.
 - Any per-field analyzer or embedder registered for the field is
   unregistered.
+
+### Changing a Field
+
+Use `Engine::update_field()` to change an existing field's type/options on
+a running engine.
+
+```rust,ignore
+let outcome = engine.update_field(
+    "title",
+    FieldOption::Text(TextOption::default().analyzer("english")),
+    UpdateFieldOptions { reindex: true, ..Default::default() },
+).await?;
+```
+
+The requested change is classified into one of three kinds, reported as
+`outcome.classification`:
+
+- **`MetadataOnly`** — no existing data is affected; always applied (e.g.
+  an HNSW field's `default_ef_search`).
+- **`Reindex`** — can be rebuilt from the field's already-stored values
+  (e.g. a text field's `analyzer`, `indexed: false → true`, or an HNSW
+  field's `m`/`ef_construction`).
+- **`Destructive`** — cannot be rebuilt from existing data; applying it
+  discards the field's data (e.g. a vector field's `dimension`/`embedder`/
+  `distance`, or a type change on a `stored: false` field).
+
+`Reindex` and `Destructive` changes are rejected unless you explicitly
+pass `UpdateFieldOptions { reindex: true, .. }` — an opt-in gate against
+accidentally triggering an expensive rebuild or a data-losing change.
+
+Applying a `Destructive` change records the field's name in the schema's
+`pending_reindex` set. This is a visibility mechanism against the known
+Solr failure mode where the schema and the index silently drift apart —
+check it via `GetSchema` / `laurus get schema` to find fields whose data
+no longer matches the schema, and re-ingest their documents as needed.
+
+Pass `UpdateFieldOptions { dry_run: true, .. }` to see how a change would
+be classified without applying anything.
 
 ## Schema Design Tips
 

@@ -137,3 +137,52 @@ pub async fn delete_field(
 
     Ok(Json(json!({ "schema": schema_json })))
 }
+
+/// `PATCH /v1/schema/fields/:name` — Changes an existing field's
+/// type/options, optionally rebuilding or discarding its on-disk data.
+pub async fn update_field(
+    State(mut state): State<GatewayState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, Response> {
+    let field_option_json = body
+        .get("field_option")
+        .ok_or_else(|| BadRequest("missing \"field_option\" key".to_string()).into_response())?;
+
+    let field_option = convert::json_to_proto_field_option(field_option_json)
+        .map_err(|e| BadRequest(e).into_response())?;
+
+    // Both default to `false`, matching `UpdateFieldOptions::default()`.
+    let reindex = body
+        .get("reindex")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let dry_run = body
+        .get("dry_run")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let response = state
+        .index_client
+        .update_field(v1::UpdateFieldRequest {
+            name,
+            field_option: Some(field_option),
+            reindex,
+            dry_run,
+        })
+        .await
+        .map_err(|s| GatewayError(s).into_response())?;
+
+    let inner = response.into_inner();
+    let schema_json = inner
+        .schema
+        .as_ref()
+        .map(convert::proto_schema_to_json)
+        .unwrap_or(Value::Null);
+    let classification = convert::proto_field_change_kind_to_json(inner.classification);
+
+    Ok(Json(json!({
+        "classification": classification,
+        "schema": schema_json,
+    })))
+}

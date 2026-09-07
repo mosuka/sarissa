@@ -39,6 +39,8 @@ pub enum Command {
     Put(PutCommand),
     /// Delete a resource.
     Delete(DeleteCommand),
+    /// Update a resource.
+    Update(UpdateCommand),
     /// Commit pending changes.
     Commit,
     /// Train an auxiliary index structure (e.g. a shared PQ codebook).
@@ -243,6 +245,48 @@ pub enum DeleteResource {
         /// The name of the field to delete.
         #[arg(long)]
         name: String,
+    },
+}
+
+// --- Update ---
+
+/// CLI arguments for the `update` subcommand.
+///
+/// Holds the target resource to update (e.g. an existing field).
+#[derive(Parser)]
+pub struct UpdateCommand {
+    #[command(subcommand)]
+    pub resource: UpdateResource,
+}
+
+#[derive(Subcommand)]
+pub enum UpdateResource {
+    /// Change an existing field's type/options.
+    ///
+    /// Metadata-only changes (e.g. an HNSW field's `default_ef_search`)
+    /// apply immediately. A change that requires rebuilding or discarding
+    /// existing on-disk data (e.g. a text field's `analyzer`, or a vector
+    /// field's `dimension`) is rejected unless `--reindex` is given.
+    Field {
+        /// The name of the field to update. Must already exist.
+        #[arg(long)]
+        name: String,
+        /// The field's new configuration as a JSON string.
+        ///
+        /// Uses the same externally-tagged format as the schema TOML.
+        /// Examples:
+        ///   '{"Text": {"indexed": true, "stored": true, "analyzer": "english"}}'
+        ///   '{"Hnsw": {"dimension": 384, "m": 32, "ef_construction": 400}}'
+        #[arg(long)]
+        field_option: String,
+        /// Opt in to a change that requires rebuilding or discarding
+        /// existing on-disk data. Ignored for a metadata-only change.
+        #[arg(long, default_value_t = false)]
+        reindex: bool,
+        /// Classify the change and print the result without applying
+        /// anything.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
     },
 }
 

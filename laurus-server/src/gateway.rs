@@ -54,7 +54,10 @@ pub fn create_router(state: GatewayState) -> Router {
         .route("/v1/index", post(index::create).get(index::get_index))
         .route("/v1/schema", get(index::get_schema))
         .route("/v1/schema/fields", post(index::add_field))
-        .route("/v1/schema/fields/{name}", delete(index::delete_field))
+        .route(
+            "/v1/schema/fields/{name}",
+            delete(index::delete_field).patch(index::update_field),
+        )
         .route(
             "/v1/documents/{id}",
             put(document::put_document)
