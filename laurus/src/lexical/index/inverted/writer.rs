@@ -11,6 +11,7 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
+use crate::data::DataValue;
 use crate::error::{LaurusError, Result};
 use crate::lexical::core::analyzed::{AnalyzedDocument, AnalyzedTerm};
 use crate::lexical::core::document::Document;
@@ -314,6 +315,170 @@ impl std::fmt::Debug for InvertedIndexWriter {
             .field("stats", &self.stats)
             .finish()
     }
+}
+
+/// Analyze one field's raw value into its indexed terms and/or BKD point
+/// values, using `analyzer` for text (a [`PerFieldAnalyzer`] resolves a
+/// field-specific analyzer by name; any other [`Analyzer`] is applied
+/// uniformly).
+///
+/// Shared by [`InvertedIndexWriter::analyze_document`] (fresh ingestion)
+/// and
+/// [`MergeEngine`](crate::lexical::index::inverted::segment::merge_engine::MergeEngine)'s
+/// field-override rebuild (Issue #1081), so a field rebuilt under a new
+/// analyzer/option is indistinguishable from one indexed fresh under it —
+/// both paths derive a field's analyzed form through this one function.
+///
+/// Returns `(terms, points)`; either may be empty (e.g. a `Bool` value
+/// produces terms but no points; an unindexable value like `Bytes`
+/// produces neither).
+pub(crate) fn analyze_field_value(
+    field_name: &str,
+    val: &DataValue,
+    analyzer: &Arc<dyn Analyzer>,
+) -> Result<(Vec<AnalyzedTerm>, Vec<Vec<f64>>)> {
+    let mut terms = Vec::new();
+    let mut points = Vec::new();
+    match val {
+        DataValue::Text(text) => {
+            // Use analyzer from config (can be PerFieldAnalyzer for field-specific analysis)
+            let tokens =
+                if let Some(per_field) = analyzer.as_any().downcast_ref::<PerFieldAnalyzer>() {
+                    per_field.analyze_field(field_name, text)?
+                } else {
+                    analyzer.analyze(text)?
+                };
+            let token_vec: Vec<Token> = tokens.collect();
+            terms = tokens_to_analyzed_terms(token_vec);
+        }
+
+        DataValue::Int64(num) => {
+            // Convert integer to text for indexing
+            let text = num.to_string();
+            terms.push(AnalyzedTerm {
+                term: text.clone(),
+                position: 0,
+                frequency: 1,
+                offset: (0, text.len()),
+            });
+            points.push(vec![*num as f64]);
+        }
+        DataValue::Float64(num) => {
+            terms.push(AnalyzedTerm {
+                term: num.to_string(),
+                position: 0,
+                frequency: 1,
+                offset: (0, num.to_string().len()),
+            });
+            points.push(vec![*num]);
+        }
+        DataValue::DateTime(dt) => {
+            let ts = dt.timestamp() as f64;
+            terms.push(AnalyzedTerm {
+                term: ts.to_string(),
+                position: 0,
+                frequency: 1,
+                offset: (0, ts.to_string().len()),
+            });
+            points.push(vec![ts]);
+        }
+        DataValue::Bool(b) => {
+            // bool is indexed as "true"/"false" text for lexical queries,
+            // and also stored as a point value (1.0/0.0) for numeric range queries
+            let text = if *b { "true" } else { "false" };
+            terms.push(AnalyzedTerm {
+                term: text.to_string(),
+                position: 0,
+                frequency: 1,
+                offset: (0, text.len()),
+            });
+        }
+        DataValue::Geo(p) => {
+            // Geo points are indexed as 2D points in BKD
+            let text = format!("{},{}", p.lat, p.lon);
+            terms.push(AnalyzedTerm {
+                term: text.clone(),
+                position: 0,
+                frequency: 1,
+                offset: (0, text.len()),
+            });
+            points.push(vec![p.lat, p.lon]);
+        }
+        DataValue::GeoEcef(p) => {
+            // 3D ECEF point: emitting a 3-element point here is what tells
+            // `BKDWriter::new` to build a 3D BKD when the per-field tree is
+            // materialized. Schema-side, `FieldOption::Geo3d` (#298)
+            // classifies the field as lexical and respects the (indexed,
+            // stored) flags exactly like 2D Geo.
+            let text = format!("{},{},{}", p.x, p.y, p.z);
+            terms.push(AnalyzedTerm {
+                term: text.clone(),
+                position: 0,
+                frequency: 1,
+                offset: (0, text.len()),
+            });
+            points.push(vec![p.x, p.y, p.z]);
+        }
+        DataValue::Int64Array(arr) => {
+            // Multi-valued integer field. Each element is a distinct
+            // analyzed term and a distinct 1D BKD point so range queries
+            // match if any value falls in range (Lucene "any match"
+            // semantics).
+            let mut offset = 0usize;
+            for (idx, num) in arr.iter().enumerate() {
+                let text = num.to_string();
+                let len = text.len();
+                terms.push(AnalyzedTerm {
+                    term: text,
+                    position: idx as u32,
+                    frequency: 1,
+                    offset: (offset, offset + len),
+                });
+                offset += len + 1;
+                points.push(vec![*num as f64]);
+            }
+        }
+        DataValue::Float64Array(arr) => {
+            // Multi-valued float field. Same shape as Int64Array.
+            let mut offset = 0usize;
+            for (idx, num) in arr.iter().enumerate() {
+                let text = num.to_string();
+                let len = text.len();
+                terms.push(AnalyzedTerm {
+                    term: text,
+                    position: idx as u32,
+                    frequency: 1,
+                    offset: (offset, offset + len),
+                });
+                offset += len + 1;
+                points.push(vec![*num]);
+            }
+        }
+        // Handle other variants (Bytes, Vector, Null) — not lexically indexed.
+        _ => {}
+    }
+    Ok((terms, points))
+}
+
+/// Convert tokens to analyzed terms.
+pub(crate) fn tokens_to_analyzed_terms(tokens: Vec<Token>) -> Vec<AnalyzedTerm> {
+    let mut term_frequencies = AHashMap::new();
+    let mut analyzed_terms = Vec::new();
+
+    for (position, token) in tokens.into_iter().enumerate() {
+        let term = token.text;
+        let frequency = term_frequencies.entry(term.clone()).or_insert(0);
+        *frequency += 1;
+
+        analyzed_terms.push(AnalyzedTerm {
+            term: term.clone(),
+            position: position as u32,
+            frequency: *frequency,
+            offset: (token.start_offset, token.end_offset),
+        });
+    }
+
+    analyzed_terms
 }
 
 impl InvertedIndexWriter {
@@ -677,8 +842,6 @@ impl InvertedIndexWriter {
 
         // Process each field in the document
         for (field_name, val) in &doc.fields {
-            use crate::data::DataValue;
-
             // 1. Get field option (Schema-aware)
             // If the field is not in schema, we check if it starts with "_" (internal)
             // Internal fields are indexed/stored by default unless explicitly disabled?
@@ -709,155 +872,12 @@ impl InvertedIndexWriter {
 
             // Index the field if enabled
             if should_index {
-                match val {
-                    DataValue::Text(text) => {
-                        // Use analyzer from config (can be PerFieldAnalyzer for field-specific analysis)
-                        let tokens = if let Some(per_field) = self
-                            .config
-                            .analyzer
-                            .as_any()
-                            .downcast_ref::<PerFieldAnalyzer>()
-                        {
-                            per_field.analyze_field(field_name, text)?
-                        } else {
-                            self.config.analyzer.analyze(text)?
-                        };
-                        let token_vec: Vec<Token> = tokens.collect();
-                        let analyzed_terms = self.tokens_to_analyzed_terms(token_vec);
-
-                        field_terms.insert(field_name.clone(), analyzed_terms);
-                    }
-
-                    DataValue::Int64(num) => {
-                        // Convert integer to text for indexing
-                        let text = num.to_string();
-
-                        let analyzed_term = AnalyzedTerm {
-                            term: text.clone(),
-                            position: 0,
-                            frequency: 1,
-                            offset: (0, text.len()),
-                        };
-
-                        field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                        point_values.insert(field_name.clone(), vec![vec![*num as f64]]);
-                    }
-                    DataValue::Float64(num) => {
-                        // ...
-                        field_terms.insert(
-                            field_name.clone(),
-                            vec![AnalyzedTerm {
-                                term: num.to_string(),
-                                position: 0,
-                                frequency: 1,
-                                offset: (0, num.to_string().len()),
-                            }],
-                        );
-                        point_values.insert(field_name.clone(), vec![vec![*num]]);
-                    }
-                    DataValue::DateTime(dt) => {
-                        let ts = dt.timestamp() as f64;
-                        field_terms.insert(
-                            field_name.clone(),
-                            vec![AnalyzedTerm {
-                                term: ts.to_string(),
-                                position: 0,
-                                frequency: 1,
-                                offset: (0, ts.to_string().len()),
-                            }],
-                        );
-                        point_values.insert(field_name.clone(), vec![vec![ts]]);
-                    }
-                    DataValue::Bool(b) => {
-                        // bool is indexed as "true"/"false" text for lexical queries,
-                        // and also stored as a point value (1.0/0.0) for numeric range queries
-                        let text = if *b { "true" } else { "false" };
-                        field_terms.insert(
-                            field_name.clone(),
-                            vec![AnalyzedTerm {
-                                term: text.to_string(),
-                                position: 0,
-                                frequency: 1,
-                                offset: (0, text.len()),
-                            }],
-                        );
-                    }
-                    DataValue::Geo(p) => {
-                        // Geo points are indexed as 2D points in BKD
-                        field_terms.insert(
-                            field_name.clone(),
-                            vec![AnalyzedTerm {
-                                term: format!("{},{}", p.lat, p.lon),
-                                position: 0,
-                                frequency: 1,
-                                offset: (0, format!("{},{}", p.lat, p.lon).len()),
-                            }],
-                        );
-                        point_values.insert(field_name.clone(), vec![vec![p.lat, p.lon]]);
-                    }
-                    DataValue::GeoEcef(p) => {
-                        // 3D ECEF point: emitting a 3-element point here is
-                        // what tells `BKDWriter::new` to build a 3D BKD when
-                        // the per-field tree is materialized. Schema-side,
-                        // `FieldOption::Geo3d` (#298) classifies the field
-                        // as lexical and respects the (indexed, stored)
-                        // flags exactly like 2D Geo.
-                        field_terms.insert(
-                            field_name.clone(),
-                            vec![AnalyzedTerm {
-                                term: format!("{},{},{}", p.x, p.y, p.z),
-                                position: 0,
-                                frequency: 1,
-                                offset: (0, format!("{},{},{}", p.x, p.y, p.z).len()),
-                            }],
-                        );
-                        point_values.insert(field_name.clone(), vec![vec![p.x, p.y, p.z]]);
-                    }
-                    DataValue::Int64Array(arr) => {
-                        // Multi-valued integer field. Each element is a
-                        // distinct analyzed term and a distinct 1D BKD
-                        // point so range queries match if any value falls
-                        // in range (Lucene "any match" semantics).
-                        let mut terms: Vec<AnalyzedTerm> = Vec::with_capacity(arr.len());
-                        let mut points: Vec<Vec<f64>> = Vec::with_capacity(arr.len());
-                        let mut offset = 0usize;
-                        for (idx, num) in arr.iter().enumerate() {
-                            let text = num.to_string();
-                            let len = text.len();
-                            terms.push(AnalyzedTerm {
-                                term: text,
-                                position: idx as u32,
-                                frequency: 1,
-                                offset: (offset, offset + len),
-                            });
-                            offset += len + 1;
-                            points.push(vec![*num as f64]);
-                        }
-                        field_terms.insert(field_name.clone(), terms);
-                        point_values.insert(field_name.clone(), points);
-                    }
-                    DataValue::Float64Array(arr) => {
-                        // Multi-valued float field. Same shape as Int64Array.
-                        let mut terms: Vec<AnalyzedTerm> = Vec::with_capacity(arr.len());
-                        let mut points: Vec<Vec<f64>> = Vec::with_capacity(arr.len());
-                        let mut offset = 0usize;
-                        for (idx, num) in arr.iter().enumerate() {
-                            let text = num.to_string();
-                            let len = text.len();
-                            terms.push(AnalyzedTerm {
-                                term: text,
-                                position: idx as u32,
-                                frequency: 1,
-                                offset: (offset, offset + len),
-                            });
-                            offset += len + 1;
-                            points.push(vec![*num]);
-                        }
-                        field_terms.insert(field_name.clone(), terms);
-                        point_values.insert(field_name.clone(), points);
-                    }
-                    // Handle other variants (Bytes, Vector, Null) — not lexically indexed.
-                    _ => {}
+                let (terms, points) = analyze_field_value(field_name, val, &self.config.analyzer)?;
+                if !terms.is_empty() {
+                    field_terms.insert(field_name.clone(), terms);
+                }
+                if !points.is_empty() {
+                    point_values.insert(field_name.clone(), points);
                 }
             }
 
@@ -879,27 +899,6 @@ impl InvertedIndexWriter {
             field_lengths,
             point_values,
         })
-    }
-
-    /// Convert tokens to analyzed terms.
-    fn tokens_to_analyzed_terms(&self, tokens: Vec<Token>) -> Vec<AnalyzedTerm> {
-        let mut term_frequencies = AHashMap::new();
-        let mut analyzed_terms = Vec::new();
-
-        for (position, token) in tokens.into_iter().enumerate() {
-            let term = token.text;
-            let frequency = term_frequencies.entry(term.clone()).or_insert(0);
-            *frequency += 1;
-
-            analyzed_terms.push(AnalyzedTerm {
-                term: term.clone(),
-                position: position as u32,
-                frequency: *frequency,
-                offset: (token.start_offset, token.end_offset),
-            });
-        }
-
-        analyzed_terms
     }
 
     /// Add an analyzed document to the inverted index.

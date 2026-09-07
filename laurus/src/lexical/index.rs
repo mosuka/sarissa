@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::error::Result;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::reader::LexicalIndexReader;
@@ -152,6 +153,51 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     fn delete_field(&self, _name: &str) -> Result<()> {
         Err(crate::error::LaurusError::invalid_argument(
             "This index implementation does not support dynamic field deletion",
+        ))
+    }
+
+    /// Rebuild an existing field's on-disk data under a new
+    /// option/analyzer, in place (Issue #1081: `Engine::update_field`'s
+    /// `Reindex`-classified lexical changes — e.g. a text field's
+    /// `analyzer`, or `indexed: false -> true` for any lexical field type).
+    ///
+    /// Every segment is rebuilt so `name`'s postings/BKD points match the
+    /// new setting; every other field is carried over unchanged.
+    /// Implementations must leave the field's existing data completely
+    /// untouched if the rebuild fails partway through (e.g. by writing new
+    /// segments before atomically publishing them, mirroring how a normal
+    /// segment merge already works).
+    ///
+    /// Only valid for a change that does not need original values the
+    /// index cannot supply — a field whose value was never stored on disk
+    /// has no original text/points to rebuild from, so callers gate this
+    /// via `laurus::engine::schema::classify_change` (which classifies
+    /// such a change `Destructive` instead, handled by the caller as
+    /// remove-then-add).
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The field name. Must already be configured.
+    /// * `option` - The field's new option.
+    /// * `analyzer` - The resolved analyzer to re-tokenize `name`'s stored
+    ///   values with. `None` when the field is being switched to
+    ///   `indexed: false`, or has no analyzer (non-text field types).
+    ///
+    /// # Errors
+    ///
+    /// The default implementation always errors, the same as
+    /// [`Self::add_field`]/[`Self::delete_field`] (mirrors
+    /// [`crate::vector::index::VectorIndex::rebuild_field`]'s contract on
+    /// the vector side). Implementations also error if no field named
+    /// `name` is registered, or if the rebuild itself fails.
+    fn rebuild_field(
+        &self,
+        _name: &str,
+        _option: crate::lexical::core::field::FieldOption,
+        _analyzer: Option<Arc<dyn Analyzer>>,
+    ) -> Result<()> {
+        Err(crate::error::LaurusError::invalid_argument(
+            "This index implementation does not support rebuilding fields dynamically",
         ))
     }
 }

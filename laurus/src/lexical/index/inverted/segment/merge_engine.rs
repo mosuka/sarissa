@@ -8,12 +8,15 @@ use std::sync::Arc;
 use ahash::AHashMap;
 use roaring::RoaringTreemap;
 
+use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::error::{LaurusError, Result};
 use crate::lexical::core::analyzed::{AnalyzedDocument, AnalyzedTerm};
 use crate::lexical::index::inverted::reader::{InvertedIndexReader, SegmentReader};
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::inverted::segment::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
-use crate::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
+use crate::lexical::index::inverted::writer::{
+    InvertedIndexWriter, InvertedIndexWriterConfig, analyze_field_value,
+};
 use crate::lexical::index::structures::aabb::AABB;
 use crate::lexical::index::structures::visitor::{CellRelation, IntersectVisitor};
 use crate::lexical::reader::LexicalIndexReader;
@@ -392,6 +395,131 @@ impl MergeEngine {
         })
     }
 
+    /// Rebuild every one of `segments` into a same-count set of NEW
+    /// segments, with `target_field` re-derived per
+    /// [`Self::reconstruct_segment_with_field_override`] and every other
+    /// field carried over unchanged (Issue #1081: `Engine::update_field`
+    /// rebuilding a lexical field's analyzer/indexed setting).
+    ///
+    /// Unlike [`Self::merge_segments`] (N sources -> 1 output), this is a
+    /// 1:1 transform — one new segment per source, each keeping that
+    /// source's document set — so the caller
+    /// ([`InvertedIndex::rebuild_field`](crate::lexical::index::inverted::InvertedIndex::rebuild_field))
+    /// can publish the whole batch as a single atomic manifest swap
+    /// without disturbing segment count or merge policy.
+    ///
+    /// `new_segment_ids` must have the same length as `segments`, in the
+    /// same order (the caller reserves one fresh ID per source via
+    /// `InvertedIndex`'s segment ID generator).
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error encountered and aborts the writer that hit
+    /// it (no partial segment is left committed). The caller is expected
+    /// to treat any error here as "nothing published yet" and leave the
+    /// existing segments completely untouched — this function never
+    /// touches a manifest itself.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `new_segment_ids.len() != segments.len()`.
+    pub fn rebuild_field_across_segments(
+        &self,
+        segments: &[ManagedSegmentInfo],
+        target_field: &str,
+        analyzer: Option<&Arc<dyn Analyzer>>,
+        new_segment_ids: &[String],
+    ) -> Result<Vec<MergeResult>> {
+        assert_eq!(
+            segments.len(),
+            new_segment_ids.len(),
+            "one new segment ID is required per source segment"
+        );
+
+        // Detected from the first posting seen across ALL segments (shared
+        // with `reconstruct_segment_with_field_override`'s signature), so
+        // every rebuilt segment agrees on whether to store term positions.
+        let mut store_positions: Option<bool> = None;
+        let mut results = Vec::with_capacity(segments.len());
+
+        for (segment, new_segment_id) in segments.iter().zip(new_segment_ids) {
+            let reader = SegmentReader::open(segment.segment_info.clone(), self.storage.clone())?;
+            let deleted = self.load_deleted_docs(&segment.segment_info)?;
+            let reconstructed = self.reconstruct_segment_with_field_override(
+                &reader,
+                &deleted,
+                &mut store_positions,
+                target_field,
+                analyzer,
+            )?;
+
+            let doc_count = reconstructed.len() as u64;
+            let min_doc_id = reconstructed.iter().map(|(id, _)| *id).min().unwrap_or(0);
+            let max_doc_id = reconstructed.iter().map(|(id, _)| *id).max().unwrap_or(0);
+
+            let writer_config = InvertedIndexWriterConfig {
+                store_term_positions: store_positions.unwrap_or(true),
+                shard_id: segment.segment_info.shard_id,
+                max_buffered_docs: usize::MAX,
+                max_buffer_memory: usize::MAX,
+                use_compound: self.config.use_compound,
+                ..Default::default()
+            };
+            // Deliberately `new`, not `with_shared_metadata` (#1023): see
+            // `perform_merge`'s identical comment above.
+            let mut writer = InvertedIndexWriter::new(self.storage.clone(), writer_config)?;
+            let replayed = (|| -> Result<Vec<String>> {
+                for (doc_id, analyzed) in reconstructed {
+                    writer.upsert_analyzed_document(doc_id, analyzed)?;
+                }
+                writer.flush_buffered_to_segment(new_segment_id)
+            })();
+            let file_paths = match replayed {
+                Ok(paths) => paths,
+                Err(e) => {
+                    writer.abort();
+                    return Err(e);
+                }
+            };
+
+            let segment_info = SegmentInfo {
+                segment_id: new_segment_id.clone(),
+                doc_count,
+                min_doc_id,
+                max_doc_id,
+                generation: 0, // The caller assigns the final generation.
+                has_deletions: false,
+                shard_id: segment.segment_info.shard_id,
+            };
+            let size_bytes = file_paths
+                .iter()
+                .map(|path| {
+                    self.storage
+                        .metadata(path)
+                        .map(|meta| meta.size)
+                        .unwrap_or(0)
+                })
+                .sum();
+            let mut managed_info = ManagedSegmentInfo::new(segment_info);
+            managed_info.size_bytes = size_bytes;
+            managed_info.file_paths = file_paths.clone();
+
+            results.push(MergeResult {
+                new_segment: managed_info,
+                stats: MergeStats {
+                    segments_merged: 1,
+                    docs_processed: doc_count,
+                    postings_merged: doc_count,
+                    shard_id: segment.segment_info.shard_id,
+                    ..Default::default()
+                },
+                file_paths,
+            });
+        }
+
+        Ok(results)
+    }
+
     /// Load the set of deleted doc_ids for a segment from its `.delmap`.
     fn load_deleted_docs(&self, segment_info: &SegmentInfo) -> Result<RoaringTreemap> {
         if !segment_info.has_deletions {
@@ -570,6 +698,165 @@ impl MergeEngine {
             let indexed_fields: Vec<String> = analyzed.field_terms.keys().cloned().collect();
             for field_name in indexed_fields {
                 if let Some(len) = reader.field_length(doc_id, &field_name)? {
+                    analyzed.field_lengths.insert(field_name, len);
+                }
+            }
+
+            out.push((doc_id, analyzed));
+        }
+
+        Ok(out)
+    }
+
+    /// Reconstruct a segment's analyzed documents like
+    /// [`Self::reconstruct_segment`], but with `target_field`'s existing
+    /// postings/BKD points discarded and re-derived from its stored value
+    /// using `analyzer` (Issue #1081).
+    ///
+    /// Every other field is carried over unchanged, exactly as
+    /// [`Self::reconstruct_segment`] does — this is the "field-conversion
+    /// hook" that lets a rebuild change one field's analyzer/indexed
+    /// setting without perturbing the rest of the segment. `analyzer` is
+    /// `None` when the field is being switched to `indexed: false`: its
+    /// terms/points are simply omitted (skipped in Pass 1/1.5 below), the
+    /// same as [`InvertedIndexWriter::analyze_document`]'s `should_index`
+    /// gate for a fresh document.
+    ///
+    /// A live document whose stored fields lack `target_field` entirely is
+    /// left with no terms/points for it, exactly as if the field were
+    /// absent from the original document — this function does not
+    /// validate that `target_field` is actually `stored: true` in the
+    /// schema; callers (`InvertedIndex::rebuild_field`, gated by
+    /// `Engine::update_field`'s `classify_change` call) are responsible
+    /// for that.
+    fn reconstruct_segment_with_field_override(
+        &self,
+        reader: &SegmentReader,
+        deleted: &RoaringTreemap,
+        store_positions: &mut Option<bool>,
+        target_field: &str,
+        analyzer: Option<&Arc<dyn Analyzer>>,
+    ) -> Result<Vec<(u64, AnalyzedDocument)>> {
+        // Pass 1: bucket postings into per-doc analyzed terms, EXCEPT
+        // `target_field` — its old postings were built under the previous
+        // analyzer/indexed setting and are stale under the new one.
+        let mut field_terms: AHashMap<u64, AHashMap<String, Vec<AnalyzedTerm>>> = AHashMap::new();
+        if let Some(dict) = reader.term_dictionary()? {
+            for (term_key, _info) in dict.iter() {
+                let Some((field, term)) = term_key.split_once(':') else {
+                    continue;
+                };
+                if field == target_field {
+                    continue;
+                }
+                if let Some(mut iter) = reader.postings(field, term)? {
+                    while iter.next()? {
+                        // See `reconstruct_segment`'s identical comment:
+                        // `postings` already excludes deleted documents.
+                        let doc_id = iter.doc_id();
+                        let positions = iter.positions()?;
+                        let freq = iter.term_freq();
+                        if store_positions.is_none() {
+                            *store_positions = Some(!positions.is_empty());
+                        }
+                        let terms = field_terms
+                            .entry(doc_id)
+                            .or_default()
+                            .entry(field.to_string())
+                            .or_default();
+                        if positions.is_empty() {
+                            terms.push(AnalyzedTerm {
+                                term: term.to_string(),
+                                position: 0,
+                                frequency: freq as u32,
+                                offset: (0, 0),
+                            });
+                        } else {
+                            for pos in positions {
+                                terms.push(AnalyzedTerm {
+                                    term: term.to_string(),
+                                    position: pos as u32,
+                                    frequency: freq as u32,
+                                    offset: (0, 0),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // BKD points, EXCEPT `target_field` for the same reason (a numeric
+        // field switching `indexed: false -> true`, or being re-derived
+        // for consistency, needs fresh points from its stored value).
+        let mut points: AHashMap<u64, AHashMap<String, Vec<Vec<f64>>>> = AHashMap::new();
+        for field in reader.bkd_field_names()? {
+            let field = field.as_str();
+            if field == target_field {
+                continue;
+            }
+            if let Some(tree) = reader.get_bkd_tree(field)? {
+                let mut visitor = CollectPointsVisitor::default();
+                tree.intersect(&mut visitor)?;
+                for (doc_id, point) in visitor.entries {
+                    if deleted.contains(doc_id) {
+                        continue;
+                    }
+                    points
+                        .entry(doc_id)
+                        .or_default()
+                        .entry(field.to_string())
+                        .or_default()
+                        .push(point);
+                }
+            }
+        }
+
+        // Pass 2: assemble each live document, re-deriving `target_field`
+        // from its stored value via the SAME per-value analysis
+        // `InvertedIndexWriter::analyze_document` uses for fresh ingestion
+        // (`analyze_field_value`), so a rebuilt field is indistinguishable
+        // from one indexed fresh under the new option.
+        let mut out = Vec::new();
+        for doc_id in reader.doc_ids()? {
+            if deleted.contains(doc_id) {
+                continue;
+            }
+            let Some(stored) = reader.document(doc_id)? else {
+                continue;
+            };
+
+            let mut analyzed = AnalyzedDocument::new();
+            analyzed.field_terms = field_terms.remove(&doc_id).unwrap_or_default();
+            analyzed.point_values = points.remove(&doc_id).unwrap_or_default();
+
+            for (field_name, value) in &stored.fields {
+                analyzed
+                    .stored_fields
+                    .insert(field_name.clone(), value.clone());
+            }
+
+            if let (Some(analyzer), Some(target_value)) =
+                (analyzer, stored.fields.get(target_field))
+            {
+                let (terms, pts) = analyze_field_value(target_field, target_value, analyzer)?;
+                if !terms.is_empty() {
+                    analyzed.field_terms.insert(target_field.to_string(), terms);
+                }
+                if !pts.is_empty() {
+                    analyzed.point_values.insert(target_field.to_string(), pts);
+                }
+            }
+            // `analyzer.is_none()` (switching to `indexed: false`):
+            // `target_field`'s terms/points are already absent (Pass 1/1.5
+            // skipped it above), so there is nothing further to do here.
+
+            let indexed_fields: Vec<String> = analyzed.field_terms.keys().cloned().collect();
+            for field_name in indexed_fields {
+                if field_name == target_field {
+                    let len = analyzed.field_terms[&field_name].len() as u32;
+                    analyzed.field_lengths.insert(field_name, len);
+                } else if let Some(len) = reader.field_length(doc_id, &field_name)? {
                     analyzed.field_lengths.insert(field_name, len);
                 }
             }

@@ -779,6 +779,92 @@ impl LexicalStore {
         Ok(())
     }
 
+    /// Rebuild an existing lexical field's on-disk data under a new
+    /// option/analyzer (Issue #1081: `Engine::update_field`'s `Reindex`
+    /// classification for lexical fields — e.g. a text field's
+    /// `analyzer`, or `indexed: false -> true`).
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The field name. Must already exist.
+    /// * `option` - The field's new configuration.
+    /// * `analyzer` - The field-specific analyzer to register for `name`.
+    ///   `None` removes any existing per-field registration (e.g. the
+    ///   field is being switched to `indexed: false`, or has no
+    ///   analyzer).
+    ///
+    /// # Ordering (this is the fix for Issue #1081's race)
+    ///
+    /// The segment rebuild ([`LexicalIndex::rebuild_field`]) runs FIRST;
+    /// the per-field analyzer swap
+    /// ([`PerFieldAnalyzer::add_analyzer`](crate::analysis::analyzer::per_field::PerFieldAnalyzer::add_analyzer)/
+    /// `remove_analyzer`) only happens after it succeeds. [`Self::add_field`]
+    /// does the opposite (analyzer first) because a brand-new field has no
+    /// existing postings to race against; a rebuild does, so swapping the
+    /// analyzer first would let a query issued mid-rebuild parse against
+    /// the NEW analyzer while on-disk postings are still built with the
+    /// OLD one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing a cached writer's pending changes
+    /// fails, or if the underlying rebuild fails. Unlike
+    /// [`Self::add_field`]/[`Self::delete_field`], a flush failure is
+    /// **propagated**, not cached for a later retry — the writer's
+    /// buffered state is not a safe starting point for a rebuild that is
+    /// about to replace every segment (same reasoning [`Self::optimize`]
+    /// already applies).
+    pub fn rebuild_field(
+        &self,
+        name: &str,
+        option: crate::lexical::core::field::FieldOption,
+        analyzer: Option<Arc<dyn Analyzer>>,
+    ) -> Result<()> {
+        // Flush pending writes BEFORE the rebuild (mirrors `optimize()`):
+        // the rebuild reads segments straight from storage, so anything
+        // still buffered in the cached writer must be durable first, or
+        // the rebuild would silently miss it. A failure here is
+        // propagated, not swallowed — see the doc comment above.
+        let mut writer_guard = self.writer_cache.lock();
+        if let Some(writer) = writer_guard.as_mut() {
+            writer.commit()?;
+        }
+
+        self.index.rebuild_field(name, option, analyzer.clone())?;
+
+        // Only NOW does the analyzer swap become visible to the query
+        // parser — after the rebuild has fully replaced the field's
+        // postings under the new analyzer (see the ordering note above).
+        if let Ok(index_analyzer) = self.analyzer()
+            && let Some(pfa) = index_analyzer
+                .as_any()
+                .downcast_ref::<crate::analysis::analyzer::per_field::PerFieldAnalyzer>(
+            )
+        {
+            match analyzer {
+                Some(field_analyzer) => pfa.add_analyzer(name, field_analyzer),
+                None => pfa.remove_analyzer(name),
+            }
+        }
+
+        // The rebuild replaced every segment, so the writer's cached
+        // segment view (if it survived the flush above) is now stale —
+        // mirrors `optimize()`'s `invalidate_segment_cache` handling.
+        if let Some(writer) = writer_guard.as_mut()
+            && let Err(e) = writer.invalidate_segment_cache()
+        {
+            *writer_guard = None;
+            drop(writer_guard);
+            *self.searcher_cache.write() = None;
+            return Err(e);
+        }
+        *writer_guard = None;
+        drop(writer_guard);
+        *self.searcher_cache.write() = None;
+
+        Ok(())
+    }
+
     /// Remove a field from the lexical store.
     ///
     /// Removes the field from the underlying index (if it was dynamically added)

@@ -356,21 +356,31 @@ pub enum FieldChangeKind {
 pub fn classify_change(old: &FieldOption, new: &FieldOption) -> FieldChangeKind {
     match (old, new) {
         (FieldOption::Text(o), FieldOption::Text(n)) => classify_text(o, n),
-        (FieldOption::Integer(o), FieldOption::Integer(n)) => {
-            classify_numeric_lexical(o.indexed, n.indexed, o.multi_valued, n.multi_valued)
-        }
-        (FieldOption::Float(o), FieldOption::Float(n)) => {
-            classify_numeric_lexical(o.indexed, n.indexed, o.multi_valued, n.multi_valued)
-        }
+        (FieldOption::Integer(o), FieldOption::Integer(n)) => classify_numeric_lexical(
+            o.indexed,
+            n.indexed,
+            o.stored,
+            o.multi_valued,
+            n.multi_valued,
+        ),
+        (FieldOption::Float(o), FieldOption::Float(n)) => classify_numeric_lexical(
+            o.indexed,
+            n.indexed,
+            o.stored,
+            o.multi_valued,
+            n.multi_valued,
+        ),
         (FieldOption::Boolean(o), FieldOption::Boolean(n)) => {
-            classify_indexed_only(o.indexed, n.indexed)
+            classify_indexed_only(o.indexed, n.indexed, o.stored)
         }
         (FieldOption::DateTime(o), FieldOption::DateTime(n)) => {
-            classify_indexed_only(o.indexed, n.indexed)
+            classify_indexed_only(o.indexed, n.indexed, o.stored)
         }
-        (FieldOption::Geo(o), FieldOption::Geo(n)) => classify_indexed_only(o.indexed, n.indexed),
+        (FieldOption::Geo(o), FieldOption::Geo(n)) => {
+            classify_indexed_only(o.indexed, n.indexed, o.stored)
+        }
         (FieldOption::Geo3d(o), FieldOption::Geo3d(n)) => {
-            classify_indexed_only(o.indexed, n.indexed)
+            classify_indexed_only(o.indexed, n.indexed, o.stored)
         }
         // `stored` changes (for every lexical variant, including Bytes) are
         // always metadata-only: they only affect documents ingested after
@@ -398,7 +408,7 @@ pub fn classify_change(old: &FieldOption, new: &FieldOption) -> FieldChangeKind 
 /// Shared classification for `indexed`-only lexical options (Boolean,
 /// DateTime, Geo, Geo3d).
 ///
-/// Only the `false -> true` transition requires a reindex: documents
+/// Only the `false -> true` transition requires rebuilding: documents
 /// ingested while the field was `indexed: false` have no postings to
 /// search, so turning indexing on only takes effect for documents ingested
 /// afterward unless the field is rebuilt. The reverse direction
@@ -407,38 +417,68 @@ pub fn classify_change(old: &FieldOption, new: &FieldOption) -> FieldChangeKind 
 /// which is the only place `indexed` is read, at document-ingestion time),
 /// so it is metadata-only, matching the same limitation `delete_field`
 /// already has (Issue #1077's investigation).
-fn classify_indexed_only(old_indexed: bool, new_indexed: bool) -> FieldChangeKind {
+///
+/// A rebuild needs the field's original values, which only exist when
+/// `old_stored` is `true` (Issue #1081: laurus's lexical rebuild sources
+/// original values from the segment's own stored fields, not a document
+/// store, but the constraint is the same either way — nothing is stored
+/// for `stored: false` fields once a segment is sealed). Without them the
+/// change can only be applied by discarding the field's existing data, so
+/// it is classified `Destructive` instead of `Reindex`.
+fn classify_indexed_only(
+    old_indexed: bool,
+    new_indexed: bool,
+    old_stored: bool,
+) -> FieldChangeKind {
     if !old_indexed && new_indexed {
-        FieldChangeKind::Reindex
+        if old_stored {
+            FieldChangeKind::Reindex
+        } else {
+            FieldChangeKind::Destructive
+        }
     } else {
         FieldChangeKind::MetadataOnly
     }
 }
 
 /// Classification for `TextOption`: `indexed` follows
-/// [`classify_indexed_only`]; an `analyzer` change always requires a
-/// reindex, since existing postings were built with the old analyzer.
+/// [`classify_indexed_only`]; an `analyzer` change always requires
+/// rebuilding from the field's original values, since existing postings
+/// were built with the old analyzer — classified `Reindex` when
+/// `old.stored` (the rebuild can source original text from the segment's
+/// stored fields) or `Destructive` otherwise (see
+/// [`classify_indexed_only`]'s doc comment).
 fn classify_text(old: &TextOption, new: &TextOption) -> FieldChangeKind {
-    let mut kind = classify_indexed_only(old.indexed, new.indexed);
+    let mut kind = classify_indexed_only(old.indexed, new.indexed, old.stored);
     if old.analyzer != new.analyzer {
-        kind = kind.max(FieldChangeKind::Reindex);
+        kind = kind.max(if old.stored {
+            FieldChangeKind::Reindex
+        } else {
+            FieldChangeKind::Destructive
+        });
     }
     kind
 }
 
 /// Classification shared by `IntegerOption`/`FloatOption`: `indexed`
-/// follows [`classify_indexed_only`]. `multi_valued: false -> true` is
+/// follows [`classify_indexed_only`] (`stored`-dependent, since turning
+/// indexing on has no BKD points to source from for a `stored: false`
+/// field that was never indexed). `multi_valued: false -> true` is
 /// metadata-only (existing single values are still valid single-element
 /// matches under "any match" semantics); the reverse could leave stale
 /// multi-value postings misread as single-valued, so it conservatively
-/// requires a reindex.
+/// requires a reindex — always `Reindex`, never `Destructive`, regardless
+/// of `stored`: numeric points are read back from the segment's BKD tree
+/// (the authoritative source, Issue #758), not from stored fields, so a
+/// field that was already `indexed: true` always has a rebuild source.
 fn classify_numeric_lexical(
     old_indexed: bool,
     new_indexed: bool,
+    old_stored: bool,
     old_multi_valued: bool,
     new_multi_valued: bool,
 ) -> FieldChangeKind {
-    let mut kind = classify_indexed_only(old_indexed, new_indexed);
+    let mut kind = classify_indexed_only(old_indexed, new_indexed, old_stored);
     if old_multi_valued && !new_multi_valued {
         kind = kind.max(FieldChangeKind::Reindex);
     }
@@ -855,6 +895,18 @@ mod tests {
                 text(|o| o.analyzer("english")),
                 Reindex,
             ),
+            (
+                "text: analyzer change on a stored:false field is destructive (no original text to re-analyze)",
+                text(|o| o.stored(false)),
+                text(|o| o.stored(false).analyzer("english")),
+                Destructive,
+            ),
+            (
+                "text: indexed false->true on a stored:false field is destructive (no original text to index)",
+                text(|o| o.stored(false).indexed(false)),
+                text(|o| o.stored(false).indexed(true)),
+                Destructive,
+            ),
             // ---- Integer ----
             (
                 "integer: stored toggle is metadata-only",
@@ -884,6 +936,22 @@ mod tests {
                     o
                 }),
                 integer(|o| o),
+                Reindex,
+            ),
+            (
+                "integer: indexed false->true on a stored:false field is destructive (no BKD points, never indexed)",
+                integer(|o| o.stored(false).indexed(false)),
+                integer(|o| o.stored(false).indexed(true)),
+                Destructive,
+            ),
+            (
+                "integer: multi_valued true->false on a stored:false field stays a reindex (BKD is the source, not stored fields)",
+                integer(|mut o| {
+                    o.stored = false;
+                    o.multi_valued = true;
+                    o
+                }),
+                integer(|o| o.stored(false)),
                 Reindex,
             ),
             // ---- Float ----

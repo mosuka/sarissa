@@ -1585,7 +1585,7 @@ impl Engine {
     }
 
     /// Dynamically change an existing field's type or options at runtime
-    /// (Issue #1077/#1079/#1080).
+    /// (Issue #1077/#1079/#1080/#1081).
     ///
     /// Unlike [`Self::add_field`]/[`Self::delete_field`], a field option
     /// change may or may not require existing on-disk data to be rebuilt.
@@ -1593,24 +1593,31 @@ impl Engine {
     ///
     /// - [`FieldChangeKind::MetadataOnly`](schema::FieldChangeKind::MetadataOnly):
     ///   applied immediately; no existing data is touched.
-    /// - [`FieldChangeKind::Reindex`](schema::FieldChangeKind::Reindex) for a
+    /// - [`FieldChangeKind::Reindex`](schema::FieldChangeKind::Reindex):
+    ///   rebuilt in place from the field's existing on-disk data. For a
     ///   **vector** field (e.g. HNSW `m`/`ef_construction`, any index
-    ///   kind's `quantizer`/`rerank_storage`, IVF `n_clusters`): rebuilt in
-    ///   place from the field's existing segments (no document-store
-    ///   read). Requires `opts.reindex == true`.
-    /// - [`FieldChangeKind::Destructive`](schema::FieldChangeKind::Destructive)
-    ///   for a **vector** field (`dimension`/`distance`/`embedder`):
-    ///   existing data is physically discarded and the field recreated
-    ///   empty under the new config (data loss — "warn and proceed", see
-    ///   #1077's investigation). The field is recorded in
+    ///   kind's `quantizer`/`rerank_storage`, IVF `n_clusters`) this reads
+    ///   only the field's own segments, no document-store read. For a
+    ///   **lexical** field (e.g. a text field's `analyzer`, or
+    ///   `indexed: false -> true`) every segment is rebuilt, re-deriving
+    ///   this field from its stored value while every other field is
+    ///   carried over unchanged — see
+    ///   [`crate::lexical::index::inverted::InvertedIndex::rebuild_field`].
+    ///   Requires `opts.reindex == true`.
+    /// - [`FieldChangeKind::Destructive`](schema::FieldChangeKind::Destructive):
+    ///   the field's existing data is discarded rather than rebuilt (data
+    ///   loss — "warn and proceed", see #1077's investigation). For a
+    ///   **vector** field (`dimension`/`distance`/`embedder`) this
+    ///   physically deletes the field's data and recreates it empty. For a
+    ///   **lexical** field (any change on a `stored: false` field) there
+    ///   is no separate purge step: the rebuild above naturally leaves the
+    ///   field empty for every document that has no stored value to
+    ///   re-derive it from. Either way the field is recorded in
     ///   [`Schema::pending_reindex`](schema::Schema::pending_reindex) so
-    ///   the loss stays discoverable via `GetSchema`. Also requires
-    ///   `opts.reindex == true` — this crate does not gate destructive
-    ///   changes behind a separate flag; see #1077's design discussion.
-    /// - `Reindex`/`Destructive` for a **lexical** field: rejected —
-    ///   rebuilding lexical fields (Issue #1081) is not yet implemented,
-    ///   since the inverted index shares one postings dictionary across
-    ///   every field in a segment.
+    ///   the loss stays discoverable via `GetSchema`, and this also
+    ///   requires `opts.reindex == true` — this crate does not gate
+    ///   destructive changes behind a separate flag; see #1077's design
+    ///   discussion.
     ///
     /// Blocks concurrently with ingestion via an internal write lock (see
     /// [`Engine`]'s `schema_change_lock`), so a document is never coerced
@@ -1635,9 +1642,7 @@ impl Engine {
     /// - The change is classified as [`FieldChangeKind::Reindex`](schema::FieldChangeKind::Reindex)
     ///   or [`FieldChangeKind::Destructive`](schema::FieldChangeKind::Destructive)
     ///   and `opts.reindex` is `false`.
-    /// - The change targets a lexical field and is classified as `Reindex`
-    ///   or `Destructive` (not yet implemented — Issue #1081).
-    /// - The underlying vector rebuild/recreate fails.
+    /// - The underlying vector or lexical rebuild/recreate fails.
     /// - A configured schema-persist hook fails (the in-memory schema has
     ///   already been updated at that point; this is not rolled back).
     pub async fn update_field(
@@ -1683,17 +1688,6 @@ impl Engine {
                 })
             }
             schema::FieldChangeKind::Reindex | schema::FieldChangeKind::Destructive => {
-                if !option.is_vector() {
-                    // Lexical rebuild is Issue #1081 (Phase 3): the
-                    // inverted index shares one postings dictionary across
-                    // every field, so this requires full segment
-                    // reconstruction, not yet implemented.
-                    return Err(crate::error::LaurusError::not_implemented(format!(
-                        "updating lexical field '{name}' requires rebuilding existing data, \
-                         which is not yet implemented (see \
-                         https://github.com/mosuka/laurus/issues/1081)"
-                    )));
-                }
                 if !opts.reindex {
                     return Err(crate::error::LaurusError::invalid_argument(format!(
                         "updating field '{name}' requires rebuilding or discarding existing \
@@ -1705,40 +1699,123 @@ impl Engine {
                 let purge = classification == schema::FieldChangeKind::Destructive;
                 if purge {
                     log::warn!(
-                        "update_field: field '{name}' has a destructive change \
-                         (dimension/distance/embedder); its existing data will be discarded"
+                        "update_field: field '{name}' has a destructive change; its existing \
+                         data will be discarded"
                     );
                 }
 
-                // Same embedder-resolution pattern as `add_field` above:
-                // clone the definition out of the `parking_lot` schema
-                // guard before the `await` (that guard is not `Send`).
-                let field_embedder = if let Some(embedder_name) = option.embedder_name() {
-                    let embedder_def = {
-                        let schema = self.schema.read();
-                        schema.embedders.get(embedder_name).cloned()
-                    };
-                    if let Some(def) = embedder_def {
-                        Some(
-                            crate::embedding::registry::create_embedder_from_definition(
-                                embedder_name,
-                                &def,
+                if option.is_vector() {
+                    // Same embedder-resolution pattern as `add_field`
+                    // above: clone the definition out of the
+                    // `parking_lot` schema guard before the `await`
+                    // (that guard is not `Send`).
+                    let field_embedder = if let Some(embedder_name) = option.embedder_name() {
+                        let embedder_def = {
+                            let schema = self.schema.read();
+                            schema.embedders.get(embedder_name).cloned()
+                        };
+                        if let Some(def) = embedder_def {
+                            Some(
+                                crate::embedding::registry::create_embedder_from_definition(
+                                    embedder_name,
+                                    &def,
+                                )
+                                .await?,
                             )
-                            .await?,
-                        )
+                        } else {
+                            None
+                        }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
+                    };
 
-                let vector_opt = option
-                    .to_vector()
-                    .expect("is_vector() was true but to_vector() returned None");
-                self.vector
-                    .rebuild_field(name, &vector_opt, field_embedder, purge)
-                    .await?;
+                    let vector_opt = option
+                        .to_vector()
+                        .expect("is_vector() was true but to_vector() returned None");
+                    self.vector
+                        .rebuild_field(name, &vector_opt, field_embedder, purge)
+                        .await?;
+                } else {
+                    let lexical_opt = option
+                        .to_lexical()
+                        .expect("is_lexical() was true but to_lexical() returned None");
+
+                    // `reconstruct_segment_with_field_override` reads
+                    // `analyzer: None` as "this field is switching to
+                    // `indexed: false`" and skips generating any
+                    // terms/points for it (mirroring a fresh document's
+                    // `should_index` gate). So `field_analyzer` must be
+                    // `Some` whenever the NEW option is indexed --
+                    // including a Text field with no explicit `analyzer`
+                    // spec (which just means "use the index's default
+                    // analyzer", not "no analyzer") and every non-text
+                    // lexical field type (`analyze_field_value` never
+                    // reads the analyzer for those, but still requires a
+                    // reference to be passed through).
+                    let field_is_indexed = match &lexical_opt {
+                        crate::lexical::core::field::FieldOption::Text(opt) => opt.indexed,
+                        crate::lexical::core::field::FieldOption::Integer(opt) => opt.indexed,
+                        crate::lexical::core::field::FieldOption::Float(opt) => opt.indexed,
+                        crate::lexical::core::field::FieldOption::Boolean(opt) => opt.indexed,
+                        crate::lexical::core::field::FieldOption::DateTime(opt) => opt.indexed,
+                        crate::lexical::core::field::FieldOption::Geo(opt) => opt.indexed,
+                        crate::lexical::core::field::FieldOption::Geo3d(opt) => opt.indexed,
+                        crate::lexical::core::field::FieldOption::Bytes(_) => false,
+                    };
+
+                    // Same analyzer-resolution pattern as `add_field`
+                    // above. Note there is no `purge`-driven branch here,
+                    // unlike the vector side: `LexicalStore::rebuild_field`
+                    // re-derives `name`'s terms/points from its stored
+                    // value when one exists, and simply leaves them empty
+                    // when it doesn't (a `stored: false` field never has
+                    // one — this is exactly what makes a `Destructive`
+                    // lexical change "discard existing data" without a
+                    // separate purge step). The resolved analyzer is
+                    // passed through either way so future documents use
+                    // it regardless of classification.
+                    let field_analyzer = if !field_is_indexed {
+                        None
+                    } else if let schema::FieldOption::Text(ref text_opt) = option
+                        && let Some(ref analyzer_spec) = text_opt.analyzer
+                    {
+                        let schema = self.schema.read();
+                        Some(
+                            crate::analysis::analyzer::registry::create_analyzer_from_spec(
+                                analyzer_spec,
+                                &schema.analyzers,
+                                &self.runtime_analyzers,
+                            )
+                            .map_err(|e| {
+                                crate::error::LaurusError::invalid_argument(format!(
+                                    "Failed to resolve analyzer for field '{name}': {e}"
+                                ))
+                            })?,
+                        )
+                    } else {
+                        // A Text field with no explicit override (uses
+                        // the index's default analyzer), or a non-text
+                        // lexical field type. Resolve the store's plain
+                        // default analyzer directly -- NOT whatever is
+                        // presently registered for `name` in the
+                        // `PerFieldAnalyzer` map, which may still hold a
+                        // stale override from a previous change this call
+                        // is in the middle of clearing (that removal only
+                        // takes effect after `rebuild_field` below
+                        // succeeds).
+                        let index_analyzer = self.lexical.analyzer()?;
+                        Some(
+                            index_analyzer
+                                .as_any()
+                                .downcast_ref::<crate::analysis::analyzer::per_field::PerFieldAnalyzer>()
+                                .map(|pfa| pfa.default_analyzer().clone())
+                                .unwrap_or(index_analyzer),
+                        )
+                    };
+
+                    self.lexical
+                        .rebuild_field(name, lexical_opt, field_analyzer)?;
+                }
 
                 {
                     let mut schema = self.schema.write();
@@ -3817,12 +3894,13 @@ mod tests {
         assert_eq!(persisted.lock().len(), 1);
     }
 
-    /// Issue #1079/#1081: a `Reindex`-classified change on a LEXICAL field
-    /// (here, an analyzer swap) is always rejected -- lexical rebuild is
-    /// not yet implemented, regardless of `opts.reindex` -- and does not
-    /// mutate the schema.
+    /// Issue #1081 (Phase 3): a `Reindex`-classified change on a LEXICAL
+    /// field (here, an analyzer swap from the default tokenizing analyzer
+    /// to `keyword`) is rejected while `opts.reindex` is left at its
+    /// default (`false`) -- the opt-in gate applies to lexical fields the
+    /// same way it does to vector fields.
     #[tokio::test]
-    async fn test_update_field_rejects_reindex_change() {
+    async fn test_update_field_rejects_reindex_change_without_opt_in() {
         let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
         let schema = Schema::builder()
             .add_field(
@@ -3835,9 +3913,66 @@ mod tests {
         let new_option = schema::FieldOption::Text(
             crate::lexical::core::field::TextOption::default().analyzer("english"),
         );
-        // Even with the opt-in flag set, a lexical rebuild is rejected --
-        // this is a hard "not yet implemented", not a missing opt-in.
         let result = engine
+            .update_field("title", new_option, UpdateFieldOptions::default())
+            .await;
+
+        assert!(
+            result.is_err(),
+            "a Reindex change without opts.reindex must be rejected"
+        );
+        // The schema is untouched: still the original (analyzer: None) option.
+        match engine.schema().fields.get("title") {
+            Some(schema::FieldOption::Text(opt)) => assert!(opt.analyzer.is_none()),
+            other => panic!("expected FieldOption::Text, got {other:?}"),
+        }
+    }
+
+    /// Issue #1081 (Phase 3): a `Reindex`-classified change on a LEXICAL
+    /// field (an analyzer swap from the default analyzer to `keyword`) with
+    /// `opts.reindex: true` rebuilds the field's postings from the stored
+    /// original text -- not just the schema -- so search results reflect
+    /// the new analyzer's tokenization immediately.
+    #[tokio::test]
+    async fn test_update_field_rebuilds_lexical_field_reindex_change() {
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "title",
+                schema::FieldOption::Text(crate::lexical::core::field::TextOption::default()),
+            )
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        engine
+            .add_document(
+                "doc1",
+                Document::builder()
+                    .add_text("title", "Rust Programming")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        engine.commit().await.unwrap();
+
+        // Before the change: the default analyzer tokenizes the field, so a
+        // single-word query matches.
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:programming"))
+            .limit(10)
+            .build();
+        assert_eq!(
+            engine.search(request).await.unwrap().len(),
+            1,
+            "default analyzer should tokenize and match a single word"
+        );
+
+        let new_option = schema::FieldOption::Text(
+            crate::lexical::core::field::TextOption::default().analyzer("keyword"),
+        );
+        let outcome = engine
             .update_field(
                 "title",
                 new_option,
@@ -3846,14 +3981,122 @@ mod tests {
                     ..Default::default()
                 },
             )
-            .await;
+            .await
+            .unwrap();
 
-        assert!(result.is_err(), "a Reindex change must be rejected");
-        // The schema is untouched: still the original (analyzer: None) option.
-        match engine.schema().fields.get("title") {
-            Some(schema::FieldOption::Text(opt)) => assert!(opt.analyzer.is_none()),
+        assert_eq!(outcome.classification, schema::FieldChangeKind::Reindex);
+        match outcome.schema.fields.get("title") {
+            Some(schema::FieldOption::Text(opt)) => assert_eq!(
+                opt.analyzer,
+                Some(schema::analyzer::AnalyzerSpec::Named("keyword".into()))
+            ),
             other => panic!("expected FieldOption::Text, got {other:?}"),
         }
+        assert!(
+            outcome.schema.pending_reindex.is_empty(),
+            "a Reindex (non-destructive) change must not appear in pending_reindex"
+        );
+
+        // After the change: postings were rebuilt from the stored original
+        // text under `keyword`, so a single-word query no longer matches...
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:programming"))
+            .limit(10)
+            .build();
+        assert!(
+            engine.search(request).await.unwrap().is_empty(),
+            "keyword analyzer must not match a partial token"
+        );
+
+        // ...but the exact original phrase, as a single keyword term, does.
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:\"Rust Programming\""))
+            .limit(10)
+            .build();
+        assert_eq!(
+            engine.search(request).await.unwrap().len(),
+            1,
+            "keyword analyzer should match the exact stored phrase as one term"
+        );
+    }
+
+    /// Issue #1081 (Phase 3): a lexical field's `indexed: false -> true`
+    /// change, with NO explicit analyzer override in the new option (i.e.
+    /// it uses the index's default analyzer), still rebuilds the field's
+    /// postings from its stored value and makes it searchable. Regression
+    /// test for a bug where `field_analyzer` incorrectly resolved to
+    /// `None` in this case -- indistinguishable, to
+    /// `reconstruct_segment_with_field_override`, from switching the field
+    /// to `indexed: false` -- silently producing empty postings instead of
+    /// tokenizing under the default analyzer.
+    #[tokio::test]
+    async fn test_update_field_rebuilds_lexical_field_indexed_false_to_true() {
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "title",
+                schema::FieldOption::Text(
+                    crate::lexical::core::field::TextOption::default().indexed(false),
+                ),
+            )
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        engine
+            .add_document(
+                "doc1",
+                Document::builder()
+                    .add_text("title", "Rust Programming")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        engine.commit().await.unwrap();
+
+        // Before the change: the field is not indexed, so it is not
+        // searchable at all.
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:programming"))
+            .limit(10)
+            .build();
+        assert!(
+            engine.search(request).await.unwrap().is_empty(),
+            "an indexed: false field must not be searchable"
+        );
+
+        let new_option = schema::FieldOption::Text(
+            crate::lexical::core::field::TextOption::default().indexed(true),
+        );
+        let outcome = engine
+            .update_field(
+                "title",
+                new_option,
+                UpdateFieldOptions {
+                    reindex: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.classification, schema::FieldChangeKind::Reindex);
+
+        // After the change: postings were rebuilt from the stored
+        // original text under the index's default analyzer -- even
+        // though the new option names no explicit analyzer -- so the
+        // same query now matches.
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from("title:programming"))
+            .limit(10)
+            .build();
+        assert_eq!(
+            engine.search(request).await.unwrap().len(),
+            1,
+            "indexed: false -> true must rebuild postings from the stored value, \
+             even with no explicit analyzer override"
+        );
     }
 
     /// Issue #1080: a `Reindex`/`Destructive`-classified change on a
