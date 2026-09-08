@@ -55,3 +55,17 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [profile.release]
 lto = true
+
+# Verification-only builds (CI interop/extension checks that never ship):
+# same optimizations as release minus full LTO, which dominates build time
+# for a throwaway binary.
+[profile.ci]
+inherits = "release"
+lto = false
+
+# Speeds up the HNSW/PQ recall integration tests (laurus/tests/), which spend
+# most of their time in unoptimized numeric kernels. Scoped to this package
+# only: laurus/tests/ compiles 88 separate test binaries, and bumping the
+# dev profile's opt-level globally would add more compile time than it saves.
+[profile.dev.package.laurus]
+opt-level = 2

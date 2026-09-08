@@ -39,7 +39,10 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "stable-aarch64-apple-darwin"
+          # -ci suffix: this leg builds with --profile ci (no LTO), which
+          # must not share a cache entry with release.yml's full-LTO
+          # release build for the same target triple.
+          shared-key: "stable-aarch64-apple-darwin-ci"
 
       - name: Cache HuggingFace models
         uses: actions/cache@v6
@@ -49,19 +52,19 @@ jobs:
 
       - name: Build laurus CLI
         run: |
-          cargo build --release --target aarch64-apple-darwin \
+          cargo build --profile ci --target aarch64-apple-darwin \
             -p laurus-cli --bin laurus --features embeddings-candle
 
       - name: Create index and ingest fixtures
         run: |
-          BIN="target/aarch64-apple-darwin/release/laurus"
+          BIN="target/aarch64-apple-darwin/ci/laurus"
           INDEX_DIR=".interop-work/index"
           "$BIN" --index-dir "$INDEX_DIR" --format json create index --schema .github/interop/schema.toml
           "$BIN" --index-dir "$INDEX_DIR" --format json add docs --file .github/interop/documents.jsonl
 
       - name: Generate expected query results
         run: |
-          BIN="target/aarch64-apple-darwin/release/laurus"
+          BIN="target/aarch64-apple-darwin/ci/laurus"
           bash .github/interop/run-queries.sh "$BIN" .interop-work/index .interop-work/expected
 
       - name: Package index and expected results
@@ -103,7 +106,10 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "stable-x86_64-unknown-linux-gnu"
+          # -ci suffix: this leg builds with --profile ci (no LTO), which
+          # must not share a cache entry with the debug-profile test jobs
+          # or the full-LTO release.yml build for the same target triple.
+          shared-key: "stable-x86_64-unknown-linux-gnu-ci"
 
       - name: Cache HuggingFace models
         uses: actions/cache@v6
@@ -113,7 +119,7 @@ jobs:
 
       - name: Build laurus CLI
         run: |
-          cargo build --release --target x86_64-unknown-linux-gnu \
+          cargo build --profile ci --target x86_64-unknown-linux-gnu \
             -p laurus-cli --bin laurus --features embeddings-candle
 
       - name: Download macOS-built index
@@ -128,7 +134,7 @@ jobs:
 
       - name: Generate actual query results and compare
         run: |
-          BIN="target/x86_64-unknown-linux-gnu/release/laurus"
+          BIN="target/x86_64-unknown-linux-gnu/ci/laurus"
           bash .github/interop/run-queries.sh "$BIN" .interop-work/index .interop-work/actual
           python3 .github/interop/compare-results.py \
             .interop-work/expected .interop-work/actual .github/interop/queries.tsv
@@ -136,7 +142,7 @@ jobs:
       - name: Verify write compatibility
         run: |
           set -euo pipefail
-          BIN="target/x86_64-unknown-linux-gnu/release/laurus"
+          BIN="target/x86_64-unknown-linux-gnu/ci/laurus"
           INDEX_DIR=".interop-work/index"
 
           "$BIN" --index-dir "$INDEX_DIR" --format json add doc \
