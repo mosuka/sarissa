@@ -18,15 +18,15 @@ runs:
       run: |
         echo "Disk usage before cleanup:"
         df -h /
-        # Remove large preinstalled toolchains the build never touches. Each
-        # `|| true` keeps the step succeeding even if a path is already absent
-        # (paths differ slightly between runner images).
-        sudo rm -rf /usr/share/dotnet || true
-        sudo rm -rf /usr/local/lib/android || true
-        sudo rm -rf /opt/ghc || true
-        sudo rm -rf /usr/local/.ghcup || true
-        sudo rm -rf /opt/hostedtoolcache/CodeQL || true
-        # Reclaim space held by cached Docker images (none of these jobs use Docker).
-        sudo docker image prune --all --force || true
+        # Remove large preinstalled toolchains the build never touches, in
+        # parallel since each is an independent subtree. Each `|| true` keeps
+        # the step succeeding even if a path is already absent (paths differ
+        # slightly between runner images).
+        sudo rm -rf /usr/share/dotnet || true &
+        sudo rm -rf /usr/local/lib/android || true &
+        sudo rm -rf /opt/ghc || true &
+        sudo rm -rf /usr/local/.ghcup || true &
+        sudo rm -rf /opt/hostedtoolcache/CodeQL || true &
+        wait
         echo "Disk usage after cleanup:"
         df -h /

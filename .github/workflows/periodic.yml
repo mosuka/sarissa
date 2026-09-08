@@ -459,7 +459,10 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "stable-${{ matrix.platform.target }}"
+          # -ci suffix: this leg builds with --profile ci (no LTO), which
+          # must not share a cache entry with the debug-profile test jobs
+          # or the full-LTO release.yml builds using the same target triple.
+          shared-key: "stable-${{ matrix.platform.target }}-ci"
 
       - name: Build PHP extension
         shell: bash
@@ -468,9 +471,9 @@ jobs:
             export RUSTFLAGS="-C link-args=-Wl,-undefined,dynamic_lookup"
           fi
           if [ "${{ matrix.platform.skip_embedding_features }}" == "true" ]; then
-            cargo build --release -p laurus-php
+            cargo build --profile ci -p laurus-php
           else
-            cargo build --release -p laurus-php --features embeddings-all
+            cargo build --profile ci -p laurus-php --features embeddings-all
           fi
 
       - name: Run tests
@@ -478,7 +481,7 @@ jobs:
         shell: bash
         run: |
           composer install
-          php -d extension=../target/release/liblaurus_php.so vendor/bin/phpunit tests/LaurusTest.php
+          php -d extension=../target/ci/liblaurus_php.so vendor/bin/phpunit tests/LaurusTest.php
 
   # ============================================================
   # Cross-platform index interop (Issue #947)

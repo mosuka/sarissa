@@ -8,6 +8,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   # ============================================================
   # Detect Changes
@@ -181,7 +185,7 @@ jobs:
   # ============================================================
   clippy:
     name: Clippy
-    needs: [changes, format]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -239,7 +243,7 @@ jobs:
   # ============================================================
   test-laurus:
     name: Test laurus
-    needs: [changes, clippy]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.laurus == 'true' }}
     strategy:
       fail-fast: false
@@ -252,6 +256,9 @@ jobs:
             skip_embedding_features: true
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
+            # Windows x embeddings-all is covered weekly by periodic.yml;
+            # skipping it here keeps this leg off the PR critical path.
+            skip_embedding_features: true
         toolchain: [stable]
     runs-on: ${{ matrix.platform.runner }}
     steps:
@@ -293,7 +300,7 @@ jobs:
   # ============================================================
   test-server:
     name: Test laurus-server
-    needs: [changes, test-laurus]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.server == 'true' }}
     strategy:
       fail-fast: false
@@ -346,7 +353,7 @@ jobs:
   # ============================================================
   test-mcp:
     name: Test laurus-mcp
-    needs: [changes, test-laurus, test-server]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.mcp == 'true' }}
     strategy:
       fail-fast: false
@@ -399,7 +406,7 @@ jobs:
   # ============================================================
   test-cli:
     name: Test laurus-cli
-    needs: [changes, test-laurus, test-server, test-mcp]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.cli == 'true' }}
     strategy:
       fail-fast: false
@@ -452,7 +459,7 @@ jobs:
   # ============================================================
   test-python:
     name: Test laurus-python
-    needs: [changes, test-laurus]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.python == 'true' }}
     strategy:
       fail-fast: false
@@ -511,7 +518,7 @@ jobs:
   # ============================================================
   test-nodejs:
     name: Test laurus-nodejs
-    needs: [changes, test-laurus]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.nodejs == 'true' }}
     strategy:
       fail-fast: false
@@ -558,7 +565,7 @@ jobs:
   # ============================================================
   test-wasm:
     name: Test laurus-wasm
-    needs: [changes, test-laurus]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.wasm == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -587,7 +594,7 @@ jobs:
   # ============================================================
   test-ruby:
     name: Test laurus-ruby
-    needs: [changes, test-laurus]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.ruby == 'true' }}
     strategy:
       fail-fast: false
@@ -637,7 +644,7 @@ jobs:
   # ============================================================
   test-php:
     name: Test laurus-php
-    needs: [changes, test-laurus]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.php == 'true' }}
     strategy:
       fail-fast: false
@@ -671,7 +678,10 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "stable-${{ matrix.platform.target }}"
+          # -ci suffix: this leg builds with --profile ci (no LTO), which
+          # must not share a cache entry with the debug-profile test jobs
+          # or the full-LTO release.yml builds using the same target triple.
+          shared-key: "stable-${{ matrix.platform.target }}-ci"
 
       - name: Build PHP extension
         shell: bash
@@ -680,9 +690,9 @@ jobs:
             export RUSTFLAGS="-C link-args=-Wl,-undefined,dynamic_lookup"
           fi
           if [ "${{ matrix.platform.skip_embedding_features }}" == "true" ]; then
-            cargo build --release -p laurus-php
+            cargo build --profile ci -p laurus-php
           else
-            cargo build --release -p laurus-php --features embeddings-all
+            cargo build --profile ci -p laurus-php --features embeddings-all
           fi
 
       - name: Run tests
@@ -690,7 +700,7 @@ jobs:
         shell: bash
         run: |
           composer install
-          php -d extension=../target/release/liblaurus_php.so vendor/bin/phpunit tests/LaurusTest.php
+          php -d extension=../target/ci/liblaurus_php.so vendor/bin/phpunit tests/LaurusTest.php
 
   # ============================================================
   # Cross-platform index interop (Issue #947)
@@ -700,7 +710,7 @@ jobs:
   # ============================================================
   index-interop:
     name: Index Interop
-    needs: [changes, test-laurus]
+    needs: [changes]
     if: ${{ !failure() && !cancelled() && needs.changes.outputs.interop == 'true' }}
     uses: ./.github/workflows/index-interop.yml
 
@@ -709,9 +719,17 @@ jobs:
   # ============================================================
   test-all:
     name: Test All
-    if: ${{ !failure() && !cancelled() }}
+    # DAG jobs above depend only on `changes`, so a lint failure no longer
+    # skips them transitively -- format/clippy must be listed explicitly to
+    # keep gating on lint. `!cancelled()` (rather than `!failure() &&
+    # !cancelled()`) lets this step run even when a need was cancelled, so
+    # the explicit result check below can tell "cancelled" apart from
+    # "succeeded" instead of both silently passing.
+    if: ${{ !cancelled() }}
     needs:
       [
+        format,
+        clippy,
         test-laurus,
         test-cli,
         test-server,
@@ -725,5 +743,14 @@ jobs:
       ]
     runs-on: ubuntu-latest
     steps:
-      - name: All tests passed
-        run: echo "All tests passed"
+      - name: Check that no required job failed or was cancelled
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "ERROR: at least one required job failed" >&2
+            exit 1
+          fi
+          if [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "ERROR: at least one required job was cancelled" >&2
+            exit 1
+          fi
+          echo "All tests passed"
