@@ -1,11 +1,12 @@
 //! Ruby-facing `Index` class — the primary entry point for the laurus binding.
 
+use std::cell::RefCell;
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::commit_policy::RbCommitPolicy;
 use crate::convert::{document_to_hash, hash_to_document};
-use crate::errors::{index_dir_err, laurus_err};
+use crate::errors::{closed_err, index_dir_err, laurus_err};
 use crate::schema::RbSchema;
 use crate::search::{build_request_from_rb, to_rb_search_result};
 use crate::wal::RbWalSyncPolicy;
@@ -43,7 +44,7 @@ use magnus::{Error, RArray, RHash, RModule, Ruby, TryConvert, Value};
 /// ```
 #[magnus::wrap(class = "Laurus::Index")]
 pub struct RbIndex {
-    engine: Arc<Engine>,
+    engine: RefCell<Option<Arc<Engine>>>,
     rt: Arc<tokio::runtime::Runtime>,
 }
 
@@ -127,9 +128,25 @@ impl RbIndex {
         let engine = rt.block_on(builder.build()).map_err(laurus_err)?;
 
         Ok(Self {
-            engine: Arc::new(engine),
+            engine: RefCell::new(Some(Arc::new(engine))),
             rt: Arc::new(rt),
         })
+    }
+
+    /// Return a clone of the underlying engine handle, or a `RuntimeError`
+    /// if `close` has already been called.
+    fn engine(&self) -> Result<Arc<Engine>, Error> {
+        self.engine.borrow().clone().ok_or_else(closed_err)
+    }
+
+    /// Release this index's handle on the underlying engine, deterministically
+    /// dropping its storage lock (Issue #1086/#1097) instead of waiting on
+    /// Ruby's garbage collector's non-deterministic timing.
+    ///
+    /// Idempotent: calling `close` more than once is a no-op. Every other
+    /// method raises `RuntimeError` after `close` has been called.
+    fn close(&self) {
+        self.engine.borrow_mut().take();
     }
 
     // ── Document CRUD ─────────────────────────────────────────────────────
@@ -145,7 +162,7 @@ impl RbIndex {
     fn put_document(&self, id: String, doc: RHash) -> Result<(), Error> {
         let ruby = Ruby::get().expect("called from Ruby thread");
         let document = hash_to_document(&ruby, doc)?;
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.put_document(&id, document))
             .map_err(laurus_err)
@@ -163,7 +180,7 @@ impl RbIndex {
     fn add_document(&self, id: String, doc: RHash) -> Result<(), Error> {
         let ruby = Ruby::get().expect("called from Ruby thread");
         let document = hash_to_document(&ruby, doc)?;
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.add_document(&id, document))
             .map_err(laurus_err)
@@ -187,7 +204,7 @@ impl RbIndex {
         if batch.is_empty() {
             return Ok(());
         }
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.put_documents(batch))
             .map_err(laurus_err)
@@ -209,7 +226,7 @@ impl RbIndex {
         if batch.is_empty() {
             return Ok(());
         }
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.add_documents(batch))
             .map_err(laurus_err)
@@ -226,7 +243,7 @@ impl RbIndex {
     /// An Array of Hashes, one per indexed version.
     fn get_documents(&self, id: String) -> Result<RArray, Error> {
         let ruby = Ruby::get().expect("called from Ruby thread");
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let docs = self
             .rt
             .block_on(engine.get_documents(&id))
@@ -247,7 +264,7 @@ impl RbIndex {
     ///
     /// * `id` - External document identifier.
     fn delete_documents(&self, id: String) -> Result<(), Error> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.delete_documents(&id))
             .map_err(laurus_err)
@@ -255,7 +272,7 @@ impl RbIndex {
 
     /// Flush buffered writes and make all pending changes searchable.
     fn commit(&self) -> Result<(), Error> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt.block_on(engine.commit()).map_err(laurus_err)
     }
 
@@ -280,7 +297,7 @@ impl RbIndex {
     ///
     /// `nil` on success, or raises if the underlying fsync fails.
     fn flush_wal(&self) -> Result<(), Error> {
-        self.engine.flush_wal().map_err(laurus_err)
+        self.engine()?.flush_wal().map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -318,7 +335,7 @@ impl RbIndex {
 
         let request = build_request_from_rb(query, limit, offset)?;
 
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let results = self
             .rt
             .block_on(engine.search(request))
@@ -385,7 +402,7 @@ impl RbIndex {
             requests.push(build_request_from_rb(item, limit, offset)?);
         }
 
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let batch_results = self
             .rt
             .block_on(engine.search_batch(requests))
@@ -414,7 +431,7 @@ impl RbIndex {
     ///   - `"vector_fields"` (Hash): per-field vector statistics.
     fn stats(&self) -> Result<RHash, Error> {
         let ruby = Ruby::get().expect("called from Ruby thread");
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let stats: EngineStats = self
             .rt
             .block_on(async { engine.stats() })
@@ -544,6 +561,7 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
     class.define_method("search", magnus::method!(RbIndex::search, -1))?;
     class.define_method("search_batch", magnus::method!(RbIndex::search_batch, -1))?;
     class.define_method("stats", magnus::method!(RbIndex::stats, 0))?;
+    class.define_method("close", magnus::method!(RbIndex::close, 0))?;
     class.define_method("inspect", magnus::method!(RbIndex::inspect, 0))?;
     class.define_method("to_s", magnus::method!(RbIndex::inspect, 0))?;
     Ok(())

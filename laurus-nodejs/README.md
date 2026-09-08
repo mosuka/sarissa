@@ -82,7 +82,17 @@ const stats = index.stats();
 // { documentCount: 42, vectorFields: {
 //     embedding: { count: 42, dimension: 384 }
 // } }
+
+// Close (releases the storage lock deterministically; see below)
+index.close();
 ```
+
+A file-based index holds an exclusive lock on its directory for as long as
+the `Index` is open, so a second `Index.create()` on the same path fails
+while the first is still around. Call `close()` when you are done with an
+index — especially before reopening the same path — rather than relying on
+the JS garbage collector, whose timing is not deterministic. `close()` is
+idempotent; every other method throws after it has been called.
 
 ### Durability / WAL
 

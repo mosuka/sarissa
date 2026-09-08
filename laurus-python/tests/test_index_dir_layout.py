@@ -31,7 +31,7 @@ def test_reopen_without_schema_loads_persisted_schema_and_data(tmp_path):
     idx = laurus.Index(path=str(tmp_path), schema=schema)
     idx.put_document("doc1", {"title": "hello world"})
     idx.commit()
-    del idx
+    idx.close()
 
     reopened = laurus.Index(path=str(tmp_path))
     results = reopened.search("title:hello", limit=5)
@@ -50,7 +50,8 @@ def test_reopen_with_explicit_schema_raises_value_error(tmp_path):
 def test_reopen_with_no_schema_at_all_succeeds_on_empty_default(tmp_path):
     # First call with no schema creates an empty-schema index (unchanged
     # default behavior); reopening it (also with no schema) must not raise.
-    laurus.Index(path=str(tmp_path))
+    idx = laurus.Index(path=str(tmp_path))
+    idx.close()
     laurus.Index(path=str(tmp_path))
 
 

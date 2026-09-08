@@ -104,6 +104,19 @@ be omitted, since it's loaded from the persisted `schema.toml`):
 $index = new Index("./myindex");
 ```
 
+A file-based index holds an exclusive lock on its directory for as long as
+the `Index` object is alive, so a second `new Index("./myindex")` on the
+same path fails while the first is still open. Call `$index->close()` when
+you are done with an index -- especially before reopening the same path --
+rather than relying on PHP's refcounting/cycle-collecting garbage
+collector, whose destruction timing is not guaranteed for every reference
+pattern (e.g. reference cycles). `close()` is idempotent; every other
+method throws after it has been called.
+
+```php
+$index->close();
+```
+
 ## Schema
 
 The `Schema` class defines the structure of your index. Use the following methods to add fields:

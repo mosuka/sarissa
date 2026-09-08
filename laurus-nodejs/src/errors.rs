@@ -3,6 +3,12 @@
 use laurus::LaurusError;
 use napi::Status;
 
+/// Error returned by any `Index` method called after
+/// [`crate::index::JsIndex::close`] (Issue #1097).
+pub fn closed_err() -> napi::Error {
+    napi::Error::new(Status::InvalidArg, "Index is closed")
+}
+
 /// Convert a [`LaurusError`] into a napi [`napi::Error`].
 pub fn laurus_err(err: LaurusError) -> napi::Error {
     match err {

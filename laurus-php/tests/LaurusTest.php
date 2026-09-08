@@ -883,7 +883,7 @@ class LaurusTest extends TestCase
         $idx = new Laurus\Index($dir, $schema);
         $idx->putDocument("doc1", ["title" => "hello world"]);
         $idx->commit();
-        unset($idx);
+        $idx->close();
 
         $reopened = new Laurus\Index($dir);
         $results = $reopened->search("title:hello", 5);
@@ -910,7 +910,8 @@ class LaurusTest extends TestCase
         // First call with no schema creates an empty-schema index (unchanged
         // default behavior); reopening it (also with no schema) must not
         // throw.
-        new Laurus\Index($dir);
+        $first = new Laurus\Index($dir);
+        $first->close();
         $idx = new Laurus\Index($dir);
         $this->assertNotNull($idx);
     }
@@ -937,5 +938,42 @@ class LaurusTest extends TestCase
         // normal fresh-create case, not a legacy-layout error.
         new Laurus\Index($dir);
         $this->assertFileExists($dir . "/schema.toml");
+    }
+
+    // ── close() (Issue #1086/#1097) ────────────────────────────────────────
+    //
+    // Engine::build() (Issue #1086) takes an exclusive lock on the storage
+    // directory, released only when the Engine is dropped. Without an
+    // explicit close(), that release depends on PHP's refcounting GC
+    // dropping the last reference, which is not guaranteed once an Index is
+    // captured by a closure, stored in a container, or involved in a
+    // reference cycle. close() makes the release deterministic.
+
+    public function testCloseThenReopenSucceeds(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_indexdir_" . uniqid();
+        mkdir($dir);
+        $idx = new Laurus\Index($dir);
+        $idx->close();
+
+        $reopened = new Laurus\Index($dir);
+        $this->assertNotNull($reopened);
+    }
+
+    public function testMethodAfterCloseThrows(): void
+    {
+        $idx = new Laurus\Index();
+        $idx->close();
+
+        $this->expectException(\Throwable::class);
+        $idx->putDocument("doc1", ["title" => "hello"]);
+    }
+
+    public function testCloseIsIdempotent(): void
+    {
+        $idx = new Laurus\Index();
+        $idx->close();
+        $idx->close();
+        $this->assertNotNull($idx);
     }
 }

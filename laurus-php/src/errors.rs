@@ -4,6 +4,12 @@ use ext_php_rs::exception::PhpException;
 use ext_php_rs::zend::ce;
 use laurus::LaurusError;
 
+/// Error returned by any `Index` method called after
+/// [`crate::index::PhpIndex::close`] (Issue #1097).
+pub fn closed_err() -> PhpException {
+    PhpException::new("Index is closed".to_string(), 0, ce::exception())
+}
+
 /// Convert a [`LaurusError`] into a PHP exception.
 ///
 /// # Mapping

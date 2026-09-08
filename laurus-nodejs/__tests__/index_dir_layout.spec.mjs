@@ -39,6 +39,7 @@ describe("Index(path) directory layout (#1059)", () => {
     const index = await Index.create(dir, schema);
     await index.putDocument("doc1", { title: "hello world" });
     await index.commit();
+    index.close();
 
     const reopened = await Index.create(dir);
     const results = await reopened.search("title:hello", 5);
@@ -56,7 +57,8 @@ describe("Index(path) directory layout (#1059)", () => {
 
   it("reopening with no schema at all succeeds on the empty default", async () => {
     const dir = freshDir();
-    await Index.create(dir);
+    const index = await Index.create(dir);
+    index.close();
     await expect(Index.create(dir)).resolves.toBeDefined();
   });
 

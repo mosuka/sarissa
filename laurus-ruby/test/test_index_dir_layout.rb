@@ -34,7 +34,7 @@ class TestIndexDirLayout < Minitest::Test
       idx = Laurus::Index.new(path: dir, schema: schema)
       idx.put_document("doc1", { "title" => "hello world" })
       idx.commit
-      idx = nil
+      idx.close
 
       reopened = Laurus::Index.new(path: dir)
       results = reopened.search("title:hello", limit: 5)
@@ -59,7 +59,8 @@ class TestIndexDirLayout < Minitest::Test
     Dir.mktmpdir do |dir|
       # First call with no schema creates an empty-schema index (unchanged
       # default behavior); reopening it (also with no schema) must not raise.
-      Laurus::Index.new(path: dir)
+      idx = Laurus::Index.new(path: dir)
+      idx.close
       Laurus::Index.new(path: dir)
     end
   end
