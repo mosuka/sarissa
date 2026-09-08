@@ -711,6 +711,44 @@ fn pairs_to_documents(docs: &Zval) -> PhpResult<Vec<(String, laurus::Document)>>
     Ok(batch)
 }
 
+/// Read the persisted commit generation for `path` directly from disk,
+/// without building an `Engine` -- no storage lock, no WAL recovery, no
+/// embedder loading (Issue #1101).
+///
+/// Unlike `Index::stats()`, this is not tied to any `Index` instance: it
+/// works even when no `Index` for `path` has ever been constructed in this
+/// process, which is the point -- it lets a caller cheaply decide whether
+/// opening the index is worth doing at all.
+///
+/// # Arguments
+///
+/// * `path` - Directory path of a file-backed index (the same value passed
+///   as the first argument to `new Index(...)`).
+///
+/// # Returns
+///
+/// `0` if the index exists but nothing has been committed yet.
+///
+/// # Exceptions
+///
+/// Throws a `ValueError` if `path` has no persisted schema at all (not a
+/// laurus index directory).
+#[php_function]
+#[php(name = "Laurus\\peek_commit_generation")]
+pub fn peek_commit_generation(path: String) -> PhpResult<u64> {
+    laurus::index_dir::peek_commit_generation(Path::new(&path)).map_err(index_dir_err)
+}
+
+/// Build the PHP function entry for [`peek_commit_generation`], for
+/// `lib.rs`'s `#[php_module]` registration.
+///
+/// `wrap_function!` expands to a reference to a `#[doc(hidden)]` struct
+/// that `#[php_function]` generates in *this* module, so it must be called
+/// from here rather than from `lib.rs` directly.
+pub fn peek_commit_generation_function_entry() -> ext_php_rs::builders::FunctionBuilder<'static> {
+    wrap_function!(peek_commit_generation)
+}
+
 /// Resolve the `(Schema, Storage)` pair for [`PhpIndex::__construct`].
 ///
 /// `path=None` keeps the pre-existing in-memory behavior (schema defaults

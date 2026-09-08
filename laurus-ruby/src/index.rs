@@ -535,6 +535,36 @@ fn resolve_storage_and_schema(
 }
 
 // ---------------------------------------------------------------------------
+// Module-level functions
+// ---------------------------------------------------------------------------
+
+/// Read the persisted commit generation for `path` directly from disk,
+/// without building an `Engine` -- no storage lock, no WAL recovery, no
+/// embedder loading (Issue #1101).
+///
+/// Unlike `Index#stats`, this is not tied to any `Index` instance: it works
+/// even when no `Index` for `path` has ever been constructed in this
+/// process, which is the point -- it lets a caller cheaply decide whether
+/// opening the index is worth doing at all.
+///
+/// # Arguments
+///
+/// * `path` - Directory path of a file-backed index (the same value passed
+///   as `path:` to `Laurus::Index.new`).
+///
+/// # Returns
+///
+/// `0` if the index exists but nothing has been committed yet.
+///
+/// # Errors
+///
+/// Raises a Ruby `ArgumentError` if `path` has no persisted schema at all
+/// (not a laurus index directory).
+fn peek_commit_generation(path: String) -> Result<u64, Error> {
+    laurus::index_dir::peek_commit_generation(Path::new(&path)).map_err(index_dir_err)
+}
+
+// ---------------------------------------------------------------------------
 // Class registration
 // ---------------------------------------------------------------------------
 
@@ -564,5 +594,9 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
     class.define_method("close", magnus::method!(RbIndex::close, 0))?;
     class.define_method("inspect", magnus::method!(RbIndex::inspect, 0))?;
     class.define_method("to_s", magnus::method!(RbIndex::inspect, 0))?;
+    module.define_module_function(
+        "peek_commit_generation",
+        magnus::function!(peek_commit_generation, 1),
+    )?;
     Ok(())
 }

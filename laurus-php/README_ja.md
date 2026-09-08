@@ -116,6 +116,24 @@ $index = new Index("./myindex");
 $index->close();
 ```
 
+インデックスを開き直す（あるいは開く）ことすらせずに、別プロセスが変更を
+コミットしたかを安く確認したい場合は、名前空間付きの
+`Laurus\peek_commit_generation($path)` を使ってください:
+
+```php
+$before = Laurus\peek_commit_generation($path);
+// ... しばらく経過 ...
+if (Laurus\peek_commit_generation($path) !== $before) {
+    // ディスク上で何かが変わった。取り込むにはインデックスを開き直す
+}
+```
+
+これはディスク上の永続化されたcommit世代を直接読むだけで、`Engine`の構築
+（ストレージロック・WALリカバリ・Embedder読み込み）を一切行わないため、
+このプロセスでそのパスの`Index`をまだ一度も作っていなくても使えます。
+`$path`がlaurusのインデックスディレクトリでない（永続化されたスキーマが
+無い）場合は`ValueError`を投げます。
+
 ## スキーマ
 
 `Schema` クラスはインデックスの構造を定義します。以下のメソッドでフィールドを追加できます:

@@ -315,15 +315,18 @@ async fn run_commit_ladder(
 /// Storage-root file name for the persisted commit generation counter
 /// (Issue #1088). Lives alongside `schema.toml`, outside any
 /// `PrefixedStorage` sub-namespace, since it represents the whole engine.
-const COMMIT_GENERATION_FILE: &str = "commit_generation.json";
+///
+/// `pub(crate)` so [`crate::index_dir::peek_commit_generation`] (Issue
+/// #1101) can read it directly without building an `Engine`.
+pub(crate) const COMMIT_GENERATION_FILE: &str = "commit_generation.json";
 
 /// On-disk payload for [`COMMIT_GENERATION_FILE`], written/read via
 /// [`crate::storage::manifest::save_checksummed_json`]/`load_checksummed_json`
 /// -- the same crash-atomic, checksummed framing every other small control
 /// file in laurus uses (Issue #1022).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-struct CommitGenerationFile {
-    generation: u64,
+pub(crate) struct CommitGenerationFile {
+    pub(crate) generation: u64,
 }
 
 /// Tracks and persists the cross-process commit generation counter (Issue

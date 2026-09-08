@@ -46,11 +46,13 @@ pub fn laurus_err(err: LaurusError) -> Error {
 /// |--------------------------|-----------------|
 /// | `SchemaConflict`         | `ArgumentError` |
 /// | `LegacyFlatLayout`       | `ArgumentError` |
+/// | `NotAnIndexDirectory`    | `ArgumentError` |
 /// | `Io`                     | `IOError`       |
 /// | `Core`                   | see [`laurus_err`] |
 ///
-/// `SchemaConflict`/`LegacyFlatLayout` are both caller-fixable misuse, so
-/// they map to `ArgumentError` — the same class [`laurus_err`] uses for
+/// `SchemaConflict`/`LegacyFlatLayout`/`NotAnIndexDirectory` are all
+/// caller-fixable misuse, so they map to `ArgumentError` — the same class
+/// [`laurus_err`] uses for
 /// `LaurusError::Schema`/`Query`/`Field`. `Io` maps to `IOError` like
 /// `LaurusError::Io` above; unlike the Python binding, there is no
 /// path-preserving exception hierarchy to lose here, and
@@ -60,7 +62,9 @@ pub fn index_dir_err(err: laurus::index_dir::IndexDirError) -> Error {
     use laurus::index_dir::IndexDirError;
     let ruby = Ruby::get().expect("called from Ruby thread");
     match err {
-        IndexDirError::SchemaConflict { .. } | IndexDirError::LegacyFlatLayout { .. } => {
+        IndexDirError::SchemaConflict { .. }
+        | IndexDirError::LegacyFlatLayout { .. }
+        | IndexDirError::NotAnIndexDirectory { .. } => {
             Error::new(ruby.exception_arg_error(), err.to_string())
         }
         IndexDirError::Io { .. } => Error::new(ruby.exception_io_error(), err.to_string()),

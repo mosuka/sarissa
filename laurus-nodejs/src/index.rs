@@ -546,6 +546,43 @@ fn pairs_to_documents(docs: Vec<(String, Value)>) -> Result<Vec<(String, laurus:
 }
 
 // ---------------------------------------------------------------------------
+// Module-level functions
+// ---------------------------------------------------------------------------
+
+/// Read the persisted commit generation for `path` directly from disk,
+/// without building an `Engine` -- no storage lock, no WAL recovery, no
+/// embedder loading (Issue #1101).
+///
+/// Unlike `Index.stats()`, this is not tied to any `Index` instance: it
+/// works even when no `Index` for `path` has ever been constructed in this
+/// process, which is the point -- it lets a caller cheaply decide whether
+/// opening the index is worth doing at all.
+///
+/// Returned as `number` (not `bigint`), matching every other numeric value
+/// this binding exposes (e.g. `stats()`'s `documentCount`); a commit
+/// generation will never realistically approach 2^53.
+///
+/// # Arguments
+///
+/// * `path` - Directory path of a file-backed index (the same value passed
+///   to `Index.create(path, ...)`).
+///
+/// # Returns
+///
+/// `0` if the index exists but nothing has been committed yet.
+///
+/// # Errors
+///
+/// Throws if `path` has no persisted schema at all (not a laurus index
+/// directory).
+#[napi]
+pub fn peek_commit_generation(path: String) -> Result<f64> {
+    laurus::index_dir::peek_commit_generation(Path::new(&path))
+        .map(|generation| generation as f64)
+        .map_err(index_dir_err)
+}
+
+// ---------------------------------------------------------------------------
 // Storage factory helper
 // ---------------------------------------------------------------------------
 

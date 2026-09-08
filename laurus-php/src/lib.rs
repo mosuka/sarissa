@@ -31,6 +31,7 @@ pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
         .class::<index::PhpWalSyncPolicy>()
         .class::<index::PhpCommitPolicy>()
         .class::<schema::PhpSchema>()
+        .function(index::peek_commit_generation_function_entry())
         // Search result & request, fusion algorithms
         .class::<search::PhpRRF>()
         .class::<search::PhpWeightedSum>()

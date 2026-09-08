@@ -117,6 +117,24 @@ method throws after it has been called.
 $index->close();
 ```
 
+To cheaply check whether another process committed since you last looked --
+without opening (or reopening) the index at all -- use the namespaced
+`Laurus\peek_commit_generation($path)`:
+
+```php
+$before = Laurus\peek_commit_generation($path);
+// ... later ...
+if (Laurus\peek_commit_generation($path) !== $before) {
+    // something changed on disk; reopen the index to pick it up
+}
+```
+
+It reads the persisted commit generation directly off disk, with no
+`Engine` construction at all -- no storage lock, no WAL recovery, no
+embedder loading -- so it works even before any `Index` for that path has
+been created in this process. Throws a `ValueError` if `$path` isn't a
+laurus index directory (no persisted schema).
+
 ## Schema
 
 The `Schema` class defines the structure of your index. Use the following methods to add fields:

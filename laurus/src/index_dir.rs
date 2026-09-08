@@ -84,6 +84,18 @@ pub enum IndexDirError {
         source: std::io::Error,
     },
 
+    /// `path` has no `schema.toml`, so it isn't a laurus index directory at
+    /// all (Issue #1101's [`peek_commit_generation`], unlike
+    /// [`open_or_create`], never creates one on the caller's behalf).
+    #[error(
+        "{path} is not a laurus index directory (no {SCHEMA_FILE} found); \
+         check the path, or create the index first"
+    )]
+    NotAnIndexDirectory {
+        /// The path that was checked.
+        path: PathBuf,
+    },
+
     /// Schema (de)serialization or storage creation/opening failed.
     #[error(transparent)]
     Core(#[from] LaurusError),
@@ -135,6 +147,52 @@ pub fn open_or_create(
     }?;
 
     Ok((resolved_schema, storage))
+}
+
+/// Read the persisted commit generation (Issue #1088) for `index_dir`
+/// directly from disk, without building an `Engine` -- no storage lock, no
+/// WAL recovery, no embedder loading (Issue #1101). Lets a caller cheaply
+/// decide whether reopening or reloading the index is worth doing at all.
+///
+/// # Returns
+///
+/// * `0` if the index exists but no commit has happened yet (matches the
+///   fallback `Engine::builder`'s own generation tracker uses when
+///   `commit_generation.json` doesn't exist).
+///
+/// # Errors
+///
+/// Returns [`IndexDirError::NotAnIndexDirectory`] if `index_dir` has no
+/// `schema.toml` -- unlike [`open_or_create`], this function never creates
+/// one. Returns [`IndexDirError::Core`] if the persisted file exists but is
+/// corrupt (checksum mismatch or malformed JSON).
+pub fn peek_commit_generation(index_dir: &Path) -> Result<u64, IndexDirError> {
+    let schema_path = index_dir.join(SCHEMA_FILE);
+    if !schema_path.is_file() {
+        return Err(IndexDirError::NotAnIndexDirectory {
+            path: index_dir.to_path_buf(),
+        });
+    }
+
+    let store_path = index_dir.join(STORE_DIR);
+    if !store_path.is_dir() {
+        // schema.toml was written but no Engine has been built over this
+        // directory yet, so there's nothing to read -- and constructing a
+        // `FileStorage` here would create an empty `store/` as a side
+        // effect of merely peeking.
+        return Ok(0);
+    }
+
+    let storage = StorageFactory::open(StorageConfig::File(FileStorageConfig::new(&store_path)))?;
+    let generation =
+        crate::storage::manifest::load_checksummed_json::<crate::engine::CommitGenerationFile>(
+            storage.as_ref(),
+            crate::engine::COMMIT_GENERATION_FILE,
+            None,
+        )?
+        .map(|(value, _format)| value.generation)
+        .unwrap_or_default();
+    Ok(generation)
 }
 
 #[cfg(test)]
@@ -190,5 +248,59 @@ mod tests {
 
         let err = open_or_create(dir.path(), None).unwrap_err();
         assert!(matches!(err, IndexDirError::LegacyFlatLayout { .. }));
+    }
+
+    #[test]
+    fn peek_commit_generation_rejects_a_directory_with_no_schema_toml() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let err = peek_commit_generation(dir.path()).unwrap_err();
+        assert!(matches!(err, IndexDirError::NotAnIndexDirectory { .. }));
+    }
+
+    #[test]
+    fn peek_commit_generation_is_zero_before_any_engine_is_built() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join(SCHEMA_FILE),
+            Schema::new().to_toml().unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(peek_commit_generation(dir.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn peek_commit_generation_is_zero_before_any_commit() {
+        let dir = tempfile::TempDir::new().unwrap();
+        open_or_create(dir.path(), Some(Schema::new())).unwrap();
+
+        // `store/` now exists (created by `open_or_create`), but no Engine
+        // has ever committed, so `commit_generation.json` doesn't exist yet.
+        assert_eq!(peek_commit_generation(dir.path()).unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn peek_commit_generation_matches_a_real_engine_after_a_commit() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (schema, storage) = open_or_create(dir.path(), Some(Schema::new())).unwrap();
+        let engine = crate::Engine::builder(storage, schema)
+            .build()
+            .await
+            .unwrap();
+        engine
+            .put_document(
+                "doc1",
+                crate::Document::builder()
+                    .add_text("title", "hello")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        engine.commit().await.unwrap();
+        let expected = engine.commit_generation();
+        drop(engine);
+
+        assert_eq!(peek_commit_generation(dir.path()).unwrap(), expected);
+        assert_eq!(expected, 1);
     }
 }

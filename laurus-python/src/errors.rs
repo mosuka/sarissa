@@ -54,9 +54,9 @@ pub fn io_err_with_path(path: &Path, e: io::Error) -> PyErr {
 pub fn index_dir_err(err: laurus::index_dir::IndexDirError) -> PyErr {
     use laurus::index_dir::IndexDirError;
     match err {
-        IndexDirError::SchemaConflict { .. } | IndexDirError::LegacyFlatLayout { .. } => {
-            PyValueError::new_err(err.to_string())
-        }
+        IndexDirError::SchemaConflict { .. }
+        | IndexDirError::LegacyFlatLayout { .. }
+        | IndexDirError::NotAnIndexDirectory { .. } => PyValueError::new_err(err.to_string()),
         IndexDirError::Io { path, source } => io_err_with_path(&path, source),
         IndexDirError::Core(e) => laurus_err(e),
     }

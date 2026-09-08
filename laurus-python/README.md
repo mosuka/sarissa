@@ -116,6 +116,23 @@ call -- so it confirms whether `reload()` (or your own `commit()`) actually
 advanced the state, but it cannot by itself tell you whether *another*
 process has committed something new; only `reload()` picks that up.
 
+To cheaply check for another process's changes *without* paying `reload()`'s
+cost, use the module-level `laurus.peek_commit_generation(path)`. Unlike
+`index.commit_generation()`, it isn't tied to any `Index` object -- it reads
+`commit_generation.json` straight off disk, with no `Engine` construction at
+all, so it works even before you've opened an `Index` for that path in this
+process:
+
+```python
+before = laurus.peek_commit_generation(path)
+# ... later ...
+if laurus.peek_commit_generation(path) != before:
+    index.reload()
+```
+
+Raises `ValueError` if `path` isn't a laurus index directory (no persisted
+schema).
+
 ## Durability / WAL
 
 A persistent index writes every change to a write-ahead log (WAL). By default
