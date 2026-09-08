@@ -139,6 +139,18 @@ pub struct EngineStats {
     /// Per-field vector statistics, keyed by field name.
     /// Empty when the schema contains no vector fields.
     pub vector_fields: HashMap<String, crate::vector::index::field::VectorFieldStats>,
+    /// Monotonically increasing counter, persisted across restarts, that
+    /// advances by 1 on every [`Engine::commit`] that actually applied a
+    /// document (put/add/delete) since the previous one (Issue #1088).
+    ///
+    /// Lets a separate process/instance reopening this same storage detect
+    /// "something changed since I last checked" in O(1), instead of
+    /// hashing the whole store directory on a timer. Does **not** reflect
+    /// [`Engine::update_field`] schema changes (those have no ingest to
+    /// compare against) — a `CommitPolicy::Interval` tick with nothing new
+    /// to apply also leaves it unchanged, so idle auto-commits don't make
+    /// this look like a false positive.
+    pub commit_generation: u64,
 }
 
 /// Summary of a shared PQ codebook produced by
@@ -252,6 +264,7 @@ async fn run_commit_ladder(
     log: &DocumentLog,
     docs_since_commit: &AtomicU64,
     applied_seq: &AtomicU64,
+    commit_generation: &CommitGenerationTracker,
 ) -> Result<()> {
     // Snapshot the ingest high-water mark BEFORE any store materializes
     // (Issue #876). `applied_seq` is advanced only after a document has landed
@@ -283,7 +296,98 @@ async fn run_commit_ladder(
     // Reset the auto-commit counter so a manual commit and an `EveryDocs`
     // auto-commit keep the same cadence going forward (#890).
     docs_since_commit.store(0, Ordering::Release);
+
+    // Issue #1088: advance (and persist) the commit generation ONLY when
+    // something was actually applied (put/add/delete) since the previous
+    // commit -- `applied_before` is the ingest high-water mark snapshotted
+    // above, and every mutation path (`index_internal`,
+    // `delete_documents_internal`, and `recover()`'s replay) advances
+    // `applied_seq` via `fetch_max` before this ladder runs. Comparing
+    // against the last commit's snapshot is what keeps an idle
+    // `CommitPolicy::Interval` tick (which runs this same ladder
+    // unconditionally on a timer) from making external readers see a
+    // false "something changed" signal on every tick.
+    commit_generation.advance_if_changed(applied_before)?;
+
     Ok(())
+}
+
+/// Storage-root file name for the persisted commit generation counter
+/// (Issue #1088). Lives alongside `schema.toml`, outside any
+/// `PrefixedStorage` sub-namespace, since it represents the whole engine.
+const COMMIT_GENERATION_FILE: &str = "commit_generation.json";
+
+/// On-disk payload for [`COMMIT_GENERATION_FILE`], written/read via
+/// [`crate::storage::manifest::save_checksummed_json`]/`load_checksummed_json`
+/// -- the same crash-atomic, checksummed framing every other small control
+/// file in laurus uses (Issue #1022).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct CommitGenerationFile {
+    generation: u64,
+}
+
+/// Tracks and persists the cross-process commit generation counter (Issue
+/// #1088), grouped into one struct so it can be threaded through
+/// [`run_commit_ladder`]/[`CommitTimer::spawn`] as a single parameter
+/// instead of three (storage root, counter, last-seen `applied_seq`).
+#[derive(Clone)]
+struct CommitGenerationTracker {
+    /// Bare root storage (outside any `PrefixedStorage` namespace) that
+    /// `commit_generation.json` lives in, alongside `schema.toml`.
+    root_storage: Arc<dyn Storage>,
+    /// In-memory cache of the persisted counter, seeded from
+    /// `commit_generation.json` at build time; read back by
+    /// [`Engine::stats`].
+    generation: Arc<AtomicU64>,
+    /// Snapshot of `applied_seq` as of the last commit, purely in-memory.
+    /// See [`Self::advance_if_changed`].
+    last_applied_seq: Arc<AtomicU64>,
+}
+
+impl CommitGenerationTracker {
+    /// Load the persisted generation from `commit_generation.json` under
+    /// `root_storage` (or start at 0 if it doesn't exist yet).
+    fn load(root_storage: Arc<dyn Storage>) -> Result<Self> {
+        let generation = crate::storage::manifest::load_checksummed_json::<CommitGenerationFile>(
+            root_storage.as_ref(),
+            COMMIT_GENERATION_FILE,
+            None,
+        )?
+        .map(|(value, _format)| value.generation)
+        .unwrap_or_default();
+        Ok(Self {
+            root_storage,
+            generation: Arc::new(AtomicU64::new(generation)),
+            last_applied_seq: Arc::new(AtomicU64::new(0)),
+        })
+    }
+
+    /// Advance and persist the generation IF `applied_before` (the
+    /// commit ladder's ingest high-water mark snapshot) shows something
+    /// was applied since the last commit; a no-op (no I/O at all)
+    /// otherwise -- the gate that keeps an idle `CommitPolicy::Interval`
+    /// tick from advancing it for no reason.
+    fn advance_if_changed(&self, applied_before: u64) -> Result<()> {
+        if applied_before > self.last_applied_seq.load(Ordering::Acquire) {
+            let new_generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+            crate::storage::manifest::save_checksummed_json(
+                self.root_storage.as_ref(),
+                COMMIT_GENERATION_FILE,
+                None,
+                &CommitGenerationFile {
+                    generation: new_generation,
+                },
+            )?;
+            self.last_applied_seq
+                .store(applied_before, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    /// The current generation, for [`Engine::stats`].
+    fn current(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
 }
 
 /// Background timer that runs the full commit ladder at least every interval for
@@ -326,6 +430,7 @@ impl CommitTimer {
         log: Arc<DocumentLog>,
         docs_since_commit: Arc<AtomicU64>,
         applied_seq: Arc<AtomicU64>,
+        commit_generation: CommitGenerationTracker,
         interval: Duration,
     ) -> Result<Self> {
         use std::sync::mpsc::RecvTimeoutError;
@@ -366,6 +471,7 @@ impl CommitTimer {
                             &log,
                             &docs_since_commit,
                             &applied_seq,
+                            &commit_generation,
                         ))
                     }));
                     match outcome {
@@ -502,6 +608,11 @@ pub struct Engine {
     /// alive; dropping the engine releases it (the concrete `StorageLock`
     /// types release themselves in their own `Drop` impl).
     _storage_lock: Option<Box<dyn crate::storage::StorageLock>>,
+    /// Persisted, cross-process commit generation counter (Issue #1088),
+    /// seeded from `commit_generation.json` at build time. Bumped and
+    /// re-persisted by [`run_commit_ladder`] whenever a commit actually
+    /// applied something new; read back by [`Self::stats`].
+    commit_generation: CommitGenerationTracker,
 }
 
 use crate::engine::search::{FusionAlgorithm, SearchResult};
@@ -1277,6 +1388,7 @@ impl Engine {
             &self.log,
             &self.docs_since_commit,
             &self.applied_seq,
+            &self.commit_generation,
         )
         .await
     }
@@ -1325,6 +1437,7 @@ impl Engine {
         Ok(EngineStats {
             document_count: live_count,
             vector_fields,
+            commit_generation: self.commit_generation.current(),
         })
     }
 
@@ -3155,6 +3268,12 @@ impl EngineBuilder {
         )
         .await?;
 
+        // Loaded while `self.storage` is still the bare root storage
+        // (Issue #1088): `commit_generation.json` lives here, alongside
+        // `schema.toml`, not inside any of the lexical/vector/document
+        // `PrefixedStorage` sub-namespaces below.
+        let commit_generation = CommitGenerationTracker::load(self.storage.clone())?;
+
         let lexical_storage = Arc::new(PrefixedStorage::new("lexical", self.storage.clone()));
         let vector_storage = Arc::new(PrefixedStorage::new("vector", self.storage.clone()));
         let document_storage: Arc<dyn Storage> =
@@ -3198,6 +3317,7 @@ impl EngineBuilder {
                 Arc::clone(&log),
                 Arc::clone(&docs_since_commit),
                 Arc::clone(&applied_seq),
+                commit_generation.clone(),
                 interval,
             )?),
             _ => None,
@@ -3225,6 +3345,7 @@ impl EngineBuilder {
             _commit_timer: commit_timer,
             schema_persist_hook: self.schema_persist_hook,
             _storage_lock: storage_lock,
+            commit_generation,
         };
 
         engine.recover().await?;
@@ -3279,6 +3400,103 @@ mod tests {
         assert!(
             second.is_ok(),
             "a fresh Engine build must succeed once the previous one's lock is released"
+        );
+    }
+
+    /// Issue #1088: `commit_generation` must advance by exactly 1 on a
+    /// commit that actually applied a document, and must NOT advance on a
+    /// commit that had nothing new to apply -- the scenario a
+    /// `CommitPolicy::Interval` idle tick produces, since it runs the same
+    /// ladder unconditionally on a timer.
+    #[tokio::test]
+    async fn commit_generation_advances_only_when_something_was_applied() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "title",
+                schema::FieldOption::Text(crate::lexical::core::field::TextOption::default()),
+            )
+            .build();
+        let engine = Engine::builder(storage, schema).build().await.unwrap();
+
+        assert_eq!(engine.stats().unwrap().commit_generation, 0);
+
+        engine
+            .add_document(
+                "doc1",
+                Document::builder().add_text("title", "hello").build(),
+            )
+            .await
+            .unwrap();
+        engine.commit().await.unwrap();
+        assert_eq!(
+            engine.stats().unwrap().commit_generation,
+            1,
+            "a commit that applied a document must advance the generation"
+        );
+
+        // No documents pending -- mirrors an idle CommitPolicy::Interval
+        // tick. Must be a complete no-op for the generation, called twice
+        // to also confirm it doesn't creep up from repeated no-op commits.
+        engine.commit().await.unwrap();
+        engine.commit().await.unwrap();
+        assert_eq!(
+            engine.stats().unwrap().commit_generation,
+            1,
+            "a commit with nothing new to apply must not advance the generation"
+        );
+
+        engine
+            .add_document(
+                "doc2",
+                Document::builder().add_text("title", "world").build(),
+            )
+            .await
+            .unwrap();
+        engine.commit().await.unwrap();
+        assert_eq!(
+            engine.stats().unwrap().commit_generation,
+            2,
+            "a second commit that applied a document must advance the generation again"
+        );
+    }
+
+    /// Issue #1088: the commit generation must be readable by a fresh
+    /// `Engine` built over the same storage -- e.g. a separate process
+    /// reopening the same index directory -- not just reflect an
+    /// in-memory counter reset to 0 on every build.
+    #[tokio::test]
+    async fn commit_generation_persists_across_engine_rebuild() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field(
+                "title",
+                schema::FieldOption::Text(crate::lexical::core::field::TextOption::default()),
+            )
+            .build();
+
+        {
+            let engine = Engine::builder(storage.clone(), schema.clone())
+                .build()
+                .await
+                .unwrap();
+            engine
+                .add_document(
+                    "doc1",
+                    Document::builder().add_text("title", "hello").build(),
+                )
+                .await
+                .unwrap();
+            engine.commit().await.unwrap();
+            assert_eq!(engine.stats().unwrap().commit_generation, 1);
+            // Dropped here, releasing the storage lock (Issue #1086).
+        }
+
+        let reopened = Engine::builder(storage, schema).build().await.unwrap();
+        assert_eq!(
+            reopened.stats().unwrap().commit_generation,
+            1,
+            "a fresh Engine over the same storage must see the persisted generation"
         );
     }
 

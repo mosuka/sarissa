@@ -606,6 +606,15 @@ impl PyIndex {
     /// Returns a dict with keys:
     ///   - `document_count` (int): total indexed documents.
     ///   - `vector_fields` (dict): per-field vector statistics.
+    ///   - `commit_generation` (int): monotonically increasing counter,
+    ///     persisted across restarts, that advances by 1 on every commit
+    ///     that actually applied a document (put/add/delete) since the
+    ///     previous one (Issue #1088). Lets a separate process/instance
+    ///     reopening this same index directory detect "something changed
+    ///     since I last checked" in O(1) instead of hashing the whole
+    ///     store directory on a timer. Does not reflect schema changes
+    ///     made via `update_field`, and does not advance on a commit with
+    ///     nothing new to apply (e.g. an idle auto-commit tick).
     pub fn stats(&self, py: Python) -> PyResult<Py<PyAny>> {
         let engine = self.engine.clone();
         let stats: EngineStats = self
@@ -622,6 +631,7 @@ impl PyIndex {
             vf.set_item(field, fd)?;
         }
         dict.set_item("vector_fields", vf)?;
+        dict.set_item("commit_generation", stats.commit_generation)?;
         Ok(dict.into_any().unbind())
     }
 
