@@ -4,12 +4,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::convert::{dict_to_document, document_to_dict};
-use crate::errors::{closed_err, index_dir_err, laurus_err};
+use crate::errors::{closed_err, index_dir_err, laurus_err, reload_requires_path_err};
 use crate::schema::PySchema;
 use crate::search::{PySearchResult, build_request_from_py, to_py_search_result};
 use laurus::{
-    CommitPolicy, DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Engine, EngineStats, Schema,
-    Storage, StorageConfig, StorageFactory, WalSyncPolicy,
+    CommitPolicy, DEFAULT_GROUP_MAX_BYTES, DEFAULT_GROUP_MAX_RECORDS, Embedder, Engine,
+    EngineStats, Schema, Storage, StorageConfig, StorageFactory, WalSyncPolicy,
 };
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -292,6 +292,27 @@ impl PyCommitPolicy {
 pub struct PyIndex {
     engine: Option<Arc<Engine>>,
     rt: Arc<tokio::runtime::Runtime>,
+    /// Directory path this index was constructed with, retained so
+    /// [`Self::reload`] can reopen the same directory. `None` for an
+    /// in-memory index.
+    path: Option<String>,
+    /// Durability policy this index was constructed with, retained so a
+    /// [`Self::reload`] doesn't silently reset it back to the default.
+    wal_sync_policy: Option<PyWalSyncPolicy>,
+    /// Auto-commit policy this index was constructed with, retained for the
+    /// same reason as `wal_sync_policy`.
+    commit_policy: Option<PyCommitPolicy>,
+    /// Schema of the most recently built `Engine` (construction or
+    /// `reload`), used to decide whether [`Self::reload`] can reuse
+    /// `last_embedder` instead of rebuilding the embedder(s) from scratch.
+    last_schema: Option<Schema>,
+    /// Embedder of the most recently built `Engine`, reused by
+    /// [`Self::reload`] when `last_schema` matches the freshly-read schema.
+    last_embedder: Option<Arc<dyn Embedder>>,
+    /// Commit generation of the most recently built `Engine`, used as the
+    /// baseline [`Self::reload`] compares against to report whether
+    /// anything actually changed.
+    last_generation: u64,
 }
 
 #[pymethods]
@@ -341,10 +362,10 @@ impl PyIndex {
         let rt =
             tokio::runtime::Runtime::new().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
-        let schema = schema.map(|s| s.inner.clone());
-        let (schema, storage) = resolve_storage_and_schema(path.as_deref(), schema)?;
+        let schema_arg = schema.map(|s| s.inner.clone());
+        let (schema_arg, storage) = resolve_storage_and_schema(path.as_deref(), schema_arg)?;
 
-        let mut builder = Engine::builder(storage, schema);
+        let mut builder = Engine::builder(storage, schema_arg);
         if let Some(p) = wal_sync_policy {
             builder = builder.wal_sync_policy(p.inner);
         }
@@ -355,8 +376,14 @@ impl PyIndex {
         let engine = rt.block_on(builder.build()).map_err(laurus_err)?;
 
         Ok(Self {
+            last_schema: Some(engine.schema()),
+            last_embedder: Some(engine.embedder()),
+            last_generation: engine.commit_generation(),
             engine: Some(Arc::new(engine)),
             rt: Arc::new(rt),
+            path,
+            wal_sync_policy: wal_sync_policy.cloned(),
+            commit_policy: commit_policy.cloned(),
         })
     }
 
@@ -365,9 +392,129 @@ impl PyIndex {
     /// CPython's garbage collector.
     ///
     /// Idempotent: calling `close()` more than once is a no-op. Every other
-    /// method raises `RuntimeError` after `close()` has been called.
+    /// method raises `RuntimeError` after `close()` has been called --
+    /// **except** [`Self::reload`], which is documented to work after
+    /// `close()` too.
     pub fn close(&mut self) {
         self.engine = None;
+    }
+
+    /// Rebuild this index's `Engine` from the directory it was constructed
+    /// with, picking up any changes committed by another process since it
+    /// was last (re)opened -- without paying the cost of reconstructing the
+    /// embedding model(s) when the schema's embedding configuration hasn't
+    /// changed.
+    ///
+    /// Unlike every other method, `reload()` works whether this `Index` is
+    /// currently open **or already `close()`d** -- it reopens the same
+    /// directory either way. This is deliberate: it lets a caller hold onto
+    /// one `Index` object across a full reload cycle instead of having to
+    /// construct a new one and swap references, and it means "another
+    /// process wrote while I wasn't looking" is exactly what `close()` then
+    /// `reload()` naturally expresses.
+    ///
+    /// # Why the storage lock isn't held continuously across the swap
+    ///
+    /// Issue #1086's directory lock is a single, process-agnostic exclusive
+    /// lock: while it is held, no other `Engine` -- in this process or any
+    /// other -- can be built over the same directory. Holding it
+    /// continuously across every `reload()` call would therefore be
+    /// self-defeating: an external writer could never acquire it in the
+    /// first place, so there would be nothing for `reload()` to ever pick
+    /// up. `reload()` instead releases the lock and immediately reacquires
+    /// it while rebuilding, back to back within this one call. This is safe
+    /// from same-process races: this crate never calls `py.allow_threads`,
+    /// so the GIL already serializes every `Index` method call -- no other
+    /// Python thread can be mid-call on this object while `reload()` runs.
+    ///
+    /// # Embedder reuse
+    ///
+    /// If the freshly-read schema is identical to the schema of the
+    /// previously-built engine, the already-loaded embedder(s) are reused
+    /// as-is instead of being reconstructed (which, for `CandleBertEmbedder`
+    /// et al., means skipping a fresh HF-cache lookup, safetensors mmap, and
+    /// tokenizer load). This comparison is on the *whole* schema, not just
+    /// the embedding-relevant subset, so an unrelated schema change (e.g. a
+    /// new non-vector field) forfeits this optimization even though it
+    /// didn't strictly need to -- a deliberate simplification.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` if this index has no directory (was constructed
+    /// with `path=None`). Raises the usual construction errors if rebuilding
+    /// the engine fails; in that case this index is left `close()`d (the
+    /// old engine's lock was already released), but every cached value
+    /// needed for a retry (path, schema, embedder) is preserved, so calling
+    /// `reload()` again retries cleanly.
+    ///
+    /// Returns:
+    ///     `True` if the commit generation advanced (something was actually
+    ///     picked up), `False` if the index was already up to date.
+    pub fn reload(&mut self) -> PyResult<bool> {
+        let path = self.path.clone().ok_or_else(reload_requires_path_err)?;
+
+        // Read the generation off the *live* engine, if there is one, not
+        // the `last_generation` cache: a commit made through this same
+        // `Index` since it was last (re)opened already advanced the live
+        // engine's generation without updating the cache (only `new`/
+        // `reload` do that), so comparing against the cache here would
+        // wrongly report changes the caller already knows about via their
+        // own `commit()` call. Falls back to the cache when already
+        // `close()`d, since there's no live engine to read at that point.
+        let baseline_generation = self
+            .engine
+            .as_ref()
+            .map_or(self.last_generation, |engine| engine.commit_generation());
+
+        // Release the current engine's storage lock deterministically
+        // before rebuilding -- see the doc comment above for why this
+        // cannot instead hold the lock across the whole call.
+        self.engine = None;
+
+        let (new_schema, storage) =
+            laurus::index_dir::open_or_create(Path::new(&path), None).map_err(index_dir_err)?;
+
+        let reuse_embedder = self
+            .last_schema
+            .as_ref()
+            .is_some_and(|old_schema| schemas_match_for_embedder_reuse(old_schema, &new_schema));
+
+        let mut builder = Engine::builder(storage, new_schema);
+        if reuse_embedder && let Some(embedder) = &self.last_embedder {
+            builder = builder.embedder(embedder.clone());
+        }
+        if let Some(policy) = &self.wal_sync_policy {
+            builder = builder.wal_sync_policy(policy.inner);
+        }
+        if let Some(policy) = &self.commit_policy {
+            builder = builder.commit_policy(policy.inner);
+        }
+
+        let engine = self.rt.block_on(builder.build()).map_err(laurus_err)?;
+
+        let changed = engine.commit_generation() != baseline_generation;
+        self.last_schema = Some(engine.schema());
+        self.last_embedder = Some(engine.embedder());
+        self.last_generation = engine.commit_generation();
+        self.engine = Some(Arc::new(engine));
+        Ok(changed)
+    }
+
+    /// Return the current commit generation (Issue #1088) in O(1).
+    ///
+    /// A monotonically increasing counter, persisted across restarts, that
+    /// advances by 1 on every commit that actually applied a document
+    /// (put/add/delete) since the previous one. Unlike reading
+    /// `commit_generation` through [`Self::stats`], this does not scan any
+    /// vector fields, so it's cheap to call as often as needed.
+    ///
+    /// This is a snapshot held in memory by the currently-loaded `Engine`,
+    /// not re-read from disk on every call: it only reflects commits made
+    /// through *this* `Index` object (confirming that [`Self::reload`] or
+    /// your own `commit()` actually advanced the state), not commits made
+    /// by another process. Only [`Self::reload`] can pick those up.
+    pub fn commit_generation(&self) -> PyResult<u64> {
+        Ok(self.engine()?.commit_generation())
     }
 
     // ── Document CRUD ─────────────────────────────────────────────────────
@@ -709,5 +856,43 @@ fn resolve_storage_and_schema(
             Ok((schema.unwrap_or_default(), storage))
         }
         Some(p) => laurus::index_dir::open_or_create(Path::new(p), schema).map_err(index_dir_err),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reload helper
+// ---------------------------------------------------------------------------
+
+/// Decide whether [`PyIndex::reload`] can reuse the previously-built
+/// embedder instead of reconstructing it from `new_schema`.
+///
+/// Deliberately compares the *whole* schema (via `Serialize`, since `Schema`
+/// has no `PartialEq`) rather than just the embedding-relevant subset: an
+/// unrelated schema change (e.g. a new non-vector field) forfeits the reuse
+/// optimization even though it didn't strictly need to, but this avoids
+/// having to reason about `PerFieldEmbedder`'s field-to-embedder-name
+/// routing across a partial schema diff.
+fn schemas_match_for_embedder_reuse(old_schema: &Schema, new_schema: &Schema) -> bool {
+    serde_json::to_value(old_schema).ok() == serde_json::to_value(new_schema).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schemas_match_for_embedder_reuse_true_when_identical() {
+        let schema = Schema::default();
+        assert!(schemas_match_for_embedder_reuse(&schema, &schema.clone()));
+    }
+
+    #[test]
+    fn schemas_match_for_embedder_reuse_false_when_a_field_is_added() {
+        let old_schema = Schema::default();
+        let new_schema = Schema::builder()
+            .add_text_field("title", laurus::lexical::core::field::TextOption::default())
+            .build();
+
+        assert!(!schemas_match_for_embedder_reuse(&old_schema, &new_schema));
     }
 }

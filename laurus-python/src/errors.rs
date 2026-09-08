@@ -13,6 +13,14 @@ pub fn closed_err() -> PyErr {
     PyRuntimeError::new_err("Index is closed")
 }
 
+/// Error returned by [`crate::index::PyIndex::reload`] when called on an
+/// in-memory index (Issue #1089): there is no directory to reopen against.
+pub fn reload_requires_path_err() -> PyErr {
+    PyValueError::new_err(
+        "reload() requires a file-backed index (this Index was created without a path)",
+    )
+}
+
 /// Convert a [`LaurusError`] into a Python exception.
 pub fn laurus_err(err: LaurusError) -> PyErr {
     match err {

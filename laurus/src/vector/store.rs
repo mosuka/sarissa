@@ -881,14 +881,21 @@ impl VectorStore {
         let mut fields = std::collections::HashMap::new();
         if let Ok(field_names) = reader.field_names() {
             for name in field_names {
-                let vectors = reader.get_vectors_by_field(&name).unwrap_or_default();
-                let vector_count = vectors.len();
-                // Derive dimension from actual vectors when present (exact
-                // ground truth); otherwise this field's own configured
+                // Issue #1089: `doc_ids_for_field` is an O(1)-ish lookup
+                // into a pre-built per-field index for every concrete reader
+                // that matters here (multi-field/HNSW/IVF/flat), unlike
+                // `get_vectors_by_field`, which materializes and clones
+                // every vector in the field just to count them.
+                let doc_ids = reader.doc_ids_for_field(&name);
+                let vector_count = doc_ids.len();
+                // Derive dimension from one actual vector when present
+                // (exact ground truth, and only a single lookup rather than
+                // the whole field); otherwise this field's own configured
                 // dimension; otherwise the index-level dimension.
-                let dimension = vectors
+                let dimension = doc_ids
                     .first()
-                    .map(|(_, v)| v.data.len())
+                    .and_then(|&doc_id| reader.get_vector(doc_id, &name).ok().flatten())
+                    .map(|v| v.data.len())
                     .or_else(|| configured_dimensions.get(&name).copied())
                     .unwrap_or(index_dimension);
                 fields.insert(
