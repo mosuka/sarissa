@@ -493,6 +493,15 @@ pub struct Engine {
     /// Optional callback that persists the schema outside the engine's own
     /// storage (Issue #1078). See [`SchemaPersistHook`].
     schema_persist_hook: Option<SchemaPersistHook>,
+    /// Exclusive lock on the root storage directory (Issue #1086), held for
+    /// the engine's lifetime so a second `Engine` built over the same
+    /// storage — another process, or another instance in this one — is
+    /// rejected instead of silently corrupting data through unsynchronized
+    /// concurrent writes. `None` when the storage backend doesn't support
+    /// locking (see [`Storage::lock_manager`]). Held only to keep the lock
+    /// alive; dropping the engine releases it (the concrete `StorageLock`
+    /// types release themselves in their own `Drop` impl).
+    _storage_lock: Option<Box<dyn crate::storage::StorageLock>>,
 }
 
 use crate::engine::search::{FusionAlgorithm, SearchResult};
@@ -3114,6 +3123,30 @@ impl EngineBuilder {
     /// Returns an error if storage initialization, index creation, WAL
     /// opening, or recovery replay fails.
     pub async fn build(self) -> Result<Engine> {
+        // Acquire an exclusive lock on the root storage before doing
+        // anything else (Issue #1086): a second `Engine` built over the
+        // same storage -- another process, or another instance in this
+        // one -- must fail fast here instead of silently racing this
+        // one's writes. Must happen while `self.storage` is still the
+        // bare root storage, before it's wrapped into the
+        // lexical/vector/document `PrefixedStorage` namespaces below and
+        // before it's moved into `DocumentLog::with_sync_policy` further
+        // down.
+        let storage_lock = match self.storage.lock_manager() {
+            Some(lock_manager) => match lock_manager.try_acquire_lock("engine")? {
+                Some(lock) => Some(lock),
+                None => {
+                    return Err(crate::error::LaurusError::storage(
+                        "Index directory is already locked by another Engine \
+                         instance (in this process or another process). If \
+                         the previous session did not shut down cleanly, \
+                         remove the stale lock file manually.",
+                    ));
+                }
+            },
+            None => None, // This storage backend doesn't support locking.
+        };
+
         let (lexical_config, vector_config) = Engine::split_schema(
             &self.schema,
             self.analyzer,
@@ -3191,6 +3224,7 @@ impl EngineBuilder {
             #[cfg(not(target_arch = "wasm32"))]
             _commit_timer: commit_timer,
             schema_persist_hook: self.schema_persist_hook,
+            _storage_lock: storage_lock,
         };
 
         engine.recover().await?;
@@ -3205,6 +3239,48 @@ mod tests {
     use crate::embedding::per_field::PerFieldEmbedder;
     use crate::embedding::precomputed::PrecomputedEmbedder;
     use crate::storage::memory::MemoryStorage;
+
+    /// Issue #1086: a second `Engine` built over the same storage (the
+    /// realistic in-process analogue of two processes opening the same
+    /// index directory) must be rejected, not silently allowed to race
+    /// the first one's writes.
+    #[tokio::test]
+    async fn build_rejects_a_second_engine_over_the_same_storage() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+
+        let _first = Engine::builder(storage.clone(), Schema::new())
+            .build()
+            .await
+            .unwrap();
+
+        let second = Engine::builder(storage, Schema::new()).build().await;
+        assert!(
+            second.is_err(),
+            "a second Engine over the same storage must be rejected while the first is alive"
+        );
+    }
+
+    /// Companion to the above: once the first `Engine` is dropped, its
+    /// lock releases automatically (Issue #1086's `Drop for
+    /// FileLockWrapper`/`MemoryLockWrapper`), so a fresh `Engine` build
+    /// over the same storage -- e.g. a CLI's `open_index` called again in
+    /// a later, separate call -- succeeds.
+    #[tokio::test]
+    async fn build_succeeds_again_after_the_first_engine_is_dropped() {
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+
+        let first = Engine::builder(storage.clone(), Schema::new())
+            .build()
+            .await
+            .unwrap();
+        drop(first);
+
+        let second = Engine::builder(storage, Schema::new()).build().await;
+        assert!(
+            second.is_ok(),
+            "a fresh Engine build must succeed once the previous one's lock is released"
+        );
+    }
 
     #[tokio::test]
     async fn test_accepts_per_field_analyzer() {

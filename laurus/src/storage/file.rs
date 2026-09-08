@@ -715,6 +715,10 @@ impl Storage for FileStorage {
         self.lock_manager.release_all()?;
         Ok(())
     }
+
+    fn lock_manager(&self) -> Option<Arc<dyn LockManager>> {
+        Some(self.lock_manager.clone())
+    }
 }
 
 /// A file input implementation.
@@ -1038,7 +1042,11 @@ impl LockManager for FileLockManager {
             locks.insert(name.to_string(), lock.clone());
         }
 
-        Ok(Box::new(FileLockWrapper { lock }))
+        Ok(Box::new(FileLockWrapper {
+            lock,
+            name: name.to_string(),
+            manager_locks: self.locks.clone(),
+        }))
     }
 
     fn try_acquire_lock(&self, name: &str) -> Result<Option<Box<dyn StorageLock>>> {
@@ -1106,6 +1114,12 @@ impl FileLock {
 #[derive(Debug)]
 struct FileLockWrapper {
     lock: Arc<Mutex<FileLock>>,
+    /// This lock's name, and a handle to the owning [`FileLockManager`]'s
+    /// `locks` map, so `release()` can remove its own entry (Issue #1086)
+    /// instead of leaving [`LockManager::lock_exists`] reporting `true`
+    /// for a lock nothing holds any more.
+    name: String,
+    manager_locks: Arc<Mutex<HashMap<String, Arc<Mutex<FileLock>>>>>,
 }
 
 impl StorageLock for FileLockWrapper {
@@ -1118,13 +1132,32 @@ impl StorageLock for FileLockWrapper {
     }
 
     fn release(&mut self) -> Result<()> {
-        let mut lock = self.lock.lock().unwrap();
-        lock.release()
+        let result = {
+            let mut lock = self.lock.lock().unwrap();
+            lock.release()
+        };
+        // Drop the manager's bookkeeping entry regardless of whether the
+        // filesystem removal succeeded -- once the caller has asked to
+        // release, `lock_exists` must stop claiming this name is held.
+        self.manager_locks.lock().unwrap().remove(&self.name);
+        result
     }
 
     fn is_valid(&self) -> bool {
         let lock = self.lock.lock().unwrap();
         !lock.released
+    }
+}
+
+impl Drop for FileLockWrapper {
+    /// Releases the lock automatically once every handle holding it is
+    /// dropped (Issue #1086), e.g. when the `Engine` field storing it goes
+    /// out of scope. Mirrors `MemoryOutput`'s "best-effort cleanup on
+    /// drop" pattern elsewhere in this module -- a failure here (e.g. the
+    /// lock file was already removed out of band) has nowhere to
+    /// propagate to.
+    fn drop(&mut self) {
+        let _ = self.release();
     }
 }
 
@@ -1145,6 +1178,78 @@ mod tests {
     fn test_file_storage_creation() {
         let (_temp_dir, storage) = create_test_storage();
         assert!(!storage.closed);
+    }
+
+    /// Issue #1086: `Storage::lock_manager()` must actually be wired to
+    /// `FileStorage`'s lock manager, not just return `None` (the trait
+    /// default every other implementor keeps).
+    #[test]
+    fn lock_manager_returns_the_file_lock_manager() {
+        let (_temp_dir, storage) = create_test_storage();
+        assert!(
+            storage.lock_manager().is_some(),
+            "FileStorage must override the Storage::lock_manager() default"
+        );
+    }
+
+    /// Two independent lock managers over the SAME directory (simulating
+    /// two `FileStorage` instances -- i.e. two processes, or two `Engine`s
+    /// in this one -- opening the same index) must not both succeed in
+    /// acquiring the same lock name.
+    #[test]
+    fn try_acquire_lock_rejects_a_second_holder_over_the_same_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let first = FileLockManager::new(temp_dir.path().to_path_buf());
+        let second = FileLockManager::new(temp_dir.path().to_path_buf());
+
+        let first_lock = first.try_acquire_lock("engine").unwrap();
+        assert!(first_lock.is_some(), "the first holder must succeed");
+
+        let second_lock = second.try_acquire_lock("engine").unwrap();
+        assert!(
+            second_lock.is_none(),
+            "a second holder over the same directory must be rejected, not silently succeed"
+        );
+    }
+
+    /// Once the first holder's lock is dropped, a fresh acquisition attempt
+    /// (as a fresh `FileStorage`/process reopening the same directory
+    /// would make) must succeed -- the lock releases itself automatically
+    /// (Issue #1086's `Drop for FileLockWrapper`), it isn't stuck until an
+    /// explicit `release()` call nobody makes.
+    #[test]
+    fn dropping_the_lock_lets_a_fresh_acquisition_succeed() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = FileLockManager::new(temp_dir.path().to_path_buf());
+
+        let first_lock = manager.try_acquire_lock("engine").unwrap();
+        assert!(first_lock.is_some());
+        drop(first_lock);
+
+        let second_lock = manager.try_acquire_lock("engine").unwrap();
+        assert!(
+            second_lock.is_some(),
+            "dropping the first lock must release it so a fresh acquisition succeeds"
+        );
+    }
+
+    /// Releasing a lock (whether via an explicit `release()` call or via
+    /// `Drop`) must clear the manager's own bookkeeping, not just remove
+    /// the on-disk file -- otherwise `lock_exists()` would keep reporting
+    /// `true` for a name nothing holds any more.
+    #[test]
+    fn release_clears_lock_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = FileLockManager::new(temp_dir.path().to_path_buf());
+
+        let mut lock = manager.acquire_lock("engine").unwrap();
+        assert!(manager.lock_exists("engine"));
+
+        lock.release().unwrap();
+        assert!(
+            !manager.lock_exists("engine"),
+            "release() must clear the manager's bookkeeping for this name"
+        );
     }
 
     /// Construct a `FileOutput` directly (bypassing the `Storage` trait) so

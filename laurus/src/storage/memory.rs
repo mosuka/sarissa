@@ -359,6 +359,10 @@ impl Storage for MemoryStorage {
         self.lock_manager.release_all()?;
         Ok(())
     }
+
+    fn lock_manager(&self) -> Option<Arc<dyn LockManager>> {
+        Some(self.lock_manager.clone())
+    }
 }
 
 /// A read handle backed by an in-memory byte buffer.
@@ -669,7 +673,11 @@ impl LockManager for MemoryLockManager {
         let lock = Arc::new(Mutex::new(MemoryLock::new(name.to_string())));
         locks.insert(name.to_string(), lock.clone());
 
-        Ok(Box::new(MemoryLockWrapper { lock }))
+        Ok(Box::new(MemoryLockWrapper {
+            lock,
+            name: name.to_string(),
+            manager_locks: self.locks.clone(),
+        }))
     }
 
     fn try_acquire_lock(&self, name: &str) -> Result<Option<Box<dyn StorageLock>>> {
@@ -719,6 +727,13 @@ impl MemoryLock {
 #[derive(Debug)]
 struct MemoryLockWrapper {
     lock: Arc<Mutex<MemoryLock>>,
+    /// This lock's name, and a handle to the owning [`MemoryLockManager`]'s
+    /// `locks` map, so `release()` can remove its own entry (Issue #1086).
+    /// Without this, a name could never be re-acquired after a proper
+    /// `release()` -- `acquire_lock` only checks map membership, and
+    /// nothing but `release_all()`'s full clear used to remove an entry.
+    name: String,
+    manager_locks: Arc<Mutex<HashMap<String, Arc<Mutex<MemoryLock>>>>>,
 }
 
 impl StorageLock for MemoryLockWrapper {
@@ -731,14 +746,27 @@ impl StorageLock for MemoryLockWrapper {
     }
 
     fn release(&mut self) -> Result<()> {
-        let mut lock = self.lock.lock().unwrap();
-        lock.released = true;
+        {
+            let mut lock = self.lock.lock().unwrap();
+            lock.released = true;
+        }
+        self.manager_locks.lock().unwrap().remove(&self.name);
         Ok(())
     }
 
     fn is_valid(&self) -> bool {
         let lock = self.lock.lock().unwrap();
         !lock.released
+    }
+}
+
+impl Drop for MemoryLockWrapper {
+    /// Releases the lock automatically once every handle holding it is
+    /// dropped (Issue #1086), mirroring `FileLockWrapper`'s Drop impl and
+    /// the existing `_wal_flush_timer`/`_commit_timer` "held only for its
+    /// Drop side effect" pattern in `Engine`.
+    fn drop(&mut self) {
+        let _ = self.release();
     }
 }
 
@@ -752,6 +780,75 @@ mod tests {
         let storage = MemoryStorage::default();
         assert_eq!(storage.file_count(), 0);
         assert_eq!(storage.total_size(), 0);
+    }
+
+    /// Issue #1086: `Storage::lock_manager()` must actually be wired to
+    /// `MemoryStorage`'s lock manager, not just return `None` (the trait
+    /// default every other implementor keeps).
+    #[test]
+    fn lock_manager_returns_the_memory_lock_manager() {
+        let storage = MemoryStorage::default();
+        assert!(
+            storage.lock_manager().is_some(),
+            "MemoryStorage must override the Storage::lock_manager() default"
+        );
+    }
+
+    /// Two `Engine`s sharing the SAME `Arc<dyn Storage>` (the realistic
+    /// in-process analogue of two processes opening the same directory)
+    /// must not both succeed in acquiring the same lock name.
+    #[test]
+    fn try_acquire_lock_rejects_a_second_holder_over_the_same_manager() {
+        let manager = MemoryLockManager::new();
+
+        let first_lock = manager.try_acquire_lock("engine").unwrap();
+        assert!(first_lock.is_some(), "the first holder must succeed");
+
+        let second_lock = manager.try_acquire_lock("engine").unwrap();
+        assert!(
+            second_lock.is_none(),
+            "a second holder over the same manager must be rejected, not silently succeed"
+        );
+    }
+
+    /// Issue #1086 bug fix: before this fix, `acquire_lock` only checked
+    /// map membership and `release()` never removed the manager's entry
+    /// (only `release_all()`'s full clear did), so a name could never be
+    /// re-acquired after a proper release -- even though nothing was
+    /// actually holding it any more. This is the direct regression test:
+    /// dropping the lock (the normal path when an `Engine` goes out of
+    /// scope) must let a fresh acquisition of the SAME name succeed.
+    #[test]
+    fn dropping_the_lock_lets_a_fresh_acquisition_succeed() {
+        let manager = MemoryLockManager::new();
+
+        let first_lock = manager.try_acquire_lock("engine").unwrap();
+        assert!(first_lock.is_some());
+        drop(first_lock);
+
+        let second_lock = manager.try_acquire_lock("engine").unwrap();
+        assert!(
+            second_lock.is_some(),
+            "dropping the first lock must release it so a fresh acquisition succeeds"
+        );
+    }
+
+    /// Releasing a lock (whether via an explicit `release()` call or via
+    /// `Drop`) must clear the manager's own bookkeeping -- otherwise
+    /// `lock_exists()` would keep reporting `true` for a name nothing
+    /// holds any more.
+    #[test]
+    fn release_clears_lock_exists() {
+        let manager = MemoryLockManager::new();
+
+        let mut lock = manager.acquire_lock("engine").unwrap();
+        assert!(manager.lock_exists("engine"));
+
+        lock.release().unwrap();
+        assert!(
+            !manager.lock_exists("engine"),
+            "release() must clear the manager's bookkeeping for this name"
+        );
     }
 
     #[test]
