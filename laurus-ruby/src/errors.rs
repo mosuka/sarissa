@@ -3,6 +3,13 @@
 use laurus::LaurusError;
 use magnus::{Error, Ruby};
 
+/// Error returned by any `Index` method called after
+/// [`crate::index::RbIndex::close`] (Issue #1097).
+pub fn closed_err() -> Error {
+    let ruby = Ruby::get().expect("called from Ruby thread");
+    Error::new(ruby.exception_runtime_error(), "Index is closed")
+}
+
 /// Convert a [`LaurusError`] into a Ruby exception.
 ///
 /// # Mapping

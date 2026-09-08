@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::convert::{dict_to_document, document_to_dict};
-use crate::errors::{index_dir_err, laurus_err};
+use crate::errors::{closed_err, index_dir_err, laurus_err};
 use crate::schema::PySchema;
 use crate::search::{PySearchResult, build_request_from_py, to_py_search_result};
 use laurus::{
@@ -290,7 +290,7 @@ impl PyCommitPolicy {
 /// ```
 #[pyclass(name = "Index")]
 pub struct PyIndex {
-    engine: Arc<Engine>,
+    engine: Option<Arc<Engine>>,
     rt: Arc<tokio::runtime::Runtime>,
 }
 
@@ -355,9 +355,19 @@ impl PyIndex {
         let engine = rt.block_on(builder.build()).map_err(laurus_err)?;
 
         Ok(Self {
-            engine: Arc::new(engine),
+            engine: Some(Arc::new(engine)),
             rt: Arc::new(rt),
         })
+    }
+
+    /// Release this index's handle on the underlying engine, deterministically
+    /// dropping its storage lock (Issue #1086/#1097) instead of waiting on
+    /// CPython's garbage collector.
+    ///
+    /// Idempotent: calling `close()` more than once is a no-op. Every other
+    /// method raises `RuntimeError` after `close()` has been called.
+    pub fn close(&mut self) {
+        self.engine = None;
     }
 
     // ── Document CRUD ─────────────────────────────────────────────────────
@@ -371,7 +381,7 @@ impl PyIndex {
     /// Call [`commit`] to make the change visible to searches.
     pub fn put_document(&self, py: Python, id: &str, doc: &Bound<PyDict>) -> PyResult<()> {
         let document = dict_to_document(py, doc)?;
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let id = id.to_string();
         self.rt
             .block_on(engine.put_document(&id, document))
@@ -388,7 +398,7 @@ impl PyIndex {
     ///     doc: A `dict` mapping field names to values.
     pub fn add_document(&self, py: Python, id: &str, doc: &Bound<PyDict>) -> PyResult<()> {
         let document = dict_to_document(py, doc)?;
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let id = id.to_string();
         self.rt
             .block_on(engine.add_document(&id, document))
@@ -414,7 +424,7 @@ impl PyIndex {
         if batch.is_empty() {
             return Ok(());
         }
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.put_documents(batch))
             .map_err(laurus_err)
@@ -434,7 +444,7 @@ impl PyIndex {
         if batch.is_empty() {
             return Ok(());
         }
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.add_documents(batch))
             .map_err(laurus_err)
@@ -444,7 +454,7 @@ impl PyIndex {
     ///
     /// Returns a list of dicts, one per indexed version.
     pub fn get_documents(&self, py: Python, id: &str) -> PyResult<Vec<Py<PyAny>>> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let id = id.to_string();
         let docs = self
             .rt
@@ -457,7 +467,7 @@ impl PyIndex {
     ///
     /// Call [`commit`] to make the deletion visible to searches.
     pub fn delete_documents(&self, _py: Python, id: &str) -> PyResult<()> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let id = id.to_string();
         self.rt
             .block_on(engine.delete_documents(&id))
@@ -466,7 +476,7 @@ impl PyIndex {
 
     /// Flush buffered writes and make all pending changes searchable.
     pub fn commit(&self, _py: Python) -> PyResult<()> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt.block_on(engine.commit()).map_err(laurus_err)
     }
 
@@ -493,7 +503,7 @@ impl PyIndex {
     ///     An exception if the underlying WAL flush fails (for example, an I/O
     ///     error while fsync'ing).
     pub fn flush_wal(&self, _py: Python) -> PyResult<()> {
-        self.engine.flush_wal().map_err(laurus_err)
+        self.engine()?.flush_wal().map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -523,7 +533,7 @@ impl PyIndex {
     ) -> PyResult<Vec<PySearchResult>> {
         let request = build_request_from_py(py, query, limit, offset)?;
 
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let results = self
             .rt
             .block_on(engine.search(request))
@@ -582,7 +592,7 @@ impl PyIndex {
             return Ok(Vec::new());
         }
 
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let batch_results = self
             .rt
             .block_on(engine.search_batch(requests))
@@ -606,8 +616,17 @@ impl PyIndex {
     /// Returns a dict with keys:
     ///   - `document_count` (int): total indexed documents.
     ///   - `vector_fields` (dict): per-field vector statistics.
+    ///   - `commit_generation` (int): monotonically increasing counter,
+    ///     persisted across restarts, that advances by 1 on every commit
+    ///     that actually applied a document (put/add/delete) since the
+    ///     previous one (Issue #1088). Lets a separate process/instance
+    ///     reopening this same index directory detect "something changed
+    ///     since I last checked" in O(1) instead of hashing the whole
+    ///     store directory on a timer. Does not reflect schema changes
+    ///     made via `update_field`, and does not advance on a commit with
+    ///     nothing new to apply (e.g. an idle auto-commit tick).
     pub fn stats(&self, py: Python) -> PyResult<Py<PyAny>> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let stats: EngineStats = self
             .rt
             .block_on(async { engine.stats() })
@@ -622,11 +641,20 @@ impl PyIndex {
             vf.set_item(field, fd)?;
         }
         dict.set_item("vector_fields", vf)?;
+        dict.set_item("commit_generation", stats.commit_generation)?;
         Ok(dict.into_any().unbind())
     }
 
     fn __repr__(&self) -> String {
         "Index()".to_string()
+    }
+}
+
+impl PyIndex {
+    /// Return a clone of the underlying engine handle, or `RuntimeError` if
+    /// [`Self::close`] has already been called.
+    fn engine(&self) -> PyResult<Arc<Engine>> {
+        self.engine.clone().ok_or_else(closed_err)
     }
 }
 

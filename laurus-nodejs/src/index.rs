@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::commit::JsCommitPolicy;
 use crate::convert::{data_value_to_json, json_to_document};
-use crate::errors::{index_dir_err, laurus_err};
+use crate::errors::{closed_err, index_dir_err, laurus_err};
 use crate::query::{JsQuery, JsTermQuery, JsVectorQuery, JsVectorQueryInner, JsVectorTextQuery};
 use crate::schema::JsSchema;
 use crate::search::{
@@ -64,11 +64,17 @@ use serde_json::Value;
 /// ```
 #[napi(js_name = "Index")]
 pub struct JsIndex {
-    engine: Arc<Engine>,
+    engine: Option<Arc<Engine>>,
 }
 
 #[napi]
 impl JsIndex {
+    /// Borrow the underlying engine, or a clear "Index is closed" error
+    /// once [`Self::close`] has been called.
+    fn engine(&self) -> Result<&Arc<Engine>> {
+        self.engine.as_ref().ok_or_else(closed_err)
+    }
+
     /// Create a new index, or reopen an existing one.
     ///
     /// When `path` is given, the directory follows the same
@@ -128,8 +134,19 @@ impl JsIndex {
         let engine = builder.build().await.map_err(laurus_err)?;
 
         Ok(Self {
-            engine: Arc::new(engine),
+            engine: Some(Arc::new(engine)),
         })
+    }
+
+    /// Release this index's handle on the underlying engine, deterministically
+    /// dropping its storage lock (Issue #1086/#1097) instead of waiting on the
+    /// JS garbage collector's non-deterministic timing.
+    ///
+    /// Idempotent: calling `close()` more than once is a no-op. Every other
+    /// method throws after `close()` has been called.
+    #[napi]
+    pub fn close(&mut self) {
+        self.engine = None;
     }
 
     // ── Document CRUD ─────────────────────────────────────────────────────
@@ -145,7 +162,7 @@ impl JsIndex {
     #[napi]
     pub async fn put_document(&self, id: String, doc: Value) -> Result<()> {
         let document = json_to_document(&doc)?;
-        self.engine
+        self.engine()?
             .put_document(&id, document)
             .await
             .map_err(laurus_err)
@@ -163,7 +180,7 @@ impl JsIndex {
     #[napi]
     pub async fn add_document(&self, id: String, doc: Value) -> Result<()> {
         let document = json_to_document(&doc)?;
-        self.engine
+        self.engine()?
             .add_document(&id, document)
             .await
             .map_err(laurus_err)
@@ -187,7 +204,10 @@ impl JsIndex {
         if batch.is_empty() {
             return Ok(());
         }
-        self.engine.put_documents(batch).await.map_err(laurus_err)
+        self.engine()?
+            .put_documents(batch)
+            .await
+            .map_err(laurus_err)
     }
 
     /// Append many document versions in one call, without removing existing
@@ -206,7 +226,10 @@ impl JsIndex {
         if batch.is_empty() {
             return Ok(());
         }
-        self.engine.add_documents(batch).await.map_err(laurus_err)
+        self.engine()?
+            .add_documents(batch)
+            .await
+            .map_err(laurus_err)
     }
 
     /// Retrieve all document versions stored under `id`.
@@ -220,7 +243,11 @@ impl JsIndex {
     /// A list of document objects (one per indexed version).
     #[napi]
     pub async fn get_documents(&self, id: String) -> Result<Vec<Value>> {
-        let docs = self.engine.get_documents(&id).await.map_err(laurus_err)?;
+        let docs = self
+            .engine()?
+            .get_documents(&id)
+            .await
+            .map_err(laurus_err)?;
         Ok(docs
             .iter()
             .map(|doc| {
@@ -242,13 +269,16 @@ impl JsIndex {
     /// * `id` - External document identifier.
     #[napi]
     pub async fn delete_documents(&self, id: String) -> Result<()> {
-        self.engine.delete_documents(&id).await.map_err(laurus_err)
+        self.engine()?
+            .delete_documents(&id)
+            .await
+            .map_err(laurus_err)
     }
 
     /// Flush buffered writes and make all pending changes searchable.
     #[napi]
     pub async fn commit(&self) -> Result<()> {
-        self.engine.commit().await.map_err(laurus_err)
+        self.engine()?.commit().await.map_err(laurus_err)
     }
 
     /// Force the write-ahead log durable on demand.
@@ -268,7 +298,7 @@ impl JsIndex {
     /// Resolves once the WAL has been fsync'd, or rejects if the flush fails.
     #[napi]
     pub async fn flush_wal(&self) -> Result<()> {
-        self.engine.flush_wal().map_err(laurus_err)
+        self.engine()?.flush_wal().map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -296,7 +326,7 @@ impl JsIndex {
             limit.unwrap_or(10) as usize,
             offset.unwrap_or(0) as usize,
         );
-        let results = self.engine.search(request).await.map_err(laurus_err)?;
+        let results = self.engine()?.search(request).await.map_err(laurus_err)?;
         Ok(results.into_iter().map(to_js_search_result).collect())
     }
 
@@ -326,7 +356,7 @@ impl JsIndex {
             limit.unwrap_or(10) as usize,
             offset.unwrap_or(0) as usize,
         )?;
-        let results = self.engine.search(request).await.map_err(laurus_err)?;
+        let results = self.engine()?.search(request).await.map_err(laurus_err)?;
         Ok(results.into_iter().map(to_js_search_result).collect())
     }
 
@@ -359,7 +389,7 @@ impl JsIndex {
             limit.unwrap_or(10) as usize,
             offset.unwrap_or(0) as usize,
         );
-        let results = self.engine.search(request).await.map_err(laurus_err)?;
+        let results = self.engine()?.search(request).await.map_err(laurus_err)?;
         Ok(results.into_iter().map(to_js_search_result).collect())
     }
 
@@ -389,7 +419,7 @@ impl JsIndex {
             limit.unwrap_or(10) as usize,
             offset.unwrap_or(0) as usize,
         );
-        let results = self.engine.search(request).await.map_err(laurus_err)?;
+        let results = self.engine()?.search(request).await.map_err(laurus_err)?;
         Ok(results.into_iter().map(to_js_search_result).collect())
     }
 
@@ -408,7 +438,7 @@ impl JsIndex {
         request: &JsSearchRequest,
     ) -> Result<Vec<JsSearchResult>> {
         let req = request.build()?;
-        let results = self.engine.search(req).await.map_err(laurus_err)?;
+        let results = self.engine()?.search(req).await.map_err(laurus_err)?;
         Ok(results.into_iter().map(to_js_search_result).collect())
     }
 
@@ -451,7 +481,7 @@ impl JsIndex {
             .collect();
 
         let batch_results = self
-            .engine
+            .engine()?
             .search_batch(requests)
             .await
             .map_err(laurus_err)?;
@@ -478,7 +508,7 @@ impl JsIndex {
     ///   - `vectorFields` (object): per-field vector statistics with `count` and `dimension`.
     #[napi]
     pub fn stats(&self) -> Result<Value> {
-        let stats = self.engine.stats().map_err(laurus_err)?;
+        let stats = self.engine()?.stats().map_err(laurus_err)?;
         let mut vector_fields = serde_json::Map::new();
         for (field, field_stats) in &stats.vector_fields {
             vector_fields.insert(

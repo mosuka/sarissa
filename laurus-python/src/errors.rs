@@ -7,6 +7,12 @@ use laurus::LaurusError;
 use pyo3::PyErr;
 use pyo3::exceptions::{PyIOError, PyRuntimeError, PyValueError};
 
+/// Error returned by any `Index` method called after
+/// [`crate::index::PyIndex::close`] (Issue #1097).
+pub fn closed_err() -> PyErr {
+    PyRuntimeError::new_err("Index is closed")
+}
+
 /// Convert a [`LaurusError`] into a Python exception.
 pub fn laurus_err(err: LaurusError) -> PyErr {
     match err {

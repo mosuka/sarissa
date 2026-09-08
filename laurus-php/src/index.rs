@@ -1,5 +1,6 @@
 //! PHP-facing `Index` class — the primary entry point for the laurus binding.
 
+use std::cell::RefCell;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,7 +13,7 @@ use laurus::{
 };
 
 use crate::convert::{document_to_hashtable, hashtable_to_document};
-use crate::errors::{index_dir_err, laurus_err};
+use crate::errors::{closed_err, index_dir_err, laurus_err};
 use crate::schema::PhpSchema;
 use crate::search::{PhpSearchResult, build_request_from_php, to_php_search_result};
 
@@ -277,7 +278,7 @@ impl PhpCommitPolicy {
 #[php_class]
 #[php(name = "Laurus\\Index")]
 pub struct PhpIndex {
-    engine: Arc<Engine>,
+    engine: RefCell<Option<Arc<Engine>>>,
     rt: Arc<tokio::runtime::Runtime>,
 }
 
@@ -343,9 +344,19 @@ impl PhpIndex {
         let engine = rt.block_on(builder.build()).map_err(laurus_err)?;
 
         Ok(Self {
-            engine: Arc::new(engine),
+            engine: RefCell::new(Some(Arc::new(engine))),
             rt: Arc::new(rt),
         })
+    }
+
+    /// Release this index's handle on the underlying engine, deterministically
+    /// dropping its storage lock (Issue #1086/#1097) instead of waiting on
+    /// PHP's garbage collector's non-deterministic timing.
+    ///
+    /// Idempotent: calling `close()` more than once is a no-op. Every other
+    /// method throws after `close()` has been called.
+    pub fn close(&self) {
+        self.engine.borrow_mut().take();
     }
 
     // ── Document CRUD ─────────────────────────────────────────────────────
@@ -360,7 +371,7 @@ impl PhpIndex {
     /// * `doc` - An associative array mapping field names to values.
     pub fn put_document(&self, id: String, doc: &ZendHashTable) -> PhpResult<()> {
         let document = hashtable_to_document(doc)?;
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.put_document(&id, document))
             .map_err(laurus_err)
@@ -377,7 +388,7 @@ impl PhpIndex {
     /// * `doc` - An associative array mapping field names to values.
     pub fn add_document(&self, id: String, doc: &ZendHashTable) -> PhpResult<()> {
         let document = hashtable_to_document(doc)?;
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.add_document(&id, document))
             .map_err(laurus_err)
@@ -400,7 +411,7 @@ impl PhpIndex {
         if batch.is_empty() {
             return Ok(());
         }
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.put_documents(batch))
             .map_err(laurus_err)
@@ -421,7 +432,7 @@ impl PhpIndex {
         if batch.is_empty() {
             return Ok(());
         }
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.add_documents(batch))
             .map_err(laurus_err)
@@ -437,7 +448,7 @@ impl PhpIndex {
     ///
     /// An array of associative arrays, one per indexed version.
     pub fn get_documents(&self, id: String) -> PhpResult<Zval> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let docs = self
             .rt
             .block_on(engine.get_documents(&id))
@@ -463,7 +474,7 @@ impl PhpIndex {
     ///
     /// * `id` - External document identifier.
     pub fn delete_documents(&self, id: String) -> PhpResult<()> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt
             .block_on(engine.delete_documents(&id))
             .map_err(laurus_err)
@@ -471,7 +482,7 @@ impl PhpIndex {
 
     /// Flush buffered writes and make all pending changes searchable.
     pub fn commit(&self) -> PhpResult<()> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         self.rt.block_on(engine.commit()).map_err(laurus_err)
     }
 
@@ -496,7 +507,7 @@ impl PhpIndex {
     /// materializes the in-memory index state). Use `flushWal()` when you want
     /// the WAL durable but do not yet need the new documents to be searchable.
     pub fn flush_wal(&self) -> PhpResult<()> {
-        self.engine.flush_wal().map_err(laurus_err)
+        self.engine()?.flush_wal().map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -522,7 +533,7 @@ impl PhpIndex {
     pub fn search(&self, query: &Zval, limit: i64, offset: i64) -> PhpResult<Vec<PhpSearchResult>> {
         let request = build_request_from_php(query, limit as usize, offset as usize)?;
 
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let results = self
             .rt
             .block_on(engine.search(request))
@@ -580,7 +591,7 @@ impl PhpIndex {
             )?);
         }
 
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let batch_results = self
             .rt
             .block_on(engine.search_batch(requests))
@@ -607,7 +618,7 @@ impl PhpIndex {
     ///   - `"documentCount"` (int): total indexed documents.
     ///   - `"vectorFields"` (array): per-field vector statistics.
     pub fn stats(&self) -> PhpResult<Zval> {
-        let engine = self.engine.clone();
+        let engine = self.engine()?;
         let stats: EngineStats = self
             .rt
             .block_on(async { engine.stats() })
@@ -651,6 +662,14 @@ impl PhpIndex {
     /// Return a string representation.
     pub fn __to_string(&self) -> String {
         "Index()".to_string()
+    }
+}
+
+impl PhpIndex {
+    /// Return a clone of the underlying engine handle, or a `closed_err`
+    /// exception if [`Self::close`] has already been called.
+    fn engine(&self) -> Result<Arc<Engine>, PhpException> {
+        self.engine.borrow().clone().ok_or_else(closed_err)
     }
 }
 

@@ -78,6 +78,19 @@ omitted, since it's loaded from the persisted `schema.toml`):
 index = laurus.Index(path="./myindex")
 ```
 
+A file-based index holds an exclusive lock on its directory for as long as
+the `Index` object is alive, so a second `laurus.Index(path=...)` on the
+same path fails while the first is still open. Call `index.close()` when
+you are done with an index -- especially before reopening the same path --
+rather than relying on CPython's garbage collector, whose destruction
+timing is not guaranteed for every reference pattern (e.g. reference
+cycles). `close()` is idempotent; every other method raises after it has
+been called.
+
+```python
+index.close()
+```
+
 ## Durability / WAL
 
 A persistent index writes every change to a write-ahead log (WAL). By default
