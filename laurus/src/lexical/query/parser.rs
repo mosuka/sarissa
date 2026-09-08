@@ -8,6 +8,7 @@
 //! - Bare terms that the analyzer splits into several tokens are OR'd
 //!   (`BooleanQuery` with `Should` clauses), matching Lucene's `match`
 //!   query. Use quotes for phrase semantics.
+//! - Terms removed entirely by analysis match no documents in that field.
 //! - Proximity search: `"hello world"~10`
 //! - Fuzzy search: `roam~2`
 //! - Range queries: `[100 TO 500]`, `{A TO Z}`
@@ -787,7 +788,11 @@ impl LexicalQueryParser {
             let terms = self.analyze_term(Some(field_name), &term)?;
 
             if terms.is_empty() {
-                return Err(LaurusError::parse("No terms after analysis".to_string()));
+                // An empty phrase already matches nothing and retains the field
+                // reference for schema validation, unlike an empty BooleanQuery.
+                return Ok(Box::new(
+                    PhraseQuery::new(field_name, terms).with_boost(boost),
+                ));
             }
 
             if terms.len() == 1 {
