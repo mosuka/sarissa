@@ -555,6 +555,25 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # }
     /// ```
     fn close(&mut self) -> Result<()>;
+
+    /// Get this storage's [`LockManager`], if it supports cross-instance
+    /// exclusion (Issue #1086).
+    ///
+    /// Returns `None` by default, so a decorator (e.g.
+    /// [`PrefixedStorage`](prefixed::PrefixedStorage)) or a test-only mock
+    /// doesn't need to implement locking at all. Only backends that
+    /// actually coordinate access across multiple `Engine`
+    /// instances/processes over the same directory (currently
+    /// `FileStorage` and [`MemoryStorage`](memory::MemoryStorage))
+    /// override this.
+    ///
+    /// `Engine::build()` calls this once, on the caller-supplied root
+    /// storage, before wrapping it into the lexical/vector/document
+    /// [`PrefixedStorage`](prefixed::PrefixedStorage) namespaces -- so a
+    /// decorator never needs to forward this itself.
+    fn lock_manager(&self) -> Option<Arc<dyn LockManager>> {
+        None
+    }
 }
 
 /// A trait for reading data from storage.
@@ -670,7 +689,7 @@ pub trait LockManager: Send + Sync + std::fmt::Debug {
 }
 
 /// A lock on a resource in storage.
-pub trait StorageLock: Send + std::fmt::Debug {
+pub trait StorageLock: Send + Sync + std::fmt::Debug {
     /// Get the name of the lock.
     fn name(&self) -> &str;
 

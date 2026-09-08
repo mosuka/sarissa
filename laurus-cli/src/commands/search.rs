@@ -123,6 +123,12 @@ tokenizer = { type = "ngram", min_gram = 2, max_gram = 2 }
             .await
             .unwrap();
         engine.commit().await.unwrap();
+        // Issue #1086: `Engine::build()` now takes an exclusive lock on
+        // the storage directory, so this handle must close before
+        // `execute` opens a second `Engine` over the same directory --
+        // exactly what a real CLI invocation would do anyway (each
+        // `laurus` command is a separate process that exits when done).
+        drop(engine);
 
         let results = execute(&search_command("吾輩は猫"), dir.path())
             .await
@@ -162,6 +168,12 @@ tokenizer = { type = "ngram", min_gram = 2, max_gram = 2 }
             .await
             .unwrap();
         engine.commit().await.unwrap();
+        // Issue #1086: `Engine::build()` now takes an exclusive lock on
+        // the storage directory, so this handle must close before
+        // `execute` opens a second `Engine` over the same directory --
+        // exactly what a real CLI invocation would do anyway (each
+        // `laurus` command is a separate process that exits when done).
+        drop(engine);
 
         let results = execute(&search_command("吾輩は猫"), dir.path())
             .await
@@ -191,6 +203,12 @@ tokenizer = { type = "ngram", min_gram = 2, max_gram = 2 }
             .await
             .unwrap();
         engine.commit().await.unwrap();
+        // Issue #1086: `Engine::build()` now takes an exclusive lock on
+        // the storage directory, so this handle must close before
+        // `execute` opens a second `Engine` over the same directory --
+        // exactly what a real CLI invocation would do anyway (each
+        // `laurus` command is a separate process that exits when done).
+        drop(engine);
 
         let results = execute(&search_command("_id:doc1"), dir.path())
             .await
@@ -237,6 +255,12 @@ tokenizer = { type = "ngram", min_gram = 2, max_gram = 2 }
                 .unwrap();
         }
         engine.commit().await.unwrap();
+        // Issue #1086: `Engine::build()` now takes an exclusive lock on
+        // the storage directory, so this handle must close before
+        // `execute` opens a second `Engine` over the same directory --
+        // exactly what a real CLI invocation would do anyway (each
+        // `laurus` command is a separate process that exits when done).
+        drop(engine);
 
         // The bigram analyzer needs a 2+ character query to produce any
         // token at all (min_gram = 2).
@@ -273,6 +297,12 @@ tokenizer = { type = "ngram", min_gram = 2, max_gram = 2 }
             .await
             .unwrap();
         engine.commit().await.unwrap();
+        // Issue #1086: `Engine::build()` now takes an exclusive lock on
+        // the storage directory, so this handle must close before
+        // `execute` opens a second `Engine` over the same directory --
+        // exactly what a real CLI invocation would do anyway (each
+        // `laurus` command is a separate process that exits when done).
+        drop(engine);
 
         // 2+ characters: the bigram analyzer needs at least min_gram (2).
         let results = execute(&search_command("猫で"), dir.path()).await.unwrap();
