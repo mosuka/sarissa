@@ -92,6 +92,26 @@ index.close();
 前に）`close()` を呼んでください。`close()` は冪等で、呼び出し後は他の全ての
 メソッドが例外を投げます。
 
+インデックスを開き直す（あるいは開く）ことすらせずに、別プロセスが変更を
+コミットしたかを安く確認したい場合は、エクスポートされている
+`peekCommitGeneration(path)` を使ってください:
+
+```javascript
+import { peekCommitGeneration } from "laurus-nodejs";
+
+const before = peekCommitGeneration(path);
+// ... しばらく経過 ...
+if (peekCommitGeneration(path) !== before) {
+  // ディスク上で何かが変わった。取り込むにはインデックスを開き直す
+}
+```
+
+これはディスク上の永続化されたcommit世代を直接読むだけで、`Engine`の構築
+（ストレージロック・WALリカバリ・Embedder読み込み）を一切行わないため、
+このプロセスでそのパスの`Index`をまだ一度も作っていなくても使えます。
+`path`がlaurusのインデックスディレクトリでない（永続化されたスキーマが
+無い）場合は例外を投げます。
+
 ### 永続性 / WAL
 
 永続インデックスはすべての変更を先行書き込みログ（WAL）に書き込みます。

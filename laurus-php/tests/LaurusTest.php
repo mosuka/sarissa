@@ -976,4 +976,69 @@ class LaurusTest extends TestCase
         $idx->close();
         $this->assertNotNull($idx);
     }
+
+    // ── peek_commit_generation (Issue #1101) ──────────────────────────────
+    //
+    // Unlike Index::stats(), this is a namespaced global function, not tied
+    // to any Index instance: it reads commit_generation.json directly from
+    // disk without building an Engine at all, so it works even when no
+    // Index for the given path has ever been constructed in this process --
+    // the point being to let a caller cheaply decide whether opening (or
+    // reopening) the index is worth doing at all.
+
+    public function testPeekCommitGenerationRejectsANonIndexDirectory(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_peek_" . uniqid();
+        mkdir($dir);
+
+        $this->expectException(\ValueError::class);
+        $this->expectExceptionMessageMatches('/not a laurus index directory/');
+        Laurus\peek_commit_generation($dir);
+    }
+
+    public function testPeekCommitGenerationIsZeroBeforeAnyCommit(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_peek_" . uniqid();
+        mkdir($dir);
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+        new Laurus\Index($dir, $schema);
+
+        $this->assertEquals(0, Laurus\peek_commit_generation($dir));
+    }
+
+    public function testPeekCommitGenerationAdvancesAfterACommit(): void
+    {
+        // Index::stats() doesn't expose a commitGeneration key yet in this
+        // binding (that's currently laurus-python-only), so this only
+        // checks the raw counter.
+        $dir = sys_get_temp_dir() . "/laurus_peek_" . uniqid();
+        mkdir($dir);
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+        $idx = new Laurus\Index($dir, $schema);
+        $idx->putDocument("doc1", ["title" => "hello world"]);
+        $idx->commit();
+
+        $this->assertEquals(1, Laurus\peek_commit_generation($dir));
+    }
+
+    public function testPeekCommitGenerationSeesACommitMadeByAnotherHandle(): void
+    {
+        $dir = sys_get_temp_dir() . "/laurus_peek_" . uniqid();
+        mkdir($dir);
+        $a = new Laurus\Index($dir);
+        $a->putDocument("doc1", []);
+        $a->commit();
+        $a->close();
+
+        $before = Laurus\peek_commit_generation($dir);
+
+        $b = new Laurus\Index($dir);
+        $b->putDocument("doc2", []);
+        $b->commit();
+        $b->close();
+
+        $this->assertNotEquals($before, Laurus\peek_commit_generation($dir));
+    }
 }

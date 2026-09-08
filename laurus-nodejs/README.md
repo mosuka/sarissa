@@ -94,6 +94,26 @@ index — especially before reopening the same path — rather than relying on
 the JS garbage collector, whose timing is not deterministic. `close()` is
 idempotent; every other method throws after it has been called.
 
+To cheaply check whether another process committed since you last looked —
+without opening (or reopening) the index at all — use the exported
+`peekCommitGeneration(path)`:
+
+```javascript
+import { peekCommitGeneration } from "laurus-nodejs";
+
+const before = peekCommitGeneration(path);
+// ... later ...
+if (peekCommitGeneration(path) !== before) {
+  // something changed on disk; reopen the index to pick it up
+}
+```
+
+It reads the persisted commit generation directly off disk, with no `Engine`
+construction at all — no storage lock, no WAL recovery, no embedder
+loading — so it works even before any `Index` for that path has been created
+in this process. Throws if `path` isn't a laurus index directory (no
+persisted schema).
+
 ### Durability / WAL
 
 A persistent index writes every change to a write-ahead log (WAL). By default

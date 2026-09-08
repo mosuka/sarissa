@@ -860,6 +860,34 @@ fn resolve_storage_and_schema(
 }
 
 // ---------------------------------------------------------------------------
+// Module-level functions
+// ---------------------------------------------------------------------------
+
+/// Read the persisted commit generation for `path` directly from disk,
+/// without building an `Engine` -- no storage lock, no WAL recovery, no
+/// embedder loading (Issue #1101).
+///
+/// Unlike [`PyIndex.reload`], this is not an `Index` method: it works even
+/// when no `Index` for `path` has ever been constructed in this process,
+/// which is the point -- it lets a caller cheaply decide whether opening
+/// (or [`PyIndex.reload`]-ing) the index is worth doing at all.
+///
+/// Args:
+///     path: Directory path of a file-backed index (the same value passed
+///         to `Index(path=...)`).
+///
+/// Returns:
+///     `0` if the index exists but nothing has been committed yet.
+///
+/// Raises:
+///     ValueError: if `path` has no persisted schema at all (not a laurus
+///         index directory).
+#[pyfunction]
+pub fn peek_commit_generation(path: String) -> PyResult<u64> {
+    laurus::index_dir::peek_commit_generation(Path::new(&path)).map_err(index_dir_err)
+}
+
+// ---------------------------------------------------------------------------
 // Reload helper
 // ---------------------------------------------------------------------------
 

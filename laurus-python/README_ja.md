@@ -116,6 +116,22 @@ changed = index.reload()  # commit世代が実際に進んでいればTrue
 かどうかをこれ単体で安く検知することはできません -- それを拾えるのは
 `reload()`だけです。
 
+`reload()`のコストを払わずに別プロセスの変更を安く確認したい場合は、
+モジュールレベルの`laurus.peek_commit_generation(path)`を使ってください。
+`index.commit_generation()`と異なり`Index`オブジェクトに紐付かず、
+`Engine`を一切構築せず`commit_generation.json`をディスクから直接読むため、
+このプロセスでまだ該当パスの`Index`を一度も開いていなくても使えます:
+
+```python
+before = laurus.peek_commit_generation(path)
+# ... しばらく経過 ...
+if laurus.peek_commit_generation(path) != before:
+    index.reload()
+```
+
+`path`がlaurusのインデックスディレクトリでない（永続化されたスキーマが
+無い）場合は`ValueError`を送出します。
+
 ## 永続性 / WAL
 
 永続インデックスはすべての変更を先行書き込みログ（WAL）に書き込みます。
