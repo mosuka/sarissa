@@ -91,6 +91,31 @@ been called.
 index.close()
 ```
 
+## Reloading an index
+
+`reload()` picks up changes committed by another process without paying the
+cost of constructing a brand-new `Index` -- in particular, it reuses the
+already-loaded embedding model(s) when the schema's embedding configuration
+hasn't changed, instead of reloading them from scratch:
+
+```python
+changed = index.reload()  # True if the commit generation actually advanced
+```
+
+`reload()` works whether the index is currently open **or already
+`close()`d** -- it reopens the same directory either way, so you can hold
+onto one `Index` object across a full reload cycle instead of constructing a
+new one and swapping references. It requires a file-backed index (`path` was
+given at construction); calling it on an in-memory index raises `ValueError`.
+
+`index.commit_generation()` returns the same O(1) counter as
+`stats()["commit_generation"]`, without `stats()`'s cost of scanning vector
+fields. It only reflects commits made through *this* `Index` object,
+though -- it's a snapshot held in memory, not re-read from disk on every
+call -- so it confirms whether `reload()` (or your own `commit()`) actually
+advanced the state, but it cannot by itself tell you whether *another*
+process has committed something new; only `reload()` picks that up.
+
 ## Durability / WAL
 
 A persistent index writes every change to a write-ahead log (WAL). By default

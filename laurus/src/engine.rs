@@ -1449,6 +1449,16 @@ impl Engine {
         self.schema.read().clone()
     }
 
+    /// Return the current commit generation (Issue #1088) in O(1).
+    ///
+    /// Unlike reading `commit_generation` through [`Engine::stats`], this
+    /// does not touch the lexical/vector stores at all -- it is a single
+    /// atomic load, safe to call as often as needed (e.g. to cheaply decide
+    /// whether a reload is worth doing).
+    pub fn commit_generation(&self) -> u64 {
+        self.commit_generation.current()
+    }
+
     /// Returns the embedder used by the vector store.
     ///
     /// This is useful for constructing a [`VectorQueryParser`] or
