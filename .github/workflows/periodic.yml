@@ -30,7 +30,6 @@ jobs:
   # ============================================================
   clippy:
     name: Clippy
-    needs: [format]
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
@@ -69,7 +68,6 @@ jobs:
   # ============================================================
   test-laurus:
     name: Test laurus
-    needs: [clippy]
     strategy:
       fail-fast: false
       matrix:
@@ -118,7 +116,6 @@ jobs:
   # ============================================================
   test-server:
     name: Test laurus-server
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -170,7 +167,6 @@ jobs:
   # ============================================================
   test-mcp:
     name: Test laurus-mcp
-    needs: [test-laurus, test-server]
     strategy:
       fail-fast: false
       matrix:
@@ -222,7 +218,6 @@ jobs:
   # ============================================================
   test-cli:
     name: Test laurus-cli
-    needs: [test-laurus, test-server, test-mcp]
     strategy:
       fail-fast: false
       matrix:
@@ -274,7 +269,6 @@ jobs:
   # ============================================================
   test-python:
     name: Test laurus-python
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -332,7 +326,6 @@ jobs:
   # ============================================================
   test-nodejs:
     name: Test laurus-nodejs
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -378,7 +371,6 @@ jobs:
   # ============================================================
   test-ruby:
     name: Test laurus-ruby
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -426,7 +418,6 @@ jobs:
   # ============================================================
   test-php:
     name: Test laurus-php
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -491,5 +482,4 @@ jobs:
   # ============================================================
   index-interop:
     name: Index Interop
-    needs: [test-laurus]
     uses: ./.github/workflows/index-interop.yml
