@@ -3,6 +3,7 @@
 //! This module provides the core functionality for merging multiple segments
 //! into a single optimized segment with proper handling of deletions and updates.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use ahash::AHashMap;
@@ -293,15 +294,17 @@ impl MergeEngine {
         // newer segment) resolve to the last-processed version.
         let mut order: Vec<u64> = Vec::new();
         let mut docs: AHashMap<u64, AnalyzedDocument> = AHashMap::new();
-        // Whether the source segments stored term positions; detected from the
-        // first posting seen so the merged segment matches.
-        let mut store_positions: Option<bool> = None;
+        // Whether the source segments stored term positions, per field;
+        // detected from the first posting seen for each field so the merged
+        // segment reproduces every field's positions state independently
+        // (#1083).
+        let mut positions_by_field: HashMap<String, bool> = HashMap::new();
 
         for segment in segments {
             let reader = SegmentReader::open(segment.segment_info.clone(), self.storage.clone())?;
             let deleted = self.load_deleted_docs(&segment.segment_info)?;
             let reconstructed =
-                self.reconstruct_segment(&reader, &deleted, &mut store_positions)?;
+                self.reconstruct_segment(&reader, &deleted, &mut positions_by_field)?;
             stats.deleted_docs_removed += deleted.len();
             for (doc_id, analyzed) in reconstructed {
                 if docs.insert(doc_id, analyzed).is_none() {
@@ -323,7 +326,7 @@ impl MergeEngine {
         // normal flush, then flush to the merged segment's name. Buffers are
         // unbounded so the merge produces exactly one output segment.
         let writer_config = InvertedIndexWriterConfig {
-            store_term_positions: store_positions.unwrap_or(true),
+            field_term_positions: positions_by_field,
             shard_id: stats.shard_id,
             max_buffered_docs: usize::MAX,
             max_buffer_memory: usize::MAX,
@@ -412,6 +415,15 @@ impl MergeEngine {
     /// same order (the caller reserves one fresh ID per source via
     /// `InvertedIndex`'s segment ID generator).
     ///
+    /// `target_term_vectors` is `target_field`'s new `term_vectors` setting
+    /// (#1083): since `target_field`'s own postings are discarded and
+    /// re-derived rather than detected from what is on disk, this is
+    /// seeded into the per-field positions map up front so every rebuilt
+    /// segment stores (or omits) `target_field`'s positions according to
+    /// the NEW schema, not the old one. Every other field keeps whatever
+    /// positions state it already had, detected the same way
+    /// [`Self::perform_merge`] does.
+    ///
     /// # Errors
     ///
     /// Returns the first error encountered and aborts the writer that hit
@@ -428,6 +440,7 @@ impl MergeEngine {
         segments: &[ManagedSegmentInfo],
         target_field: &str,
         analyzer: Option<&Arc<dyn Analyzer>>,
+        target_term_vectors: bool,
         new_segment_ids: &[String],
     ) -> Result<Vec<MergeResult>> {
         assert_eq!(
@@ -436,10 +449,14 @@ impl MergeEngine {
             "one new segment ID is required per source segment"
         );
 
-        // Detected from the first posting seen across ALL segments (shared
-        // with `reconstruct_segment_with_field_override`'s signature), so
-        // every rebuilt segment agrees on whether to store term positions.
-        let mut store_positions: Option<bool> = None;
+        // Every other field's positions state is detected from the first
+        // posting seen across ALL segments (shared with
+        // `reconstruct_segment_with_field_override`'s signature), so every
+        // rebuilt segment agrees. `target_field` is seeded up front so its
+        // own detection (skipped in Pass 1, since its postings are stale)
+        // never overrides the new schema's setting.
+        let mut positions_by_field: HashMap<String, bool> = HashMap::new();
+        positions_by_field.insert(target_field.to_string(), target_term_vectors);
         let mut results = Vec::with_capacity(segments.len());
 
         for (segment, new_segment_id) in segments.iter().zip(new_segment_ids) {
@@ -448,7 +465,7 @@ impl MergeEngine {
             let reconstructed = self.reconstruct_segment_with_field_override(
                 &reader,
                 &deleted,
-                &mut store_positions,
+                &mut positions_by_field,
                 target_field,
                 analyzer,
             )?;
@@ -458,7 +475,7 @@ impl MergeEngine {
             let max_doc_id = reconstructed.iter().map(|(id, _)| *id).max().unwrap_or(0);
 
             let writer_config = InvertedIndexWriterConfig {
-                store_term_positions: store_positions.unwrap_or(true),
+                field_term_positions: positions_by_field.clone(),
                 shard_id: segment.segment_info.shard_id,
                 max_buffered_docs: usize::MAX,
                 max_buffer_memory: usize::MAX,
@@ -572,13 +589,16 @@ impl MergeEngine {
     /// numeric fields are preserved (Issue #758); `field_lengths` are read back
     /// from the segment. Deleted docs are excluded.
     ///
-    /// `store_positions` is set from the first posting seen (whether the source
-    /// stored term positions) so the merged segment matches.
+    /// `positions_by_field` is populated, per field, from the first posting
+    /// seen for that field (whether the source stored term positions) so
+    /// the merged segment reproduces each field's positions state
+    /// independently — fields can disagree, e.g. one `term_vectors: true`
+    /// and one `false` (#1083).
     fn reconstruct_segment(
         &self,
         reader: &SegmentReader,
         deleted: &RoaringTreemap,
-        store_positions: &mut Option<bool>,
+        positions_by_field: &mut HashMap<String, bool>,
     ) -> Result<Vec<(u64, AnalyzedDocument)>> {
         // Pass 1: bucket postings into per-doc analyzed terms.
         let mut field_terms: AHashMap<u64, AHashMap<String, Vec<AnalyzedTerm>>> = AHashMap::new();
@@ -606,9 +626,9 @@ impl MergeEngine {
                         let doc_id = iter.doc_id();
                         let positions = iter.positions()?;
                         let freq = iter.term_freq();
-                        if store_positions.is_none() {
-                            *store_positions = Some(!positions.is_empty());
-                        }
+                        positions_by_field
+                            .entry(field.to_string())
+                            .or_insert_with(|| !positions.is_empty());
                         let terms = field_terms
                             .entry(doc_id)
                             .or_default()
@@ -733,7 +753,7 @@ impl MergeEngine {
         &self,
         reader: &SegmentReader,
         deleted: &RoaringTreemap,
-        store_positions: &mut Option<bool>,
+        positions_by_field: &mut HashMap<String, bool>,
         target_field: &str,
         analyzer: Option<&Arc<dyn Analyzer>>,
     ) -> Result<Vec<(u64, AnalyzedDocument)>> {
@@ -756,9 +776,9 @@ impl MergeEngine {
                         let doc_id = iter.doc_id();
                         let positions = iter.positions()?;
                         let freq = iter.term_freq();
-                        if store_positions.is_none() {
-                            *store_positions = Some(!positions.is_empty());
-                        }
+                        positions_by_field
+                            .entry(field.to_string())
+                            .or_insert_with(|| !positions.is_empty());
                         let terms = field_terms
                             .entry(doc_id)
                             .or_default()
@@ -1196,5 +1216,108 @@ mod tests {
         let mut want = vec![d0, d1];
         want.sort_unstable();
         assert_eq!(got, want, "`title:bravo` postings after merge");
+    }
+
+    /// #1083: after merging two segments, each field must keep its OWN
+    /// `term_vectors` state independently — one field can carry positions
+    /// while another does not, and the merged segment must not collapse
+    /// them into a single index-wide setting. Run with both field-name
+    /// orderings so the result cannot depend on `HashMap`/dictionary
+    /// iteration order.
+    #[test]
+    fn merge_preserves_per_field_term_vectors_independently() {
+        use crate::lexical::core::field::{FieldOption, TextOption};
+        use crate::lexical::query::Query;
+        use crate::lexical::query::phrase::PhraseQuery;
+
+        let run = |vec_field: &str, novec_field: &str| {
+            let storage: Arc<dyn Storage> =
+                Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+            let mut fields = std::collections::HashMap::new();
+            fields.insert(
+                vec_field.to_string(),
+                FieldOption::Text(TextOption {
+                    term_vectors: true,
+                    ..Default::default()
+                }),
+            );
+            fields.insert(
+                novec_field.to_string(),
+                FieldOption::Text(TextOption {
+                    term_vectors: false,
+                    ..Default::default()
+                }),
+            );
+            let config = InvertedIndexWriterConfig {
+                fields,
+                ..Default::default()
+            };
+
+            let mut writer = InvertedIndexWriter::new(storage.clone(), config).unwrap();
+            let d0 = writer
+                .add_document(
+                    Document::builder()
+                        .add_field(vec_field, DataValue::Text("quick brown fox".to_string()))
+                        .add_field(novec_field, DataValue::Text("quick brown fox".to_string()))
+                        .build(),
+                )
+                .unwrap();
+            writer.commit().unwrap(); // segment_000000
+            let d1 = writer
+                .add_document(
+                    Document::builder()
+                        .add_field(vec_field, DataValue::Text("lazy dog".to_string()))
+                        .add_field(novec_field, DataValue::Text("lazy dog".to_string()))
+                        .build(),
+                )
+                .unwrap();
+            writer.commit().unwrap(); // segment_000001
+            drop(writer);
+
+            let si0 = segment_info("segment_000000", 1, d0, d0, 0);
+            let si1 = segment_info("segment_000001", 1, d1, d1, 1);
+            let candidate = MergeCandidate {
+                segments: vec![si0.segment_id.clone(), si1.segment_id.clone()],
+                priority: 1.0,
+                estimated_size: 0,
+                strategy: MergeStrategy::SizeBased,
+            };
+            let engine = MergeEngine::new(MergeConfig::default(), storage.clone());
+            let result = engine
+                .merge_segments(
+                    &candidate,
+                    &[ManagedSegmentInfo::new(si0), ManagedSegmentInfo::new(si1)],
+                    1,
+                )
+                .unwrap();
+
+            let reader = InvertedIndexReader::new(
+                vec![result.new_segment.segment_info.clone()],
+                storage.clone(),
+                Default::default(),
+            )
+            .unwrap();
+
+            let with_vectors =
+                PhraseQuery::new(vec_field, vec!["quick".to_string(), "brown".to_string()]);
+            let matcher = with_vectors.matcher(&reader).unwrap();
+            assert!(
+                !matcher.is_exhausted(),
+                "{vec_field} must keep its positions after merge"
+            );
+
+            let without_vectors =
+                PhraseQuery::new(novec_field, vec!["quick".to_string(), "brown".to_string()]);
+            let matcher = without_vectors.matcher(&reader).unwrap();
+            assert!(
+                matcher.is_exhausted(),
+                "{novec_field} must not have positions after merge"
+            );
+        };
+
+        // Both orderings, so the result cannot depend on field-name sort order.
+        run("a_vec", "b_novec");
+        run("a_novec", "b_vec");
     }
 }

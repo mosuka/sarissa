@@ -738,6 +738,7 @@ impl LexicalIndex for InvertedIndex {
             shard_id: self.config.shard_id,
             fields,
             use_compound: self.config.use_compound,
+            store_term_positions: self.config.store_term_vectors,
             ..Default::default()
         };
         // Hand the writer the shared metadata and manifest handles
@@ -854,6 +855,15 @@ impl LexicalIndex for InvertedIndex {
     ) -> Result<()> {
         self.check_closed()?;
 
+        // #1083: `option` is the field's NEW setting. For anything other
+        // than `Text`, term positions fall back to the index-wide default,
+        // matching `InvertedIndexWriterConfig::stores_term_positions`'s
+        // 3-level resolution.
+        let target_term_vectors = match &option {
+            FieldOption::Text(text_option) => text_option.term_vectors,
+            _ => self.config.store_term_vectors,
+        };
+
         let segments = self.load_segments()?;
         if !segments.is_empty() {
             use self::segment::ManagedSegmentInfo;
@@ -895,6 +905,7 @@ impl LexicalIndex for InvertedIndex {
                 &managed,
                 name,
                 analyzer.as_ref(),
+                target_term_vectors,
                 &new_segment_ids,
             )?;
 

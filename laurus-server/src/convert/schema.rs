@@ -125,7 +125,7 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
         FieldOption::Text(o) => Some(Opt::Text(v1::TextOption {
             indexed: o.indexed,
             stored: o.stored,
-            term_vectors: o.term_vectors,
+            term_vectors: Some(o.term_vectors),
             analyzer: o.analyzer.as_ref().map(analyzer_spec_to_proto),
         })),
         FieldOption::Integer(o) => Some(Opt::Integer(v1::IntegerOption {
@@ -202,7 +202,9 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
         Some(Opt::Text(o)) => Some(FieldOption::Text(TextOption {
             indexed: o.indexed,
             stored: o.stored,
-            term_vectors: o.term_vectors,
+            // Unset means "use the engine's default", matching
+            // `TextOption::default()` (#1083).
+            term_vectors: o.term_vectors.unwrap_or(true),
             analyzer: o.analyzer.as_ref().and_then(analyzer_spec_from_proto),
         })),
         Some(Opt::Integer(o)) => Some(FieldOption::Integer(IntegerOption {

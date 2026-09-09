@@ -83,7 +83,7 @@ let opt = TextOption::default()
 | :--- | :--- | :--- |
 | `indexed` | `true` | Whether the field is searchable |
 | `stored` | `true` | Whether the original value is stored for retrieval |
-| `term_vectors` | `true` | Whether term positions are stored (needed for phrase queries and highlighting) |
+| `term_vectors` | `true` | Whether term positions are stored (needed for phrase and span queries; highlighting always re-tokenizes the stored text and does not use them) |
 
 ### Vector Fields
 

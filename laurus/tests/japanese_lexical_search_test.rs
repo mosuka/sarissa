@@ -27,11 +27,11 @@ const JAPANESE_SCHEMA_JSON: &str = r#"
     "default_fields": ["title", "body"],
     "fields": {
         "title": { "Text": {
-            "indexed": true, "stored": true, "term_vectors": false,
+            "indexed": true, "stored": true, "term_vectors": true,
             "analyzer": { "language": "japanese", "mode": "normal", "dict": "embedded://ipadic" }
         }},
         "body": { "Text": {
-            "indexed": true, "stored": true, "term_vectors": false,
+            "indexed": true, "stored": true, "term_vectors": true,
             "analyzer": { "language": "japanese", "mode": "normal", "dict": "embedded://ipadic" }
         }}
     }

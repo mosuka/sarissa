@@ -190,7 +190,14 @@ pub struct TextOption {
     #[serde(default = "default_true")]
     pub stored: bool,
 
-    /// Whether to store term vectors (enables highlighting, more-like-this).
+    /// Whether to store term positions for this field ("term vectors").
+    ///
+    /// Positions are what phrase (`PhraseQuery`) and span (`SpanNearQuery`
+    /// and friends) queries read; without them those queries never match
+    /// this field, with no fallback. Nothing else uses them — BM25 scores
+    /// from the posting list's own frequency section, and highlighting
+    /// always re-tokenizes the stored text. Costs a small per-posting
+    /// section on disk.
     #[serde(default = "default_true")]
     pub term_vectors: bool,
 
@@ -232,10 +239,13 @@ impl TextOption {
         self
     }
 
-    /// Sets whether term vectors should be stored for this field.
+    /// Sets whether term positions ("term vectors") are stored for this
+    /// field.
     ///
-    /// Term vectors enable features such as highlighting and more-like-this queries
-    /// by recording per-document term positions and frequencies.
+    /// Term positions are required by phrase (`PhraseQuery`) and span
+    /// (`SpanNearQuery` and friends) queries over this field; with
+    /// `false`, those queries return no matches for it. Every other query
+    /// type, BM25 scoring, and highlighting are unaffected.
     ///
     /// # Arguments
     ///
@@ -281,7 +291,7 @@ impl Default for TextOption {
         Self {
             indexed: true,
             stored: true,
-            term_vectors: false,
+            term_vectors: true,
             analyzer: None,
         }
     }

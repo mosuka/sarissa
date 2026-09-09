@@ -40,16 +40,16 @@ Full-text searchable field. Text is processed by the analysis pipeline (tokeniza
 
 ```toml
 [fields.title.Text]
-indexed = true       # Whether to index this field for search
-stored = true        # Whether to store the original value for retrieval
-term_vectors = false # Whether to store term positions (for phrase queries, highlighting)
+indexed = true      # Whether to index this field for search
+stored = true       # Whether to store the original value for retrieval
+term_vectors = true # Whether to store term positions (for phrase and span queries)
 ```
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `indexed` | `bool` | `true` | Enables searching this field |
 | `stored` | `bool` | `true` | Stores the original value so it can be returned in results |
-| `term_vectors` | `bool` | `true` | Stores term positions for phrase queries, highlighting, and more-like-this |
+| `term_vectors` | `bool` | `true` | Stores term positions, read by phrase and span queries; highlighting always re-tokenizes the stored text and does not use them |
 
 #### Integer
 
@@ -359,12 +359,12 @@ default_fields = ["title", "body"]
 [fields.title.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.body.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.category.Text]
 indexed = true
@@ -398,7 +398,7 @@ default_fields = ["title", "body"]
 [fields.title.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.body.Text]
 indexed = true
@@ -429,7 +429,7 @@ default_fields = ["name", "description"]
 [fields.name.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.description.Text]
 indexed = true

@@ -119,6 +119,75 @@ async fn update_field_switches_to_japanese_analyzer_and_changes_search_behavior(
     Ok(())
 }
 
+/// #1083: before `term_vectors` was wired to the write path, flipping it
+/// `false -> true` had no observable effect at all -- postings were
+/// unconditionally written with positions regardless of the setting. Now
+/// that positions are actually withheld when `term_vectors: false`, the
+/// same `update_field(reindex: true)` path proven above for an analyzer
+/// change must also rebuild a field's postings to add positions, turning
+/// a previously-non-matching phrase query into a match.
+#[tokio::test(flavor = "multi_thread")]
+async fn update_field_enables_term_vectors_and_phrase_query_starts_matching() -> Result<()> {
+    let schema: Schema = serde_json::from_str(
+        r#"{
+            "default_fields": ["body"],
+            "fields": {
+                "body": { "Text": { "indexed": true, "stored": true, "term_vectors": false } }
+            }
+        }"#,
+    )
+    .expect("valid schema JSON");
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let engine = Engine::new(storage, schema).await?;
+
+    engine
+        .put_document(
+            "doc1",
+            Document::builder()
+                .add_text("body", "the quick brown fox")
+                .build(),
+        )
+        .await?;
+    engine.commit().await?;
+
+    // Before: `term_vectors: false` means no positions on disk, so a
+    // phrase query must not match.
+    let parser = engine.unified_query_parser()?;
+    let request = parser.parse("body:\"quick brown\"").await?;
+    let before = engine.search(request).await?;
+    assert!(
+        before.is_empty(),
+        "term_vectors: false must have no positions to phrase-match against, got {before:?}"
+    );
+
+    let new_option = SchemaFieldOption::Text(TextOption::default().term_vectors(true));
+    let outcome = engine
+        .update_field(
+            "body",
+            new_option,
+            UpdateFieldOptions {
+                reindex: true,
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert_eq!(outcome.classification, FieldChangeKind::Reindex);
+
+    // After: postings were rebuilt from the stored original text with
+    // positions, so the same phrase query now matches.
+    let parser = engine.unified_query_parser()?;
+    let request = parser.parse("body:\"quick brown\"").await?;
+    let after = engine.search(request).await?;
+    let ids: Vec<&str> = after.iter().map(|h| h.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["doc1"],
+        "the rebuild must add positions so the phrase query matches"
+    );
+
+    Ok(())
+}
+
 /// Storage decorator failing the next `create_output` whose name has the
 /// armed prefix -- aimed at `InvertedIndex::rebuild_field`'s rebuilt
 /// segment (named `merged_<generation>`, see `inverted.rs`), so the rebuild

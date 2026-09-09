@@ -189,7 +189,7 @@ class Schema:
 
 | Method | Description |
 | :--- | :--- |
-| `add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)` | Full-text field (inverted index, BM25). `analyzer` accepts a built-in name (`"standard"`, `"english"`, `"keyword"`, `"simple"`, `"noop"`, or any custom name registered via `add_analyzer`) or a dict configuring a parameterised preset such as `{"language": "japanese", "mode": "normal", "dict": "/var/lib/lindera/ipadic"}`. The bare string `"japanese"` is rejected because the preset requires a Lindera dictionary path. |
+| `add_text_field(name, *, stored=True, indexed=True, term_vectors=True, analyzer=None)` | Full-text field (inverted index, BM25). `term_vectors` controls whether term positions are stored, read by phrase and span queries. `analyzer` accepts a built-in name (`"standard"`, `"english"`, `"keyword"`, `"simple"`, `"noop"`, or any custom name registered via `add_analyzer`) or a dict configuring a parameterised preset such as `{"language": "japanese", "mode": "normal", "dict": "/var/lib/lindera/ipadic"}`. The bare string `"japanese"` is rejected because the preset requires a Lindera dictionary path. |
 | `add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64-bit integer field. Set `multi_valued=True` to accept arrays of integers (range queries match if any value satisfies the predicate). |
 | `add_float_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64-bit float field. Set `multi_valued=True` to accept arrays of floats (range queries match if any value satisfies the predicate). |
 | `add_boolean_field(name, *, stored=True, indexed=True)` | Boolean field. |

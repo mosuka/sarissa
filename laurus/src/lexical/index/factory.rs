@@ -235,7 +235,7 @@ mod tests {
                 assert_eq!(inverted.max_docs_per_segment, 1000000);
                 assert_eq!(inverted.write_buffer_size, 1024 * 1024);
                 assert!(!inverted.compress_stored_fields);
-                assert!(!inverted.store_term_vectors);
+                assert!(inverted.store_term_vectors);
                 assert_eq!(inverted.merge_factor, 10);
                 assert_eq!(inverted.max_segments, 100);
             }

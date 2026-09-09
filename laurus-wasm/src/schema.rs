@@ -129,7 +129,8 @@ impl WasmSchema {
     /// * `name` - Field name.
     /// * `stored` - Whether the original value is retrievable (default `true`).
     /// * `indexed` - Whether the field is searchable (default `true`).
-    /// * `term_vectors` - Whether term position information is stored (default `false`).
+    /// * `term_vectors` - Whether term positions are stored, required by
+    ///   phrase and span queries over this field (default `true`).
     /// * `analyzer` - Optional analyzer name. Pass a parameter-less
     ///   built-in directly: `"standard"`, `"english"`, `"keyword"`,
     ///   `"simple"`, `"noop"`. For the Japanese analyzer, build it
@@ -153,7 +154,7 @@ impl WasmSchema {
             FieldOption::Text(TextOption {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
-                term_vectors: term_vectors.unwrap_or(false),
+                term_vectors: term_vectors.unwrap_or(true),
                 analyzer: analyzer.map(laurus::AnalyzerSpec::Named),
             }),
         );

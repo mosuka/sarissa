@@ -229,11 +229,12 @@ impl LexicalIndexConfigBuilder {
         self
     }
 
-    /// Enable or disable term vector storage.
+    /// Enable or disable the index-wide default for term position storage.
     ///
-    /// Term vectors enable advanced features like highlighting and more-like-this
-    /// queries, but increase index size and indexing time.
-    /// Default: false
+    /// Positions are what phrase and span queries read; a `Text` field
+    /// with an explicit `term_vectors` option overrides this default
+    /// (Issue #1083). See [`InvertedIndexConfig::store_term_vectors`].
+    /// Default: true
     pub fn store_term_vectors(mut self, store: bool) -> Self {
         self.store_term_vectors = Some(store);
         self

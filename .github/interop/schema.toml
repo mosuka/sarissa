@@ -12,7 +12,7 @@ model = "sentence-transformers/all-MiniLM-L6-v2"
 [fields.title.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 analyzer = "english"
 
 [fields.title_ja.Text]

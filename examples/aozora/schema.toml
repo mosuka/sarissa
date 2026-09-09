@@ -33,14 +33,14 @@ token_filters = [{ type = "lowercase" }]
 [fields.title.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 analyzer = "ja_ipadic"
 
 # 著者名 (author, morphologically analyzed — partial match, e.g. author:太宰)
 [fields.author.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 analyzer = "ja_ipadic"
 
 # 著者名 (author, exact match only, e.g. author_exact:太宰治)
@@ -55,7 +55,7 @@ analyzer = "keyword"
 [fields.body.Text]
 indexed = true
 stored = false
-term_vectors = false
+term_vectors = true
 analyzer = "ja_ipadic"
 
 # 本文の冒頭抜粋 (display excerpt). Not indexed — search targets `body`.
