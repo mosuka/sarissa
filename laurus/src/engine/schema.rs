@@ -2,7 +2,7 @@ pub mod analyzer;
 pub mod embedder;
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use self::analyzer::AnalyzerDefinition;
 use self::embedder::EmbedderDefinition;
@@ -123,14 +123,22 @@ pub fn validate_field_name(name: &str) -> crate::error::Result<()> {
 pub struct Schema {
     /// Custom analyzer definitions, keyed by name.
     /// These can be referenced from text field `analyzer` settings.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub analyzers: HashMap<String, AnalyzerDefinition>,
+    ///
+    /// A `BTreeMap` (not `HashMap`), so serialization (`to_toml`/`to_json`)
+    /// always emits keys in the same sorted order (Issue #1060) instead of
+    /// varying with `HashMap`'s per-process hash seed.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub analyzers: BTreeMap<String, AnalyzerDefinition>,
     /// Embedder definitions, keyed by name.
     /// These can be referenced from vector field `embedder` settings.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub embedders: HashMap<String, EmbedderDefinition>,
+    ///
+    /// A `BTreeMap` for the same determinism reason as [`Self::analyzers`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub embedders: BTreeMap<String, EmbedderDefinition>,
     /// Options for each field.
-    pub fields: HashMap<String, FieldOption>,
+    ///
+    /// A `BTreeMap` for the same determinism reason as [`Self::analyzers`].
+    pub fields: BTreeMap<String, FieldOption>,
     /// Default fields for search.
     #[serde(default)]
     pub default_fields: Vec<String>,
@@ -160,9 +168,9 @@ pub struct Schema {
 impl Schema {
     pub fn new() -> Self {
         Self {
-            analyzers: HashMap::new(),
-            embedders: HashMap::new(),
-            fields: HashMap::new(),
+            analyzers: BTreeMap::new(),
+            embedders: BTreeMap::new(),
+            fields: BTreeMap::new(),
             default_fields: Vec::new(),
             dynamic_field_policy: DynamicFieldPolicy::default(),
             pending_reindex: BTreeSet::new(),
@@ -565,9 +573,9 @@ fn classify_ivf_specific(old: &IvfOption, new: &IvfOption) -> FieldChangeKind {
 
 #[derive(Default)]
 pub struct SchemaBuilder {
-    analyzers: HashMap<String, AnalyzerDefinition>,
-    embedders: HashMap<String, EmbedderDefinition>,
-    fields: HashMap<String, FieldOption>,
+    analyzers: BTreeMap<String, AnalyzerDefinition>,
+    embedders: BTreeMap<String, EmbedderDefinition>,
+    fields: BTreeMap<String, FieldOption>,
     default_fields: Vec<String>,
     dynamic_field_policy: DynamicFieldPolicy,
 }
@@ -1261,6 +1269,87 @@ mod tests {
 
         for (desc, old, new, expected) in cases {
             assert_eq!(classify_change(&old, &new), expected, "case failed: {desc}");
+        }
+    }
+
+    /// Issue #1060: `Schema`'s `analyzers`/`embedders`/`fields` are
+    /// `BTreeMap`s, not `HashMap`s, so `to_toml()` must produce
+    /// byte-identical output across repeated calls on the same schema.
+    /// With `HashMap`, table order would instead vary with the
+    /// process's per-instance hash seed.
+    #[test]
+    fn schema_toml_serialization_is_deterministic_across_calls() {
+        use crate::engine::schema::analyzer::{AnalyzerDefinition, TokenizerConfig};
+        use crate::engine::schema::embedder::EmbedderDefinition;
+        use crate::lexical::core::field::{BooleanOption, DateTimeOption, IntegerOption};
+
+        let schema = Schema::builder()
+            .add_text_field("title", TextOption::default())
+            .add_text_field("body", TextOption::default())
+            .add_integer_field("year", IntegerOption::default())
+            .add_boolean_field("published", BooleanOption::default())
+            .add_datetime_field("created_at", DateTimeOption::default())
+            .add_analyzer(
+                "analyzer_z",
+                AnalyzerDefinition {
+                    char_filters: vec![],
+                    tokenizer: TokenizerConfig::Whitespace,
+                    token_filters: vec![],
+                },
+            )
+            .add_analyzer(
+                "analyzer_a",
+                AnalyzerDefinition {
+                    char_filters: vec![],
+                    tokenizer: TokenizerConfig::Whitespace,
+                    token_filters: vec![],
+                },
+            )
+            .add_embedder("embedder_z", EmbedderDefinition::Precomputed)
+            .add_embedder("embedder_a", EmbedderDefinition::Precomputed)
+            .build();
+
+        let first = schema.to_toml().unwrap();
+        for _ in 0..10 {
+            assert_eq!(
+                schema.to_toml().unwrap(),
+                first,
+                "TOML output must be byte-identical across repeated calls"
+            );
+        }
+    }
+
+    /// Issue #1060: a `CharFilterConfig::Mapping`'s dictionary is also a
+    /// `BTreeMap` for the same reason -- it's serialized as part of the
+    /// schema's `analyzers` table.
+    #[test]
+    fn schema_toml_serialization_is_deterministic_with_mapping_char_filter() {
+        use crate::CharFilterConfig;
+        use crate::engine::schema::analyzer::{AnalyzerDefinition, TokenizerConfig};
+
+        let mut mapping = std::collections::BTreeMap::new();
+        mapping.insert("z".to_string(), "zed".to_string());
+        mapping.insert("a".to_string(), "ay".to_string());
+        mapping.insert("m".to_string(), "em".to_string());
+
+        let schema = Schema::builder()
+            .add_analyzer(
+                "with_mapping",
+                AnalyzerDefinition {
+                    char_filters: vec![CharFilterConfig::Mapping { mapping }],
+                    tokenizer: TokenizerConfig::Whitespace,
+                    token_filters: vec![],
+                },
+            )
+            .build();
+
+        let first = schema.to_toml().unwrap();
+        for _ in 0..10 {
+            assert_eq!(
+                schema.to_toml().unwrap(),
+                first,
+                "TOML output must be byte-identical across repeated calls"
+            );
         }
     }
 }

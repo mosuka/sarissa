@@ -679,9 +679,10 @@ impl PySchema {
     /// from Python can also be opened with ``laurus-cli``.
     ///
     /// Note:
-    ///     Table order in the output is not stable across calls (the
-    ///     underlying maps are unordered); compare parsed structures
-    ///     rather than raw text when round-tripping.
+    ///     Table order in the output is stable and sorted by key across
+    ///     calls (Issue #1060). Comparing parsed structures rather than
+    ///     raw text is still recommended when round-tripping, since it
+    ///     doesn't depend on this ordering guarantee.
     pub fn to_toml(&self) -> PyResult<String> {
         self.inner.to_toml().map_err(schema_toml_err)
     }

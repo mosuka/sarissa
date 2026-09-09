@@ -11,7 +11,7 @@
 //! including lexical fields (Text, Integer, Float, etc.) and vector index
 //! fields (HNSW, Flat, IVF).
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -137,8 +137,10 @@ pub async fn run_index(
 /// Collect the fields eligible for create-time codebook training: HNSW
 /// fields configuring `ProductQuantization` (or, with the `pq-fastscan`
 /// feature, `ProductQuantizationFastScan` — Issue #920) with a
-/// `pq_codebook_path`, sorted by field name (`Schema::fields` is a
-/// HashMap, so iteration order alone would be nondeterministic).
+/// `pq_codebook_path`, sorted by field name. `Schema::fields` is a
+/// `BTreeMap` (Issue #1060) so iteration is already in that order; the
+/// explicit sort is kept to make the ordering guarantee obvious here
+/// rather than relying on that implicit fact.
 fn eligible_pq_fields(schema: &Schema) -> Vec<String> {
     use laurus::vector::core::quantization::QuantizationMethod;
     fn is_pq_variant(quantizer: &QuantizationMethod) -> bool {
@@ -236,7 +238,7 @@ pub fn run_schema(output: &Path) -> Result<()> {
 pub fn build_schema_interactive() -> Result<Schema> {
     println!("\n=== Laurus Schema Generator ===\n");
 
-    let mut fields: HashMap<String, FieldOption> = HashMap::new();
+    let mut fields: BTreeMap<String, FieldOption> = BTreeMap::new();
     let mut field_order: Vec<String> = Vec::new();
 
     loop {
@@ -276,8 +278,8 @@ pub fn build_schema_interactive() -> Result<Schema> {
     };
 
     Ok(Schema {
-        analyzers: std::collections::HashMap::new(),
-        embedders: std::collections::HashMap::new(),
+        analyzers: BTreeMap::new(),
+        embedders: BTreeMap::new(),
         fields,
         default_fields,
         dynamic_field_policy: Default::default(),
@@ -286,7 +288,7 @@ pub fn build_schema_interactive() -> Result<Schema> {
 }
 
 /// Prompt for a unique field name.
-fn prompt_field_name(existing: &HashMap<String, FieldOption>) -> Result<String> {
+fn prompt_field_name(existing: &BTreeMap<String, FieldOption>) -> Result<String> {
     loop {
         let name: String = Input::new().with_prompt("Field name").interact_text()?;
 
