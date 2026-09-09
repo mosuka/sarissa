@@ -69,6 +69,16 @@ pub struct InvertedIndexWriterConfig {
 
     /// Field-specific configurations.
     pub fields: HashMap<String, FieldOption>,
+
+    /// Per-field override for whether to store term positions, keyed by
+    /// field name.
+    ///
+    /// Set only when replaying documents during a segment merge or a
+    /// field rebuild, to reproduce the positions state each field already
+    /// had on disk regardless of the current schema. Empty in the normal
+    /// document-indexing path, where [`Self::stores_term_positions`]
+    /// instead resolves from `fields` and `store_term_positions`.
+    pub field_term_positions: HashMap<String, bool>,
 }
 
 impl std::fmt::Debug for InvertedIndexWriterConfig {
@@ -96,7 +106,31 @@ impl Default for InvertedIndexWriterConfig {
             analyzer: Arc::new(StandardAnalyzer::new().unwrap()),
             shard_id: 0,
             fields: HashMap::new(),
+            field_term_positions: HashMap::new(),
         }
+    }
+}
+
+impl InvertedIndexWriterConfig {
+    /// Resolves whether term positions should be stored for `field_name`.
+    ///
+    /// Resolution order (most specific wins):
+    /// 1. `field_term_positions[field_name]` — set only when replaying
+    ///    documents during a segment merge or field rebuild, to preserve
+    ///    each field's on-disk positions state.
+    /// 2. `fields[field_name]`, if it is `FieldOption::Text` — the
+    ///    field's own `term_vectors` schema setting.
+    /// 3. `store_term_positions` — the index-wide default, used for
+    ///    schema-less fields, reserved fields (names starting with `_`),
+    ///    and every non-`Text` lexical field variant.
+    pub(crate) fn stores_term_positions(&self, field_name: &str) -> bool {
+        if let Some(&override_value) = self.field_term_positions.get(field_name) {
+            return override_value;
+        }
+        if let Some(FieldOption::Text(opt)) = self.fields.get(field_name) {
+            return opt.term_vectors;
+        }
+        self.store_term_positions
     }
 }
 
@@ -908,13 +942,33 @@ impl InvertedIndexWriter {
         doc: &AnalyzedDocument,
     ) -> Result<()> {
         for (field_name, terms) in &doc.field_terms {
-            for analyzed_term in terms {
-                let full_term = format!("{field_name}:{}", analyzed_term.term);
+            let store_positions = self.config.stores_term_positions(field_name);
 
-                let posting = if self.config.store_term_positions {
-                    Posting::with_positions(doc_id, vec![analyzed_term.position])
+            // `terms` holds one `AnalyzedTerm` per occurrence, so the same
+            // term text can appear multiple times (e.g. "cat cat cat").
+            // `PostingList::add_posting` merges at most one posting per call
+            // into the existing one for this doc — calling it once per
+            // occurrence with a positions-less posting would have each
+            // occurrence's `AnalyzedTerm::frequency` (itself already a
+            // running occurrence count) added on top of the previous
+            // occurrences', turning 3 occurrences into a triangular-number
+            // frequency of 6 instead of 3. Aggregate occurrences per term
+            // first so exactly one posting is added per (doc, term) pair.
+            let mut per_term: AHashMap<&str, Vec<u32>> = AHashMap::new();
+            for analyzed_term in terms {
+                per_term
+                    .entry(analyzed_term.term.as_str())
+                    .or_default()
+                    .push(analyzed_term.position);
+            }
+
+            for (term, positions) in per_term {
+                let full_term = format!("{field_name}:{term}");
+
+                let posting = if store_positions {
+                    Posting::with_positions(doc_id, positions)
                 } else {
-                    Posting::with_frequency(doc_id, analyzed_term.frequency)
+                    Posting::with_frequency(doc_id, positions.len() as u32)
                 };
 
                 self.inverted_index.add_posting(full_term, posting);
@@ -2606,5 +2660,94 @@ mod tests {
             large_estimate > small_estimate + 60_000,
             "a 64 KiB payload must dominate the estimate, got {large_estimate} vs {small_estimate}"
         );
+    }
+
+    /// #1083: `stores_term_positions` must resolve `field_term_positions`
+    /// before the field's own schema setting, and the field's schema
+    /// setting before the index-wide default.
+    #[test]
+    fn stores_term_positions_resolution_order() {
+        use crate::lexical::core::field::{FieldOption, TextOption};
+
+        let mut config = InvertedIndexWriterConfig {
+            store_term_positions: false,
+            ..Default::default()
+        };
+        config.fields.insert(
+            "with_vectors".to_string(),
+            FieldOption::Text(TextOption {
+                term_vectors: true,
+                ..Default::default()
+            }),
+        );
+        config.fields.insert(
+            "without_vectors".to_string(),
+            FieldOption::Text(TextOption {
+                term_vectors: false,
+                ..Default::default()
+            }),
+        );
+
+        // Level 3: no field entry, no override -> index-wide default.
+        assert!(!config.stores_term_positions("schemaless_field"));
+
+        // Level 2: field's own `term_vectors` setting overrides the
+        // index-wide default in both directions.
+        assert!(config.stores_term_positions("with_vectors"));
+        assert!(!config.stores_term_positions("without_vectors"));
+
+        // Level 1: `field_term_positions` overrides everything, including
+        // a field with an opposite schema setting.
+        config
+            .field_term_positions
+            .insert("with_vectors".to_string(), false);
+        config
+            .field_term_positions
+            .insert("schemaless_field".to_string(), true);
+        assert!(!config.stores_term_positions("with_vectors"));
+        assert!(config.stores_term_positions("schemaless_field"));
+    }
+
+    /// #1083: repeated occurrences of the same term in one document must
+    /// aggregate into a single posting whose frequency equals the actual
+    /// occurrence count, in both the positions-enabled and
+    /// positions-disabled paths.
+    ///
+    /// Before the aggregation fix, each occurrence's `AnalyzedTerm`
+    /// carried a running frequency count (1, 2, 3, ...) and
+    /// `PostingList::add_posting` summed those across occurrences,
+    /// turning 3 occurrences of "cat" into a triangular-number frequency
+    /// of 6 instead of 3.
+    #[test]
+    fn repeated_term_frequency_does_not_accumulate_triangularly() {
+        use crate::lexical::index::inverted::core::posting::TermPostingIndex;
+
+        let run = |store_term_positions: bool| -> u32 {
+            let storage = Arc::new(crate::storage::memory::MemoryStorage::new(
+                crate::storage::memory::MemoryStorageConfig::default(),
+            ));
+            let config = InvertedIndexWriterConfig {
+                store_term_positions,
+                ..Default::default()
+            };
+            let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
+            let doc = Document::builder()
+                .add_field(
+                    "title",
+                    crate::data::DataValue::Text("cat cat cat".to_string()),
+                )
+                .build();
+            writer.upsert_document(0, doc).unwrap();
+
+            let index: &TermPostingIndex = &writer.inverted_index;
+            let posting_list = index
+                .get_posting_list("title:cat")
+                .expect("term must be indexed");
+            assert_eq!(posting_list.len(), 1);
+            posting_list.iter().next().unwrap().frequency
+        };
+
+        assert_eq!(run(true), 3, "positions-enabled path");
+        assert_eq!(run(false), 3, "positions-disabled path");
     }
 }

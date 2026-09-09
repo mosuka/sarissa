@@ -738,6 +738,7 @@ impl LexicalIndex for InvertedIndex {
             shard_id: self.config.shard_id,
             fields,
             use_compound: self.config.use_compound,
+            store_term_positions: self.config.store_term_vectors,
             ..Default::default()
         };
         // Hand the writer the shared metadata and manifest handles
