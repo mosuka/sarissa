@@ -106,7 +106,12 @@ message FieldOption {
 message TextOption {
   bool indexed = 1;
   bool stored = 2;
-  bool term_vectors = 3;
+  // Whether to store term positions for this field ("term vectors").
+  // Unset means "use the engine's default" (currently `true`) rather than
+  // explicitly `false` — a plain `bool` cannot distinguish the two, which
+  // silently forced every field to `false` when a client omitted the
+  // field entirely.
+  optional bool term_vectors = 3;
   // Analyzer reference. Unset means use the engine default analyzer.
   AnalyzerSpec analyzer = 4;
 }

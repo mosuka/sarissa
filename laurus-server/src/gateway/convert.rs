@@ -419,10 +419,11 @@ pub fn json_to_proto_field_option(json: &Value) -> Result<v1::FieldOption, Strin
         Opt::Text(v1::TextOption {
             indexed: v.get("indexed").and_then(|v| v.as_bool()).unwrap_or(false),
             stored: v.get("stored").and_then(|v| v.as_bool()).unwrap_or(false),
-            term_vectors: v
-                .get("term_vectors")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
+            // Unset (omitted by the client) is distinct from an explicit
+            // `false`: it means "use the engine's default" (#1083), unlike
+            // `indexed`/`stored` above, which have no such tri-state and
+            // are left as their existing `unwrap_or(false)` behavior.
+            term_vectors: v.get("term_vectors").and_then(|v| v.as_bool()),
             analyzer: v.get("analyzer").map(json_to_analyzer_spec).transpose()?,
         })
     } else if let Some(v) = obj.get("integer") {
@@ -489,8 +490,13 @@ fn proto_field_option_to_json(opt: &v1::FieldOption) -> Value {
             let mut text_obj = json!({
                 "indexed": v.indexed,
                 "stored": v.stored,
-                "term_vectors": v.term_vectors,
             });
+            // Surfaced only when explicitly set (#1083): an absent
+            // `term_vectors` means "use the engine's default", same as
+            // `analyzer` below, rather than a `null` standing in for `false`.
+            if let Some(term_vectors) = v.term_vectors {
+                text_obj["term_vectors"] = json!(term_vectors);
+            }
             if let Some(spec) = v.analyzer.as_ref().and_then(analyzer_spec_to_json) {
                 text_obj["analyzer"] = spec;
             }
