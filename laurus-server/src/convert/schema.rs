@@ -4,7 +4,7 @@
 //! datetime, geo, bytes, HNSW, flat, IVF), distance metrics, and quantization
 //! configuration.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::{
@@ -46,17 +46,17 @@ pub fn to_proto(schema: &Schema) -> v1::Schema {
 
 /// Convert a proto Schema into a laurus Schema.
 pub fn from_proto(proto: &v1::Schema) -> Result<Schema, String> {
-    let mut fields = HashMap::new();
+    let mut fields = BTreeMap::new();
     for (name, fo) in &proto.fields {
         let option = field_option_from_proto(fo)
             .ok_or_else(|| format!("Field '{name}' has no option set"))?;
         fields.insert(name.clone(), option);
     }
-    let mut analyzers = HashMap::new();
+    let mut analyzers = BTreeMap::new();
     for (name, ad) in &proto.analyzers {
         analyzers.insert(name.clone(), analyzer_definition_from_proto(ad)?);
     }
-    let mut embedders = HashMap::new();
+    let mut embedders = BTreeMap::new();
     for (name, ed) in &proto.embedders {
         embedders.insert(name.clone(), embedder_definition_from_proto(ed)?);
     }
@@ -590,8 +590,12 @@ fn char_filter_to_proto(config: &CharFilterConfig) -> v1::ComponentConfig {
             ("pattern_replace", p)
         }
         CharFilterConfig::Mapping { mapping } => {
-            // Encode mapping as key=value pairs in params.
-            let p: HashMap<String, String> = mapping.clone();
+            // Encode mapping as key=value pairs in params. `mapping` is a
+            // `BTreeMap` (Issue #1060); `params` is the proto's `HashMap`.
+            let p: HashMap<String, String> = mapping
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
             ("mapping", p)
         }
         CharFilterConfig::JapaneseIterationMark { kanji, kana } => {
@@ -625,7 +629,11 @@ fn char_filter_from_proto(proto: &v1::ComponentConfig) -> Result<CharFilterConfi
             replacement: proto.params.get("replacement").cloned().unwrap_or_default(),
         }),
         "mapping" => Ok(CharFilterConfig::Mapping {
-            mapping: proto.params.clone(),
+            mapping: proto
+                .params
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
         }),
         "japanese_iteration_mark" => Ok(CharFilterConfig::JapaneseIterationMark {
             kanji: proto.params.get("kanji").is_none_or(|v| v != "false"),

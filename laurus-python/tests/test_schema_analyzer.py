@@ -224,8 +224,9 @@ def test_to_toml_then_from_toml_round_trip():
     toml_str = schema.to_toml()
     restored = laurus.Schema.from_toml(toml_str)
 
-    # Compare parsed structure, not raw text: the underlying maps are
-    # unordered, so table order in the TOML text is not stable.
+    # Compare parsed structure rather than raw text: it's the more direct
+    # check for round-tripping, even though table order in the TOML text
+    # is now stable and sorted by key (Issue #1060).
     assert restored.field_names() == schema.field_names()
     assert restored.analyzer_names() == schema.analyzer_names()
 

@@ -126,7 +126,7 @@ pub fn create_analyzer_by_name(name: &str) -> Result<Arc<dyn Analyzer>> {
 /// [`EngineBuilder::register_runtime_analyzer`]: crate::engine::EngineBuilder::register_runtime_analyzer
 pub fn create_analyzer_from_spec(
     spec: &AnalyzerSpec,
-    schema_analyzers: &std::collections::HashMap<String, AnalyzerDefinition>,
+    schema_analyzers: &std::collections::BTreeMap<String, AnalyzerDefinition>,
     runtime_analyzers: &std::collections::HashMap<String, Arc<dyn Analyzer>>,
 ) -> Result<Arc<dyn Analyzer>> {
     match spec {
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn test_create_named_from_spec_falls_back_to_schema_analyzers() {
         let spec = AnalyzerSpec::Named("my_custom".into());
-        let mut analyzers = std::collections::HashMap::new();
+        let mut analyzers = std::collections::BTreeMap::new();
         analyzers.insert(
             "my_custom".to_string(),
             AnalyzerDefinition {

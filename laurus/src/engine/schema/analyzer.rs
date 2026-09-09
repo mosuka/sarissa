@@ -15,7 +15,7 @@
 //! }
 //! ```
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -185,8 +185,9 @@ pub enum CharFilterConfig {
 
     /// Replaces strings using a mapping dictionary.
     Mapping {
-        /// Key-value pairs for replacement.
-        mapping: HashMap<String, String>,
+        /// Key-value pairs for replacement. A `BTreeMap` (not `HashMap`)
+        /// so schema serialization stays deterministic (Issue #1060).
+        mapping: BTreeMap<String, String>,
     },
 
     /// Expands Japanese iteration marks (踊り字).

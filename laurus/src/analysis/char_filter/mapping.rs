@@ -1,5 +1,5 @@
 use aho_corasick::{AhoCorasick, MatchKind};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::{CharFilter, Transformation};
 
@@ -9,7 +9,7 @@ pub struct MappingCharFilter {
 }
 
 impl MappingCharFilter {
-    pub fn new(mapping: HashMap<String, String>) -> crate::error::Result<Self> {
+    pub fn new(mapping: BTreeMap<String, String>) -> crate::error::Result<Self> {
         let mut keys = Vec::new();
         let mut replacements = Vec::new();
 
@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn test_mapping_char_filter() {
-        let mut mapping = HashMap::new();
+        let mut mapping = BTreeMap::new();
         mapping.insert("ph".to_string(), "f".to_string());
         mapping.insert("qu".to_string(), "k".to_string());
 
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn test_mapping_expansion() {
-        let mut mapping = HashMap::new();
+        let mut mapping = BTreeMap::new();
         mapping.insert("a".to_string(), "aaa".to_string());
         let filter = MappingCharFilter::new(mapping).unwrap();
         let (output, trans) = filter.filter("bab");
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_mapping_deletion() {
-        let mut mapping = HashMap::new();
+        let mut mapping = BTreeMap::new();
         mapping.insert("foo".to_string(), "".to_string());
         let filter = MappingCharFilter::new(mapping).unwrap();
         let (output, trans) = filter.filter("afoob");
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_mapping_overlap() {
-        let mut mapping = HashMap::new();
+        let mut mapping = BTreeMap::new();
         mapping.insert("ab".to_string(), "1".to_string());
         mapping.insert("abc".to_string(), "2".to_string());
         let filter = MappingCharFilter::new(mapping).unwrap();
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_mapping_multibyte() {
-        let mut mapping = HashMap::new();
+        let mut mapping = BTreeMap::new();
         mapping.insert("壱".to_string(), "1".to_string());
         let filter = MappingCharFilter::new(mapping).unwrap();
 
