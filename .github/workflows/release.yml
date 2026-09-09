@@ -31,7 +31,6 @@ jobs:
   # ============================================================
   clippy:
     name: Clippy
-    needs: [format]
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
@@ -70,7 +69,6 @@ jobs:
   # ============================================================
   test-laurus:
     name: Test laurus
-    needs: [clippy]
     strategy:
       fail-fast: false
       matrix:
@@ -119,7 +117,6 @@ jobs:
   # ============================================================
   test-server:
     name: Test laurus-server
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -171,7 +168,6 @@ jobs:
   # ============================================================
   test-mcp:
     name: Test laurus-mcp
-    needs: [test-laurus, test-server]
     strategy:
       fail-fast: false
       matrix:
@@ -223,7 +219,6 @@ jobs:
   # ============================================================
   test-cli:
     name: Test laurus-cli
-    needs: [test-laurus, test-server, test-mcp]
     strategy:
       fail-fast: false
       matrix:
@@ -275,7 +270,6 @@ jobs:
   # ============================================================
   test-python:
     name: Test laurus-python
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -333,7 +327,6 @@ jobs:
   # ============================================================
   test-nodejs:
     name: Test laurus-nodejs
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -379,7 +372,6 @@ jobs:
   # ============================================================
   test-ruby:
     name: Test laurus-ruby
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -428,7 +420,6 @@ jobs:
   # ============================================================
   test-php:
     name: Test laurus-php
-    needs: [test-laurus]
     strategy:
       fail-fast: false
       matrix:
@@ -487,7 +478,6 @@ jobs:
   # ============================================================
   test-wasm:
     name: Test laurus-wasm
-    needs: [test-laurus]
     runs-on: ubuntu-latest
     steps:
       - name: Run checkout
@@ -515,9 +505,17 @@ jobs:
   # ============================================================
   test-all:
     name: Test All
-    if: ${{ !failure() && !cancelled() }}
+    # DAG jobs above no longer depend on each other, so a lint failure no
+    # longer skips them transitively -- format/clippy must be listed
+    # explicitly to keep gating on lint. `!cancelled()` (rather than
+    # `!failure() && !cancelled()`) lets this step run even when a need was
+    # cancelled, so the explicit result check below can tell "cancelled"
+    # apart from "succeeded" instead of both silently passing.
+    if: ${{ !cancelled() }}
     needs:
       [
+        format,
+        clippy,
         test-laurus,
         test-cli,
         test-server,
@@ -530,8 +528,17 @@ jobs:
       ]
     runs-on: ubuntu-latest
     steps:
-      - name: All tests passed
-        run: echo "All tests passed"
+      - name: Check that no required job failed or was cancelled
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "ERROR: at least one required job failed" >&2
+            exit 1
+          fi
+          if [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "ERROR: at least one required job was cancelled" >&2
+            exit 1
+          fi
+          echo "All tests passed"
 
   # ============================================================
   # Build release binaries
