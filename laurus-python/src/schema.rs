@@ -666,9 +666,12 @@ impl PySchema {
     ///     FileNotFoundError: if the file does not exist.
     ///     ValueError: if the file's contents are not valid schema TOML.
     #[staticmethod]
-    pub fn from_toml_file(path: PathBuf) -> PyResult<Self> {
-        let content = std::fs::read_to_string(&path).map_err(|e| io_err_with_path(&path, e))?;
-        Self::from_toml(&content)
+    pub fn from_toml_file(py: Python, path: PathBuf) -> PyResult<Self> {
+        let inner = py.detach(|| -> PyResult<Schema> {
+            let content = std::fs::read_to_string(&path).map_err(|e| io_err_with_path(&path, e))?;
+            Schema::from_toml(&content).map_err(schema_toml_err)
+        })?;
+        Ok(Self { inner })
     }
 
     /// Serialize this schema to a TOML string, in the same format
@@ -684,10 +687,9 @@ impl PySchema {
     }
 
     /// Write this schema to a TOML file (see [`Schema.to_toml`]).
-    pub fn to_toml_file(&self, path: PathBuf) -> PyResult<()> {
+    pub fn to_toml_file(&self, py: Python, path: PathBuf) -> PyResult<()> {
         let content = self.to_toml()?;
-        std::fs::write(&path, content).map_err(|e| io_err_with_path(&path, e))?;
-        Ok(())
+        py.detach(|| std::fs::write(&path, content).map_err(|e| io_err_with_path(&path, e)))
     }
 
     /// Set the default fields used when no field is specified in a query.

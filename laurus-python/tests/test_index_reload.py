@@ -11,7 +11,17 @@ is what makes "pick up an external commit" testable deterministically: the
 directory lock (Issue #1086) is a single, process-wide exclusive lock, so
 simulating "another process wrote" only requires a second `Index` handle
 that opens after the first one closes.
+
+Since Issue #1103 releases the GIL during `Index` method calls, `reload()`
+(and `close()`) can now genuinely race an in-flight call from another
+thread. Both take `&mut self`, which pyo3 only grants as an *exclusive*
+borrow -- it cannot be acquired while another call's ordinary `&self`
+(shared) borrow is outstanding. See `test_reload_raises_when_it_races_a_
+concurrent_call` below.
 """
+
+import threading
+import time
 
 import laurus
 
@@ -84,3 +94,37 @@ def test_commit_generation_matches_stats(tmp_path):
     index.commit()
 
     assert index.commit_generation() == index.stats()["commit_generation"]
+
+
+def test_reload_raises_when_it_races_a_concurrent_call(tmp_path):
+    index = _index_with_title_field(str(tmp_path))
+    index.put_documents([(f"doc{i}", {"title": f"doc {i}"}) for i in range(50_000)])
+    index.commit()
+
+    start_barrier = threading.Event()
+    result = {}
+
+    def searcher():
+        start_barrier.wait()
+        # Long enough to keep a shared borrow on `index` outstanding while
+        # `reloader` tries to acquire an exclusive one.
+        index.search_batch(["title:doc"] * 200, limit=10)
+
+    def reloader():
+        start_barrier.wait()
+        time.sleep(0.02)  # let the searcher acquire its shared borrow first
+        try:
+            index.reload()
+            result["error"] = None
+        except RuntimeError as e:
+            result["error"] = str(e)
+
+    t_search = threading.Thread(target=searcher)
+    t_reload = threading.Thread(target=reloader)
+    t_search.start()
+    t_reload.start()
+    start_barrier.set()
+    t_search.join()
+    t_reload.join()
+
+    assert result["error"] == "Already borrowed"

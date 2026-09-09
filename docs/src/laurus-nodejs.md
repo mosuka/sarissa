@@ -53,8 +53,10 @@ without blocking it. Schema construction, query creation, and
 > **Note:** The Python binding (`laurus-python`) exposes the
 > same Rust engine methods as **synchronous** functions because
 > Python's GIL (Global Interpreter Lock) makes an async API
-> cumbersome. Node.js has no such constraint, so the async Rust
-> engine is exposed directly as Promises.
+> cumbersome (each call still releases the GIL while its Rust
+> work runs, so it isn't single-threaded -- see the Python
+> binding's docs). Node.js has no such constraint, so the async
+> Rust engine is exposed directly as Promises.
 
 ## Quick Start
 

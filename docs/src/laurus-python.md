@@ -35,11 +35,23 @@ then executes the operation entirely in native code.
 
 Although the Rust engine uses async I/O internally, all Python
 methods are exposed as **synchronous** functions. This is because
-Python's GIL (Global Interpreter Lock) prevents true concurrent
-execution within a single interpreter, making an async API
-cumbersome (it would require `asyncio.run()` everywhere).
-Instead, each method calls `tokio::Runtime::block_on()` under
-the hood to bridge async Rust to synchronous Python.
+Python's GIL (Global Interpreter Lock) would make an async API
+cumbersome (it would require `asyncio.run()` everywhere). Instead,
+each method calls `tokio::Runtime::block_on()` under the hood to
+bridge async Rust to synchronous Python, releasing the GIL for the
+duration of that call (`Python::detach`, Issue #1103) so other
+Python threads keep running while it's in flight -- a
+multi-threaded server genuinely benefits from more worker threads,
+rather than every call serializing on the GIL as before.
+
+Because Python threads can now be concurrent writers for the first
+time, the engine's existing concurrency caveats become reachable
+from Python: `commit()` is not serialized against concurrent
+`put`/`add`/`delete` calls, and `CommitPolicy` auto-commit
+guarantees hold for single-writer ingestion -- best-effort under
+concurrent writers on a shared `Index`. Use explicit `commit()`
+calls, or a single ingest thread, when you need those guarantees
+under concurrency.
 
 > **Note:** The Node.js binding (`laurus-nodejs`) exposes the
 > same Rust engine methods as native `async` / `Promise` APIs,

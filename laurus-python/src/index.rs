@@ -315,6 +315,15 @@ pub struct PyIndex {
     last_generation: u64,
 }
 
+// Every engine call below releases the GIL via `py.detach`, so two Python
+// threads can now hold `&PyIndex` at the same time. pyo3 only enforces
+// `Send` on GIL-enabled builds, so assert `Sync` here: a future field that
+// isn't `Sync` must not silently break that.
+const _: () = {
+    const fn assert_sync<T: Sync>() {}
+    assert_sync::<PyIndex>();
+};
+
 #[pymethods]
 impl PyIndex {
     /// Create a new index, or reopen an existing one.
@@ -354,6 +363,7 @@ impl PyIndex {
     #[new]
     #[pyo3(signature = (path=None, schema=None, wal_sync_policy=None, commit_policy=None))]
     pub fn new(
+        py: Python,
         path: Option<String>,
         schema: Option<&PySchema>,
         wal_sync_policy: Option<&PyWalSyncPolicy>,
@@ -363,17 +373,24 @@ impl PyIndex {
             tokio::runtime::Runtime::new().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
         let schema_arg = schema.map(|s| s.inner.clone());
-        let (schema_arg, storage) = resolve_storage_and_schema(path.as_deref(), schema_arg)?;
+        let wal_sync_policy_inner = wal_sync_policy.map(|p| p.inner);
+        let commit_policy_inner = commit_policy.map(|p| p.inner);
+        let path_for_resolve = path.clone();
 
-        let mut builder = Engine::builder(storage, schema_arg);
-        if let Some(p) = wal_sync_policy {
-            builder = builder.wal_sync_policy(p.inner);
-        }
-        if let Some(p) = commit_policy {
-            builder = builder.commit_policy(p.inner);
-        }
+        let engine = py.detach(|| -> PyResult<Engine> {
+            let (schema_arg, storage) =
+                resolve_storage_and_schema(path_for_resolve.as_deref(), schema_arg)?;
 
-        let engine = rt.block_on(builder.build()).map_err(laurus_err)?;
+            let mut builder = Engine::builder(storage, schema_arg);
+            if let Some(p) = wal_sync_policy_inner {
+                builder = builder.wal_sync_policy(p);
+            }
+            if let Some(p) = commit_policy_inner {
+                builder = builder.commit_policy(p);
+            }
+
+            rt.block_on(builder.build()).map_err(laurus_err)
+        })?;
 
         Ok(Self {
             last_schema: Some(engine.schema()),
@@ -395,8 +412,12 @@ impl PyIndex {
     /// method raises `RuntimeError` after `close()` has been called --
     /// **except** [`Self::reload`], which is documented to work after
     /// `close()` too.
-    pub fn close(&mut self) {
-        self.engine = None;
+    pub fn close(&mut self, py: Python) {
+        let engine = self.engine.take();
+        // Dropping the last `Arc<Engine>` releases the storage lock
+        // (Issue #1086/#1097), which is blocking I/O -- do it with the GIL
+        // released.
+        py.detach(|| drop(engine));
     }
 
     /// Rebuild this index's `Engine` from the directory it was constructed
@@ -423,9 +444,14 @@ impl PyIndex {
     /// first place, so there would be nothing for `reload()` to ever pick
     /// up. `reload()` instead releases the lock and immediately reacquires
     /// it while rebuilding, back to back within this one call. This is safe
-    /// from same-process races: this crate never calls `py.allow_threads`,
-    /// so the GIL already serializes every `Index` method call -- no other
-    /// Python thread can be mid-call on this object while `reload()` runs.
+    /// from same-process races without any extra locking: `reload()` and
+    /// `close()` take `&mut self`, which pyo3 only grants as an *exclusive*
+    /// borrow (`PyRefMut`) -- it cannot be acquired while any other method
+    /// call (an ordinary `&self` / shared borrow, held for that call's full
+    /// duration, GIL released or not) is in flight on this object. A
+    /// `reload()`/`close()` that overlaps another in-flight call instead
+    /// fails fast with `RuntimeError: Already borrowed`, rather than racing
+    /// silently; callers that see this are expected to retry.
     ///
     /// # Embedder reuse
     ///
@@ -450,7 +476,7 @@ impl PyIndex {
     /// Returns:
     ///     `True` if the commit generation advanced (something was actually
     ///     picked up), `False` if the index was already up to date.
-    pub fn reload(&mut self) -> PyResult<bool> {
+    pub fn reload(&mut self, py: Python) -> PyResult<bool> {
         let path = self.path.clone().ok_or_else(reload_requires_path_err)?;
 
         // Read the generation off the *live* engine, if there is one, not
@@ -471,26 +497,33 @@ impl PyIndex {
         // cannot instead hold the lock across the whole call.
         self.engine = None;
 
-        let (new_schema, storage) =
-            laurus::index_dir::open_or_create(Path::new(&path), None).map_err(index_dir_err)?;
+        let last_schema = self.last_schema.clone();
+        let last_embedder = self.last_embedder.clone();
+        let wal_sync_policy = self.wal_sync_policy.as_ref().map(|p| p.inner);
+        let commit_policy = self.commit_policy.as_ref().map(|p| p.inner);
+        let rt = self.rt.clone();
 
-        let reuse_embedder = self
-            .last_schema
-            .as_ref()
-            .is_some_and(|old_schema| schemas_match_for_embedder_reuse(old_schema, &new_schema));
+        let engine = py.detach(move || -> PyResult<Engine> {
+            let (new_schema, storage) =
+                laurus::index_dir::open_or_create(Path::new(&path), None).map_err(index_dir_err)?;
 
-        let mut builder = Engine::builder(storage, new_schema);
-        if reuse_embedder && let Some(embedder) = &self.last_embedder {
-            builder = builder.embedder(embedder.clone());
-        }
-        if let Some(policy) = &self.wal_sync_policy {
-            builder = builder.wal_sync_policy(policy.inner);
-        }
-        if let Some(policy) = &self.commit_policy {
-            builder = builder.commit_policy(policy.inner);
-        }
+            let reuse_embedder = last_schema.as_ref().is_some_and(|old_schema| {
+                schemas_match_for_embedder_reuse(old_schema, &new_schema)
+            });
 
-        let engine = self.rt.block_on(builder.build()).map_err(laurus_err)?;
+            let mut builder = Engine::builder(storage, new_schema);
+            if reuse_embedder && let Some(embedder) = &last_embedder {
+                builder = builder.embedder(embedder.clone());
+            }
+            if let Some(policy) = wal_sync_policy {
+                builder = builder.wal_sync_policy(policy);
+            }
+            if let Some(policy) = commit_policy {
+                builder = builder.commit_policy(policy);
+            }
+
+            rt.block_on(builder.build()).map_err(laurus_err)
+        })?;
 
         let changed = engine.commit_generation() != baseline_generation;
         self.last_schema = Some(engine.schema());
@@ -530,8 +563,7 @@ impl PyIndex {
         let document = dict_to_document(py, doc)?;
         let engine = self.engine()?;
         let id = id.to_string();
-        self.rt
-            .block_on(engine.put_document(&id, document))
+        py.detach(|| self.rt.block_on(engine.put_document(&id, document)))
             .map_err(laurus_err)
     }
 
@@ -547,8 +579,7 @@ impl PyIndex {
         let document = dict_to_document(py, doc)?;
         let engine = self.engine()?;
         let id = id.to_string();
-        self.rt
-            .block_on(engine.add_document(&id, document))
+        py.detach(|| self.rt.block_on(engine.add_document(&id, document)))
             .map_err(laurus_err)
     }
 
@@ -572,8 +603,7 @@ impl PyIndex {
             return Ok(());
         }
         let engine = self.engine()?;
-        self.rt
-            .block_on(engine.put_documents(batch))
+        py.detach(|| self.rt.block_on(engine.put_documents(batch)))
             .map_err(laurus_err)
     }
 
@@ -592,8 +622,7 @@ impl PyIndex {
             return Ok(());
         }
         let engine = self.engine()?;
-        self.rt
-            .block_on(engine.add_documents(batch))
+        py.detach(|| self.rt.block_on(engine.add_documents(batch)))
             .map_err(laurus_err)
     }
 
@@ -603,9 +632,8 @@ impl PyIndex {
     pub fn get_documents(&self, py: Python, id: &str) -> PyResult<Vec<Py<PyAny>>> {
         let engine = self.engine()?;
         let id = id.to_string();
-        let docs = self
-            .rt
-            .block_on(engine.get_documents(&id))
+        let docs = py
+            .detach(|| self.rt.block_on(engine.get_documents(&id)))
             .map_err(laurus_err)?;
         docs.iter().map(|doc| document_to_dict(py, doc)).collect()
     }
@@ -613,18 +641,18 @@ impl PyIndex {
     /// Delete all document versions stored under `id`.
     ///
     /// Call [`commit`] to make the deletion visible to searches.
-    pub fn delete_documents(&self, _py: Python, id: &str) -> PyResult<()> {
+    pub fn delete_documents(&self, py: Python, id: &str) -> PyResult<()> {
         let engine = self.engine()?;
         let id = id.to_string();
-        self.rt
-            .block_on(engine.delete_documents(&id))
+        py.detach(|| self.rt.block_on(engine.delete_documents(&id)))
             .map_err(laurus_err)
     }
 
     /// Flush buffered writes and make all pending changes searchable.
-    pub fn commit(&self, _py: Python) -> PyResult<()> {
+    pub fn commit(&self, py: Python) -> PyResult<()> {
         let engine = self.engine()?;
-        self.rt.block_on(engine.commit()).map_err(laurus_err)
+        py.detach(|| self.rt.block_on(engine.commit()))
+            .map_err(laurus_err)
     }
 
     /// Force any buffered Write-Ahead Log (WAL) appends to be flushed
@@ -649,8 +677,9 @@ impl PyIndex {
     /// Raises:
     ///     An exception if the underlying WAL flush fails (for example, an I/O
     ///     error while fsync'ing).
-    pub fn flush_wal(&self, _py: Python) -> PyResult<()> {
-        self.engine()?.flush_wal().map_err(laurus_err)
+    pub fn flush_wal(&self, py: Python) -> PyResult<()> {
+        let engine = self.engine()?;
+        py.detach(|| engine.flush_wal()).map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -681,9 +710,8 @@ impl PyIndex {
         let request = build_request_from_py(py, query, limit, offset)?;
 
         let engine = self.engine()?;
-        let results = self
-            .rt
-            .block_on(engine.search(request))
+        let results = py
+            .detach(|| self.rt.block_on(engine.search(request)))
             .map_err(laurus_err)?;
 
         results
@@ -740,9 +768,8 @@ impl PyIndex {
         }
 
         let engine = self.engine()?;
-        let batch_results = self
-            .rt
-            .block_on(engine.search_batch(requests))
+        let batch_results = py
+            .detach(|| self.rt.block_on(engine.search_batch(requests)))
             .map_err(laurus_err)?;
 
         batch_results
@@ -774,10 +801,7 @@ impl PyIndex {
     ///     nothing new to apply (e.g. an idle auto-commit tick).
     pub fn stats(&self, py: Python) -> PyResult<Py<PyAny>> {
         let engine = self.engine()?;
-        let stats: EngineStats = self
-            .rt
-            .block_on(async { engine.stats() })
-            .map_err(laurus_err)?;
+        let stats: EngineStats = py.detach(|| engine.stats()).map_err(laurus_err)?;
         let dict = PyDict::new(py);
         dict.set_item("document_count", stats.document_count)?;
         let vf = PyDict::new(py);
@@ -883,8 +907,9 @@ fn resolve_storage_and_schema(
 ///     ValueError: if `path` has no persisted schema at all (not a laurus
 ///         index directory).
 #[pyfunction]
-pub fn peek_commit_generation(path: String) -> PyResult<u64> {
-    laurus::index_dir::peek_commit_generation(Path::new(&path)).map_err(index_dir_err)
+pub fn peek_commit_generation(py: Python, path: String) -> PyResult<u64> {
+    py.detach(|| laurus::index_dir::peek_commit_generation(Path::new(&path)))
+        .map_err(index_dir_err)
 }
 
 // ---------------------------------------------------------------------------
