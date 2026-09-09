@@ -2939,6 +2939,7 @@ dependencies = [
  "chrono",
  "laurus",
  "magnus",
+ "rb-sys",
  "tokio",
 ]
 

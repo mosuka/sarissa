@@ -36,7 +36,28 @@ then executes the operation entirely in native code.
 Although the Rust engine uses async I/O internally, all Ruby
 methods are exposed as **synchronous** functions. Each method
 calls `tokio::Runtime::block_on()` under the hood to bridge
-async Rust to synchronous Ruby.
+async Rust to synchronous Ruby, releasing the GVL (Global VM
+Lock) for the duration of that call (Issue #1103) so other Ruby
+threads keep running while it's in flight -- a multi-threaded
+server genuinely benefits from more worker threads, rather than
+every call serializing on the GVL.
+
+Because Ruby threads can now be concurrent writers for the first
+time, the engine's existing concurrency caveats become reachable
+from Ruby: `commit` is not serialized against concurrent
+`put`/`add`/`delete` calls, and `CommitPolicy` auto-commit
+guarantees hold for single-writer ingestion -- best-effort under
+concurrent writers on a shared `Index`. Use explicit `commit`
+calls, or a single ingest thread, when you need those guarantees
+under concurrency.
+
+Unlike the Python binding, `close` does not wait for any
+in-flight call on another thread before returning: Magnus only
+ever hands a plain `&self` to `#[magnus::wrap]` methods, so there
+is no borrow-checker mechanism here to make `close` exclusive.
+If another thread is still mid-call when `close` runs, that
+call's own reference keeps the underlying engine (and its
+storage lock) alive until the call returns.
 
 ## Quick Start
 
