@@ -117,6 +117,14 @@ pub struct TopFieldCollector<'a> {
     total_hits: u64,
     /// Reference to the index reader for accessing field values.
     reader: &'a dyn crate::lexical::reader::LexicalIndexReader,
+    /// Whether `field_name` has a DocValues column, resolved once at
+    /// construction (Issue #1053). `field_name` is fixed for the whole
+    /// collector's lifetime, so caching this here -- rather than
+    /// re-probing per document -- avoids paying a lock-guarded
+    /// `has_doc_values` check on every hit for no benefit; mirrors the
+    /// same per-field caching `FacetCollector::collect_doc` does for the
+    /// same reason (#597).
+    has_dv: bool,
 }
 
 impl<'a> TopFieldCollector<'a> {
@@ -127,6 +135,7 @@ impl<'a> TopFieldCollector<'a> {
         ascending: bool,
         reader: &'a dyn crate::lexical::reader::LexicalIndexReader,
     ) -> Self {
+        let has_dv = reader.has_doc_values(&field_name);
         TopFieldCollector {
             max_docs,
             min_score: 0.0,
@@ -135,6 +144,7 @@ impl<'a> TopFieldCollector<'a> {
             hits: BinaryHeap::new(),
             total_hits: 0,
             reader,
+            has_dv,
         }
     }
 
@@ -146,6 +156,7 @@ impl<'a> TopFieldCollector<'a> {
         ascending: bool,
         reader: &'a dyn crate::lexical::reader::LexicalIndexReader,
     ) -> Self {
+        let has_dv = reader.has_doc_values(&field_name);
         TopFieldCollector {
             max_docs,
             min_score,
@@ -154,18 +165,33 @@ impl<'a> TopFieldCollector<'a> {
             hits: BinaryHeap::new(),
             total_hits: 0,
             reader,
+            has_dv,
         }
     }
 
-    /// Get the field value for a document using DocValues.
-    /// DocValues provide efficient column-oriented storage for field values.
+    /// Get the field value for a document, preferring DocValues.
+    ///
+    /// When `field_name` has no DocValues column, falls back to the
+    /// stored document (Issue #1053) instead of yielding `Null` --
+    /// otherwise every value compares equal and sorting silently
+    /// degrades to doc-id order. Mirrors `FacetCollector::collect_doc`'s
+    /// stored-document fallback for the same absent-column case.
     fn get_field_value(&self, doc_id: u64) -> crate::lexical::core::field::FieldValue {
-        // Get field value from DocValues (efficient column-oriented storage)
-        if let Ok(Some(value)) = self.reader.get_doc_value(&self.field_name, doc_id) {
-            value
-        } else {
-            // Return Null if field not found
-            crate::lexical::core::field::FieldValue::Null
+        use crate::lexical::core::field::FieldValue;
+
+        if self.has_dv {
+            return match self.reader.get_doc_value(&self.field_name, doc_id) {
+                Ok(Some(value)) => value,
+                _ => FieldValue::Null,
+            };
+        }
+
+        match self.reader.document(doc_id) {
+            Ok(Some(document)) => document
+                .get(&self.field_name)
+                .cloned()
+                .unwrap_or(FieldValue::Null),
+            _ => FieldValue::Null,
         }
     }
 
@@ -987,6 +1013,12 @@ mod tests {
         ) -> Result<Option<crate::lexical::core::field::FieldValue>> {
             Ok(self.values.get(&doc_id).cloned())
         }
+        fn has_doc_values(&self, _field: &str) -> bool {
+            // This mock exists to exercise the DocValues path -- see
+            // `DocFallbackMockReader` below for the stored-document
+            // fallback path (Issue #1053).
+            true
+        }
     }
 
     /// Build a `TopFieldCollector` over an `Int64` field named `"value"`
@@ -1202,5 +1234,132 @@ mod tests {
             );
             assert_eq!(compare_sort_key(&other, &FieldValue::Null), Ordering::Less);
         }
+    }
+
+    /// Reader with no DocValues at all, serving field values from stored
+    /// documents instead (Issue #1053). Mirrors the shape of `DvMockReader`
+    /// in `lexical::search::features::facet`, minus the per-field DocValues
+    /// toggle -- `TopFieldCollector` tests here only need the
+    /// no-DocValues-at-all case, since `has_dv` is resolved once for the
+    /// single sort field, not per document.
+    #[derive(Debug)]
+    struct DocFallbackMockReader {
+        docs: Vec<crate::Document>,
+    }
+
+    impl DocFallbackMockReader {
+        fn new(docs: Vec<crate::Document>) -> Self {
+            Self { docs }
+        }
+    }
+
+    impl crate::lexical::reader::LexicalIndexReader for DocFallbackMockReader {
+        fn doc_count(&self) -> u64 {
+            self.docs.len() as u64
+        }
+        fn max_doc(&self) -> u64 {
+            self.docs.len() as u64
+        }
+        fn is_deleted(&self, _doc_id: u64) -> bool {
+            false
+        }
+        fn document(&self, doc_id: u64) -> Result<Option<crate::Document>> {
+            Ok(self.docs.get(doc_id as usize).cloned())
+        }
+        fn term_info(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+            Ok(None)
+        }
+        fn postings(
+            &self,
+            _field: &str,
+            _term: &str,
+        ) -> Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>> {
+            Ok(None)
+        }
+        fn field_stats(&self, _field: &str) -> Result<Option<crate::lexical::reader::FieldStats>> {
+            Ok(None)
+        }
+        fn close(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn is_closed(&self) -> bool {
+            false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        // `get_doc_value`/`has_doc_values` deliberately left at the
+        // trait's defaults (`Ok(None)` / `false`): this reader simulates a
+        // field with no DocValues column at all.
+    }
+
+    /// Issue #1053 regression: sorting by a `Bytes` field with no
+    /// DocValues column must order by content, not silently degrade to
+    /// doc-id order. Three documents hold content `[2]`, `[3]`, `[1]` at
+    /// doc ids `0`, `1`, `2` respectively, so content order (`[1] < [2] <
+    /// [3]`, i.e. doc ids `2, 0, 1`) differs from doc-id order (`0, 1,
+    /// 2`) -- this one test is red before the stored-document fallback
+    /// (every value resolves to `Null`, yielding doc-id order `[0, 1,
+    /// 2]`) and green after (content order `[2, 0, 1]`), directly
+    /// distinguishing the two behaviors.
+    #[test]
+    fn test_top_field_collector_bytes_sort_falls_back_to_stored_document() {
+        let docs = vec![
+            crate::Document::builder()
+                .add_bytes("blob", vec![2])
+                .build(), // doc_id 0
+            crate::Document::builder()
+                .add_bytes("blob", vec![3])
+                .build(), // doc_id 1
+            crate::Document::builder()
+                .add_bytes("blob", vec![1])
+                .build(), // doc_id 2
+        ];
+        let reader = DocFallbackMockReader::new(docs);
+        let mut collector = TopFieldCollector::new(3, "blob".to_string(), true, &reader);
+        for doc_id in 0..3 {
+            collector.collect(doc_id, 0.0).unwrap();
+        }
+        let ids: Vec<u64> = collector.results().iter().map(|h| h.doc_id).collect();
+        assert_eq!(
+            ids,
+            vec![2, 0, 1],
+            "must order by content ([1] < [2] < [3]), not doc id"
+        );
+    }
+
+    /// Issue #1053 acceptance criterion: `Vector` fields genuinely have no
+    /// ordering (`compare_sort_key` falls through to `sort_type_rank`,
+    /// which gives every `Vector` the same rank), so the stored-document
+    /// fallback must not change their sort order -- it stays doc-id order
+    /// either way.
+    #[test]
+    fn test_top_field_collector_vector_sort_unaffected_by_stored_document_fallback() {
+        let docs = vec![
+            crate::Document::builder()
+                .add_vector("embedding", vec![3.0, 0.0])
+                .build(), // doc_id 0
+            crate::Document::builder()
+                .add_vector("embedding", vec![1.0, 0.0])
+                .build(), // doc_id 1
+            crate::Document::builder()
+                .add_vector("embedding", vec![2.0, 0.0])
+                .build(), // doc_id 2
+        ];
+        let reader = DocFallbackMockReader::new(docs);
+        let mut collector = TopFieldCollector::new(3, "embedding".to_string(), true, &reader);
+        for doc_id in 0..3 {
+            collector.collect(doc_id, 0.0).unwrap();
+        }
+        let ids: Vec<u64> = collector.results().iter().map(|h| h.doc_id).collect();
+        assert_eq!(
+            ids,
+            vec![0, 1, 2],
+            "Vector values always tie on rank, so order stays doc-id order"
+        );
     }
 }

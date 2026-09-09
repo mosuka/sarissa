@@ -929,15 +929,22 @@ impl InvertedIndexWriter {
     /// Check if we should flush the current segment.
     /// Whether a stored value is worth a DocValues column (#1047).
     ///
-    /// DocValues serves sorting and faceting only. Sorting cannot order
-    /// `Bytes` or `Vector` values — [`sort_type_rank`] gives each variant a
-    /// single rank with no inner comparison, so every value of such a field
-    /// compares equal — and faceting reads the stored document when a column
-    /// is absent. Copying these payloads into a second on-disk structure
-    /// therefore doubles what the segment writes and buys nothing; a
-    /// thumbnail or an embedding is often the largest value in the document.
+    /// DocValues serves sorting and faceting only, and both fall back to
+    /// reading the stored document when a column is absent
+    /// ([`TopFieldCollector::get_field_value`], `FacetCollector::collect_doc`)
+    /// — so excluding a value from DocValues costs a stored-document decode
+    /// per hit, not correctness (#1053). `Vector` values genuinely have no
+    /// ordering ([`sort_type_rank`] gives every `Vector` the same rank, so
+    /// they always compare as ties regardless of where the value comes
+    /// from); `Bytes` *does* order lexicographically (`compare_sort_key`'s
+    /// explicit `Bytes` arm) but is excluded anyway, purely because copying
+    /// it into a second on-disk structure doubles what the segment writes
+    /// for no benefit — a thumbnail or a small blob is often the largest
+    /// value in the document, and the stored-document fallback already
+    /// recovers correct ordering when one is needed.
     ///
     /// [`sort_type_rank`]: crate::lexical::query::collector
+    /// [`TopFieldCollector::get_field_value`]: crate::lexical::query::collector::TopFieldCollector
     fn is_doc_values_candidate(value: &crate::data::DataValue) -> bool {
         !matches!(
             value,
