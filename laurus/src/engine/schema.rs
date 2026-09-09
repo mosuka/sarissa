@@ -456,9 +456,26 @@ fn classify_indexed_only(
 /// `old.stored` (the rebuild can source original text from the segment's
 /// stored fields) or `Destructive` otherwise (see
 /// [`classify_indexed_only`]'s doc comment).
+///
+/// `term_vectors: false -> true` needs the same rebuild as an analyzer
+/// change: existing postings were written without positions, and there is
+/// no way to recover them other than re-deriving the field from its
+/// original value — `Reindex` when `old.stored`, `Destructive` otherwise.
+/// `true -> false` is `MetadataOnly`: unlike `multi_valued` (where a stale
+/// on-disk shape can be misread under the new setting), a reader tells
+/// positions apart per-posting via the segment's own `any_positions`
+/// header, so leftover positions on disk are simply never read once the
+/// field's setting is `false` — no correctness risk either way (#1083).
 fn classify_text(old: &TextOption, new: &TextOption) -> FieldChangeKind {
     let mut kind = classify_indexed_only(old.indexed, new.indexed, old.stored);
     if old.analyzer != new.analyzer {
+        kind = kind.max(if old.stored {
+            FieldChangeKind::Reindex
+        } else {
+            FieldChangeKind::Destructive
+        });
+    }
+    if !old.term_vectors && new.term_vectors {
         kind = kind.max(if old.stored {
             FieldChangeKind::Reindex
         } else {
@@ -913,6 +930,24 @@ mod tests {
                 "text: indexed false->true on a stored:false field is destructive (no original text to index)",
                 text(|o| o.stored(false).indexed(false)),
                 text(|o| o.stored(false).indexed(true)),
+                Destructive,
+            ),
+            (
+                "text: term_vectors false->true requires reindex",
+                text(|o| o.term_vectors(false)),
+                text(|o| o.term_vectors(true)),
+                Reindex,
+            ),
+            (
+                "text: term_vectors true->false is metadata-only",
+                text(|o| o.term_vectors(true)),
+                text(|o| o.term_vectors(false)),
+                MetadataOnly,
+            ),
+            (
+                "text: term_vectors false->true on a stored:false field is destructive (no original text to re-derive positions from)",
+                text(|o| o.stored(false).term_vectors(false)),
+                text(|o| o.stored(false).term_vectors(true)),
                 Destructive,
             ),
             // ---- Integer ----
