@@ -3,12 +3,12 @@ default_fields = ["title", "body"]
 [fields.title.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.body.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.category.Text]
 indexed = true

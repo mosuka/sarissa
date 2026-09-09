@@ -345,7 +345,7 @@ fn prompt_text_option() -> Result<FieldOption> {
         .interact()?;
     let term_vectors = Confirm::new()
         .with_prompt("Term vectors?")
-        .default(false)
+        .default(true)
         .interact()?;
 
     let analyzer_choices = [

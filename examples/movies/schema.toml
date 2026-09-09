@@ -3,12 +3,12 @@ default_fields = ["title", "overview"]
 [fields.title.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.overview.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.genres.Text]
 indexed = true

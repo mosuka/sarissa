@@ -112,7 +112,8 @@ impl RbSchema {
     ///   - `name` (String): Field name.
     ///   - `stored:` (bool, default true): Whether the original value is retrievable.
     ///   - `indexed:` (bool, default true): Whether the field is searchable.
-    ///   - `term_vectors:` (bool, default false): Whether term position information is stored.
+    ///   - `term_vectors:` (bool, default true): Whether term positions are
+    ///     stored, required by phrase and span queries over this field.
     ///   - `analyzer:` (String, optional): Analyzer name. For
     ///     parameter-less built-ins (`"standard"`, `"english"`,
     ///     `"keyword"`, `"simple"`, `"noop"`) pass the name directly.
@@ -140,7 +141,7 @@ impl RbSchema {
         let (stored, indexed, term_vectors, analyzer) = kwargs.optional;
         let stored = stored.unwrap_or(true);
         let indexed = indexed.unwrap_or(true);
-        let term_vectors = term_vectors.unwrap_or(false);
+        let term_vectors = term_vectors.unwrap_or(true);
         let analyzer = analyzer.flatten().map(laurus::AnalyzerSpec::Named);
         self.inner.borrow_mut().fields.insert(
             name,

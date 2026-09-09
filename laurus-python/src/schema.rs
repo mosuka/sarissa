@@ -218,14 +218,14 @@ impl PySchema {
     ///     name: Field name.
     ///     stored: Whether the original value is retrievable (default True).
     ///     indexed: Whether the field is searchable (default True).
-    ///     term_vectors: Whether term position information is stored
-    ///         (default False).
+    ///     term_vectors: Whether term positions are stored, required by
+    ///         phrase and span queries over this field (default True).
     ///     analyzer: Either a string analyzer name (``"standard"``,
     ///         ``"english"``, ``"keyword"``, ``"simple"``, ``"noop"``, or
     ///         a custom name registered via ``add_analyzer``), or a dict
     ///         configuring a parameterized built-in preset such as
     ///         ``{"language": "japanese", "dict": "/var/lib/lindera/ipadic"}``.
-    #[pyo3(signature = (name, *, stored=true, indexed=true, term_vectors=false, analyzer=None))]
+    #[pyo3(signature = (name, *, stored=true, indexed=true, term_vectors=true, analyzer=None))]
     pub fn add_text_field(
         &mut self,
         py: Python<'_>,

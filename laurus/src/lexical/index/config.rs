@@ -51,10 +51,21 @@ pub struct InvertedIndexConfig {
     /// for indexing and retrieval operations.
     pub compress_stored_fields: bool,
 
-    /// Whether to store term vectors.
+    /// Index-wide default for whether term positions are stored.
     ///
-    /// Term vectors enable advanced features like highlighting and more-like-this
-    /// queries, but increase index size and indexing time.
+    /// Positions are what phrase (`PhraseQuery`) and span (`SpanNearQuery`
+    /// and friends) queries read — they are not a separate structure but
+    /// section 4 of each posting list, gated per list by an
+    /// `any_positions` byte. Nothing else consults them: BM25 reads the
+    /// posting list's own frequency section, and highlighting always
+    /// re-tokenizes the stored text.
+    ///
+    /// This is only the **default**. A `Text` field with an explicit
+    /// [`TextOption::term_vectors`](crate::lexical::core::field::TextOption)
+    /// overrides it (Issue #1083); this value governs schema-less fields,
+    /// reserved `_`-prefixed fields, and non-`Text` lexical variants.
+    /// Disabling it shrinks segments at the cost of phrase and span
+    /// queries over the fields it applies to.
     pub store_term_vectors: bool,
 
     /// Merge factor for segment merging.
@@ -128,7 +139,7 @@ impl Default for InvertedIndexConfig {
             max_docs_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             compress_stored_fields: false,
-            store_term_vectors: false,
+            store_term_vectors: true,
             merge_factor: 10,
             max_segments: 100,
             analyzer: std::sync::Arc::new(

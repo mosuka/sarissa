@@ -116,13 +116,14 @@ impl PhpSchema {
     /// * `name` - Field name.
     /// * `stored` - Whether the original value is retrievable (default: true).
     /// * `indexed` - Whether the field is searchable (default: true).
-    /// * `term_vectors` - Whether term position information is stored (default: false).
+    /// * `term_vectors` - Whether term positions are stored, required by
+    ///   phrase and span queries over this field (default: true).
     /// * `analyzer` - Optional analyzer name. For parameter-less built-in
     ///   analyzers (`"standard"`, `"english"`, `"keyword"`, `"simple"`,
     ///   `"noop"`) pass the name directly. Parameterized presets such as
     ///   the Japanese analyzer (which needs a Lindera dictionary path)
     ///   should be registered via `addAnalyzer` and referenced by name.
-    #[php(defaults(stored = true, indexed = true, term_vectors = false))]
+    #[php(defaults(stored = true, indexed = true, term_vectors = true))]
     pub fn add_text_field(
         &self,
         name: String,

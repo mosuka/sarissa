@@ -5,7 +5,7 @@
       "option": {
         "indexed": true,
         "stored": true,
-        "term_vectors": false
+        "term_vectors": true
       }
     },
     "body": {
@@ -13,7 +13,7 @@
       "option": {
         "indexed": true,
         "stored": true,
-        "term_vectors": false
+        "term_vectors": true
       }
     },
     "category": {
