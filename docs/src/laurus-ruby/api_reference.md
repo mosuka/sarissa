@@ -153,7 +153,7 @@ Laurus::Schema.new
 
 | Method | Description |
 | :--- | :--- |
-| `add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)` | Full-text field (inverted index, BM25). `analyzer:` is the name of a parameter-less built-in (`"standard"`, `"english"`, `"keyword"`, `"simple"`, `"noop"`) or a custom name registered via `add_analyzer`. The Japanese preset requires a Lindera dictionary path, so register it as a custom analyzer with a `lindera` tokenizer and reference it by name. |
+| `add_text_field(name, stored: true, indexed: true, term_vectors: true, analyzer: nil)` | Full-text field (inverted index, BM25). `term_vectors:` controls whether term positions are stored, read by phrase and span queries. `analyzer:` is the name of a parameter-less built-in (`"standard"`, `"english"`, `"keyword"`, `"simple"`, `"noop"`) or a custom name registered via `add_analyzer`. The Japanese preset requires a Lindera dictionary path, so register it as a custom analyzer with a `lindera` tokenizer and reference it by name. |
 | `add_integer_field(name, stored: true, indexed: true, multi_valued: false)` | 64-bit integer field. Pass `multi_valued: true` to accept arrays of integers (range queries match if any value satisfies the predicate). |
 | `add_float_field(name, stored: true, indexed: true, multi_valued: false)` | 64-bit float field. Pass `multi_valued: true` to accept arrays of floats (range queries match if any value satisfies the predicate). |
 | `add_boolean_field(name, stored: true, indexed: true)` | Boolean field. |

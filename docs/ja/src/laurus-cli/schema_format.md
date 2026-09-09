@@ -40,16 +40,16 @@ default_fields = ["title", "body"]
 
 ```toml
 [fields.title.Text]
-indexed = true       # このフィールドを検索用にインデックスするかどうか
-stored = true        # 取得用に元の値を保存するかどうか
-term_vectors = false # タームの位置を保存するかどうか（フレーズクエリ、ハイライト用）
+indexed = true      # このフィールドを検索用にインデックスするかどうか
+stored = true       # 取得用に元の値を保存するかどうか
+term_vectors = true # タームの位置を保存するかどうか（フレーズクエリ・スパンクエリ用）
 ```
 
 | オプション | 型 | デフォルト | 説明 |
 | :--- | :--- | :--- | :--- |
 | `indexed` | `bool` | `true` | このフィールドの検索を有効にする |
 | `stored` | `bool` | `true` | 結果に返せるよう元の値を保存する |
-| `term_vectors` | `bool` | `true` | フレーズクエリ、ハイライト、More-Like-This 用にタームの位置を保存する |
+| `term_vectors` | `bool` | `true` | フレーズクエリ・スパンクエリが読み取るタームの位置を保存する。ハイライトは常に保存済みテキストを再トークナイズするため使用しない |
 
 #### Integer
 
@@ -359,12 +359,12 @@ default_fields = ["title", "body"]
 [fields.title.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.body.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.category.Text]
 indexed = true
@@ -398,7 +398,7 @@ default_fields = ["title", "body"]
 [fields.title.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.body.Text]
 indexed = true
@@ -429,7 +429,7 @@ default_fields = ["name", "description"]
 [fields.name.Text]
 indexed = true
 stored = true
-term_vectors = false
+term_vectors = true
 
 [fields.description.Text]
 indexed = true
