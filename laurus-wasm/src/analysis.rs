@@ -309,6 +309,7 @@ mod tests {
             empty,
             empty,
             empty,
+            empty,
             None,
         );
         assert!(result.is_err());
@@ -334,6 +335,7 @@ mod tests {
         let empty: &[u8] = &[];
         let result = WasmJapaneseAnalyzer::from_bytes(
             b"{}",
+            empty,
             empty,
             empty,
             empty,

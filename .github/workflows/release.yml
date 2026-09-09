@@ -498,7 +498,7 @@ jobs:
         run: cargo build -p laurus-wasm --target wasm32-unknown-unknown
 
       - name: Run clippy
-        run: cargo clippy -p laurus-wasm --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy -p laurus-wasm --target wasm32-unknown-unknown --tests -- -D warnings
 
   # ============================================================
   # Gate: ensure all tests pass before proceeding to build
