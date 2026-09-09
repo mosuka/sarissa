@@ -1,12 +1,12 @@
 //! Ruby-facing `Index` class — the primary entry point for the laurus binding.
 
-use std::cell::RefCell;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::commit_policy::RbCommitPolicy;
 use crate::convert::{document_to_hash, hash_to_document};
 use crate::errors::{closed_err, index_dir_err, laurus_err};
+use crate::gvl::without_gvl;
 use crate::schema::RbSchema;
 use crate::search::{build_request_from_rb, to_rb_search_result};
 use crate::wal::RbWalSyncPolicy;
@@ -44,9 +44,21 @@ use magnus::{Error, RArray, RHash, RModule, Ruby, TryConvert, Value};
 /// ```
 #[magnus::wrap(class = "Laurus::Index")]
 pub struct RbIndex {
-    engine: RefCell<Option<Arc<Engine>>>,
+    engine: RwLock<Option<Arc<Engine>>>,
     rt: Arc<tokio::runtime::Runtime>,
 }
+
+// Every engine call below releases the GVL via `without_gvl`, so two Ruby
+// threads can now hold `&RbIndex` at the same time. magnus only requires
+// `Send` for a `#[magnus::wrap]` type (`Sync` is checked only for the
+// opt-in `frozen_shareable` flag, which this type does not use), so assert
+// `Sync` here: a future field that isn't `Sync` must not silently break
+// that. `RwLock` (unlike the `RefCell` this replaces) is fine under
+// concurrent access from multiple threads.
+const _: () = {
+    const fn assert_sync<T: Sync>() {}
+    assert_sync::<RbIndex>();
+};
 
 impl RbIndex {
     /// Create a new index, or reopen an existing one.
@@ -113,30 +125,38 @@ impl RbIndex {
 
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
+        let rt = Arc::new(rt);
 
         let schema = schema_ref.map(|s| s.inner.borrow().clone());
+        // Returns `magnus::Error` (holds a `Value`, so it's `!Send`); must
+        // run with the GVL held, before entering `without_gvl` below.
         let (schema, storage) = resolve_storage_and_schema(path.as_deref(), schema)?;
+        let wal_sync_policy = wal_sync_policy.map(|p| p.inner);
+        let commit_policy = commit_policy.map(|p| p.inner);
 
-        let mut builder = Engine::builder(storage, schema);
-        if let Some(policy) = wal_sync_policy {
-            builder = builder.wal_sync_policy(policy.inner);
-        }
-        if let Some(policy) = commit_policy {
-            builder = builder.commit_policy(policy.inner);
-        }
-
-        let engine = rt.block_on(builder.build()).map_err(laurus_err)?;
+        let rt_for_build = rt.clone();
+        let engine = without_gvl(move || -> Result<Engine, laurus::LaurusError> {
+            let mut builder = Engine::builder(storage, schema);
+            if let Some(policy) = wal_sync_policy {
+                builder = builder.wal_sync_policy(policy);
+            }
+            if let Some(policy) = commit_policy {
+                builder = builder.commit_policy(policy);
+            }
+            rt_for_build.block_on(builder.build())
+        })
+        .map_err(laurus_err)?;
 
         Ok(Self {
-            engine: RefCell::new(Some(Arc::new(engine))),
-            rt: Arc::new(rt),
+            engine: RwLock::new(Some(Arc::new(engine))),
+            rt,
         })
     }
 
     /// Return a clone of the underlying engine handle, or a `RuntimeError`
     /// if `close` has already been called.
     fn engine(&self) -> Result<Arc<Engine>, Error> {
-        self.engine.borrow().clone().ok_or_else(closed_err)
+        self.engine.read().unwrap().clone().ok_or_else(closed_err)
     }
 
     /// Release this index's handle on the underlying engine, deterministically
@@ -145,8 +165,24 @@ impl RbIndex {
     ///
     /// Idempotent: calling `close` more than once is a no-op. Every other
     /// method raises `RuntimeError` after `close` has been called.
+    ///
+    /// # Concurrent calls (Issue #1103)
+    ///
+    /// Unlike the Python binding's `close()`/`reload()`, this method takes
+    /// `&self`, not an exclusive borrow -- magnus only ever hands out `&self`
+    /// to `#[magnus::wrap]` methods, so there is no borrow-checker mechanism
+    /// here to make `close()` wait for an in-flight call on another thread.
+    /// If some other thread still holds a cloned `Arc<Engine>` (returned by
+    /// [`Self::engine`]) when `close()` runs, this only drops *this* handle's
+    /// reference: the storage lock is released once every in-flight call
+    /// finishes and drops its own reference, not necessarily by the time
+    /// `close()` returns.
     fn close(&self) {
-        self.engine.borrow_mut().take();
+        let engine = self.engine.write().unwrap().take();
+        // Dropping the last `Arc<Engine>` releases the storage lock (Issue
+        // #1086/#1097), which is blocking I/O -- do it with the GVL
+        // released.
+        without_gvl(|| drop(engine));
     }
 
     // ── Document CRUD ─────────────────────────────────────────────────────
@@ -163,9 +199,7 @@ impl RbIndex {
         let ruby = Ruby::get().expect("called from Ruby thread");
         let document = hash_to_document(&ruby, doc)?;
         let engine = self.engine()?;
-        self.rt
-            .block_on(engine.put_document(&id, document))
-            .map_err(laurus_err)
+        without_gvl(|| self.rt.block_on(engine.put_document(&id, document))).map_err(laurus_err)
     }
 
     /// Append a document version without removing existing versions.
@@ -181,9 +215,7 @@ impl RbIndex {
         let ruby = Ruby::get().expect("called from Ruby thread");
         let document = hash_to_document(&ruby, doc)?;
         let engine = self.engine()?;
-        self.rt
-            .block_on(engine.add_document(&id, document))
-            .map_err(laurus_err)
+        without_gvl(|| self.rt.block_on(engine.add_document(&id, document))).map_err(laurus_err)
     }
 
     /// Index many documents in one call, replacing existing documents by id.
@@ -205,9 +237,7 @@ impl RbIndex {
             return Ok(());
         }
         let engine = self.engine()?;
-        self.rt
-            .block_on(engine.put_documents(batch))
-            .map_err(laurus_err)
+        without_gvl(|| self.rt.block_on(engine.put_documents(batch))).map_err(laurus_err)
     }
 
     /// Append many document versions in one call, without removing existing
@@ -227,9 +257,7 @@ impl RbIndex {
             return Ok(());
         }
         let engine = self.engine()?;
-        self.rt
-            .block_on(engine.add_documents(batch))
-            .map_err(laurus_err)
+        without_gvl(|| self.rt.block_on(engine.add_documents(batch))).map_err(laurus_err)
     }
 
     /// Retrieve all document versions stored under `id`.
@@ -244,10 +272,8 @@ impl RbIndex {
     fn get_documents(&self, id: String) -> Result<RArray, Error> {
         let ruby = Ruby::get().expect("called from Ruby thread");
         let engine = self.engine()?;
-        let docs = self
-            .rt
-            .block_on(engine.get_documents(&id))
-            .map_err(laurus_err)?;
+        let docs =
+            without_gvl(|| self.rt.block_on(engine.get_documents(&id))).map_err(laurus_err)?;
         let arr = ruby.ary_new_capa(docs.len());
         for doc in &docs {
             let hash = document_to_hash(&ruby, doc)?;
@@ -265,15 +291,13 @@ impl RbIndex {
     /// * `id` - External document identifier.
     fn delete_documents(&self, id: String) -> Result<(), Error> {
         let engine = self.engine()?;
-        self.rt
-            .block_on(engine.delete_documents(&id))
-            .map_err(laurus_err)
+        without_gvl(|| self.rt.block_on(engine.delete_documents(&id))).map_err(laurus_err)
     }
 
     /// Flush buffered writes and make all pending changes searchable.
     fn commit(&self) -> Result<(), Error> {
         let engine = self.engine()?;
-        self.rt.block_on(engine.commit()).map_err(laurus_err)
+        without_gvl(|| self.rt.block_on(engine.commit())).map_err(laurus_err)
     }
 
     /// Force any buffered Write-Ahead Log (WAL) appends to durable storage.
@@ -297,7 +321,8 @@ impl RbIndex {
     ///
     /// `nil` on success, or raises if the underlying fsync fails.
     fn flush_wal(&self) -> Result<(), Error> {
-        self.engine()?.flush_wal().map_err(laurus_err)
+        let engine = self.engine()?;
+        without_gvl(|| engine.flush_wal()).map_err(laurus_err)
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -336,10 +361,8 @@ impl RbIndex {
         let request = build_request_from_rb(query, limit, offset)?;
 
         let engine = self.engine()?;
-        let results = self
-            .rt
-            .block_on(engine.search(request))
-            .map_err(laurus_err)?;
+        let results =
+            without_gvl(|| self.rt.block_on(engine.search(request))).map_err(laurus_err)?;
 
         let arr = ruby.ary_new_capa(results.len());
         for r in results {
@@ -403,10 +426,8 @@ impl RbIndex {
         }
 
         let engine = self.engine()?;
-        let batch_results = self
-            .rt
-            .block_on(engine.search_batch(requests))
-            .map_err(laurus_err)?;
+        let batch_results =
+            without_gvl(|| self.rt.block_on(engine.search_batch(requests))).map_err(laurus_err)?;
 
         let outer = ruby.ary_new_capa(batch_results.len());
         for per_query_results in batch_results {
@@ -432,10 +453,7 @@ impl RbIndex {
     fn stats(&self) -> Result<RHash, Error> {
         let ruby = Ruby::get().expect("called from Ruby thread");
         let engine = self.engine()?;
-        let stats: EngineStats = self
-            .rt
-            .block_on(async { engine.stats() })
-            .map_err(laurus_err)?;
+        let stats: EngineStats = without_gvl(|| engine.stats()).map_err(laurus_err)?;
         let dict = ruby.hash_new();
         dict.aset(ruby.str_new("document_count"), stats.document_count)?;
         let vf = ruby.hash_new();

@@ -15,6 +15,7 @@ mod analysis;
 mod commit_policy;
 mod convert;
 mod errors;
+mod gvl;
 mod index;
 mod query;
 mod schema;
